@@ -275,7 +275,7 @@ export const SqlEditorPage: React.FC = () => {
                   columns={resultColumns}
                   dataSource={latestResult.rows?.map((r, i) => ({ ...r, _key: i }))}
                   rowKey="_key"
-                  pagination={{ pageSize: 50, size: 'small' }}
+                  pagination={{ defaultPageSize: 50, showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100], size: 'small' }}
                   size="small"
                   scroll={{ x: 'max-content' }}
                 />
