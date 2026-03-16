@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import {
-  Layout, Table, Typography, Space, Select, Button, Progress, Tabs,
-  theme, Empty,
+  Layout, Table, Typography, Space, Select, Button, Progress,
+  theme,
 } from 'antd'
 import {
   UnorderedListOutlined, ReloadOutlined,
@@ -17,7 +17,7 @@ import { confirmDanger } from '@/components/ConfirmModal'
 import { toast, handleApiError } from '@/utils/notification'
 import { formatDateTime, formatDuration, getElapsedMs } from '@/utils/format'
 
-const { Sider, Content } = Layout
+const { Sider } = Layout
 const { Title, Text } = Typography
 
 export const TaskCenterPage: React.FC = () => {

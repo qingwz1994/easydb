@@ -7,8 +7,9 @@ dist/
 # Vite
 apps/desktop-ui/.vite/
 
-# Tauri / Rust (预留)
+# Tauri / Rust
 apps/desktop-ui/src-tauri/target/
+apps/desktop-ui/src-tauri/resources/
 
 # Kotlin / JVM / Gradle
 kernel/.gradle/

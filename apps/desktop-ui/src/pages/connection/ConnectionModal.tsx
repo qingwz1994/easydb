@@ -1,9 +1,8 @@
 import React, { useState } from 'react'
 import {
   Modal, Form, Input, InputNumber, Select, Tabs, Switch, Typography,
-  theme,
 } from 'antd'
-import type { ConnectionConfig, SshConfig, SslConfig } from '@/types'
+import type { ConnectionConfig } from '@/types'
 
 const { Text } = Typography
 
@@ -18,12 +17,7 @@ interface ConnectionModalProps {
   testing: boolean
 }
 
-const defaultSsh: SshConfig = {
-  enabled: false, host: '', port: 22, username: '', authType: 'password',
-}
-const defaultSsl: SslConfig = {
-  enabled: false,
-}
+
 
 export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   open, editingConnection, confirmLoading,
@@ -31,7 +25,6 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   testResult, testing,
 }) => {
   const [form] = Form.useForm()
-  const { token } = theme.useToken()
   const [sshEnabled, setSshEnabled] = useState(false)
   const [sslEnabled, setSslEnabled] = useState(false)
 

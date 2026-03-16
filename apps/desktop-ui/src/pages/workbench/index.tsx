@@ -1,11 +1,11 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import {
   Layout, Tree, Tabs, Table, Typography, Input, Space, Button, Tag, Tooltip,
-  theme, Spin, Empty,
+  theme, Spin,
 } from 'antd'
 import {
   DatabaseOutlined, TableOutlined, EyeOutlined,
-  SearchOutlined, ReloadOutlined, CodeOutlined,
+  SearchOutlined, CodeOutlined,
 } from '@ant-design/icons'
 import type { DataNode } from 'antd/es/tree'
 import type { DatabaseInfo, TableInfo, ColumnInfo, IndexInfo } from '@/types'
@@ -16,7 +16,7 @@ import { EmptyState } from '@/components/EmptyState'
 import { useNavigate } from 'react-router-dom'
 
 const { Sider, Content } = Layout
-const { Text, Paragraph } = Typography
+const { Text } = Typography
 
 export const WorkbenchPage: React.FC = () => {
   const { token } = theme.useToken()

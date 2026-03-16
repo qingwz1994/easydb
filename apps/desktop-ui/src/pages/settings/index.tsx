@@ -1,11 +1,10 @@
 import React from 'react'
-import { Typography, Card, Space, Switch, Divider, theme } from 'antd'
+import { Typography, Card, Space, Switch } from 'antd'
 import { SettingOutlined, InfoCircleOutlined } from '@ant-design/icons'
 
 const { Title, Text, Paragraph } = Typography
 
 export const SettingsPage: React.FC = () => {
-  const { token } = theme.useToken()
 
   return (
     <div style={{ padding: 24, maxWidth: 640 }}>
