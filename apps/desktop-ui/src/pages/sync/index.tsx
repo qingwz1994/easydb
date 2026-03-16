@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   Typography, Select, Button, Card, Alert,
   theme, Tag,
@@ -9,7 +9,7 @@ import {
 } from '@ant-design/icons'
 import { StepBar } from '@/components/StepBar'
 import { useConnectionStore } from '@/stores/connectionStore'
-import { syncApi } from '@/services/api'
+import { syncApi, metadataApi } from '@/services/api'
 import { toast, handleApiError } from '@/utils/notification'
 import { useNavigate } from 'react-router-dom'
 
@@ -33,9 +33,40 @@ export const SyncPage: React.FC = () => {
   const [targetDb, setTargetDb] = useState<string>()
   const [submitting, setSubmitting] = useState(false)
 
+  const [sourceDbs, setSourceDbs] = useState<Array<{ name: string }>>([])
+  const [targetDbs, setTargetDbs] = useState<Array<{ name: string }>>([])
+  const [loadingSourceDbs, setLoadingSourceDbs] = useState(false)
+  const [loadingTargetDbs, setLoadingTargetDbs] = useState(false)
+
   const connOptions = connections.map((c) => ({
     value: c.id, label: `${c.name} (${c.host}:${c.port})`,
   }))
+
+  useEffect(() => {
+    if (sourceId) {
+      setLoadingSourceDbs(true)
+      metadataApi.databases(sourceId)
+        .then((dbs) => setSourceDbs(dbs as string[]))
+        .catch((e) => handleApiError(e, '加载源数据库列表失败'))
+        .finally(() => setLoadingSourceDbs(false))
+    } else {
+      setSourceDbs([])
+      setSourceDb(undefined)
+    }
+  }, [sourceId])
+
+  useEffect(() => {
+    if (targetId) {
+      setLoadingTargetDbs(true)
+      metadataApi.databases(targetId)
+        .then((dbs) => setTargetDbs(dbs as string[]))
+        .catch((e) => handleApiError(e, '加载目标数据库列表失败'))
+        .finally(() => setLoadingTargetDbs(false))
+    } else {
+      setTargetDbs([])
+      setTargetDb(undefined)
+    }
+  }, [targetId])
 
   const handleStart = async () => {
     setSubmitting(true)
@@ -88,11 +119,23 @@ export const SyncPage: React.FC = () => {
             <div style={{ display: 'flex', gap: 24, marginTop: 16 }}>
               <div style={{ flex: 1 }}>
                 <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>源数据库</Text>
-                <Select value={sourceDb} onChange={setSourceDb} placeholder="输入数据库名" style={{ width: '100%' }} showSearch allowClear options={[]} notFoundContent="请手动输入数据库名" onSearch={(v) => setSourceDb(v)} />
+                <Select
+                  value={sourceDb} onChange={setSourceDb}
+                  placeholder="选择数据库" style={{ width: '100%' }}
+                  showSearch allowClear
+                  loading={loadingSourceDbs}
+                  options={sourceDbs.map((db) => ({ value: db.name, label: db.name }))}
+                />
               </div>
               <div style={{ flex: 1 }}>
                 <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>目标数据库</Text>
-                <Select value={targetDb} onChange={setTargetDb} placeholder="输入数据库名" style={{ width: '100%' }} showSearch allowClear options={[]} notFoundContent="请手动输入数据库名" onSearch={(v) => setTargetDb(v)} />
+                <Select
+                  value={targetDb} onChange={setTargetDb}
+                  placeholder="选择数据库" style={{ width: '100%' }}
+                  showSearch allowClear
+                  loading={loadingTargetDbs}
+                  options={targetDbs.map((db) => ({ value: db.name, label: db.name }))}
+                />
               </div>
             </div>
           </Card>
@@ -132,3 +175,4 @@ export const SyncPage: React.FC = () => {
     </div>
   )
 }
+
