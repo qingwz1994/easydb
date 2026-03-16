@@ -1,20 +1,20 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react'
 import {
-  Layout, Button, Space, Typography, Tabs, Table, Tag,
+  Layout, Button, Space, Typography, Tabs, Table, Tag, Select,
   theme,
 } from 'antd'
 import {
   PlayCircleOutlined, ClearOutlined,
-  CodeOutlined,
+  DatabaseOutlined, ApiOutlined,
 } from '@ant-design/icons'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
-import type { SqlResult } from '@/types'
+import type { SqlResult, ConnectionConfig } from '@/types'
 import { useWorkbenchStore } from '@/stores/workbenchStore'
-import { sqlApi } from '@/services/api'
+import { useConnectionStore } from '@/stores/connectionStore'
+import { sqlApi, metadataApi, connectionApi } from '@/services/api'
 import { EmptyState } from '@/components/EmptyState'
 import { handleApiError, toast } from '@/utils/notification'
-import { useNavigate } from 'react-router-dom'
 import { createSqlCompletionProvider, clearCompletionCache } from './sqlCompletionProvider'
 
 const { Content, Header } = Layout
@@ -22,42 +22,65 @@ const { Text } = Typography
 
 export const SqlEditorPage: React.FC = () => {
   const { token } = theme.useToken()
-  const navigate = useNavigate()
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
   const completionDisposableRef = useRef<{ dispose: () => void } | null>(null)
 
   const activeConnectionId = useWorkbenchStore((s) => s.activeConnectionId)
-  const activeConnectionName = useWorkbenchStore((s) => s.activeConnectionName)
   const activeDatabase = useWorkbenchStore((s) => s.activeDatabase)
+  const setActiveConnection = useWorkbenchStore((s) => s.setActiveConnection)
+  const setActiveDatabase = useWorkbenchStore((s) => s.setActiveDatabase)
+  const connections = useConnectionStore((s) => s.connections)
+  const setConnections = useConnectionStore((s) => s.setConnections)
 
   const [sql, setSql] = useState('')
   const [executing, setExecuting] = useState(false)
   const [results, setResults] = useState<SqlResult[]>([])
   const [activeTab, setActiveTab] = useState<'results' | 'messages'>('results')
+  const [databases, setDatabases] = useState<string[]>([])
+  const monacoRef = useRef<typeof import('monaco-editor') | null>(null)
 
-  if (!activeConnectionId) {
-    return (
-      <EmptyState
-        description="请先在「连接管理」中打开一个连接"
-        actionText="前往连接管理"
-        onAction={() => navigate('/connection')}
-      />
-    )
+  // 自动加载连接列表
+  useEffect(() => {
+    if (connections.length === 0) {
+      connectionApi.list().then((list) => {
+        setConnections((list as ConnectionConfig[]).filter((c) => c.status === 'connected'))
+      }).catch(() => {})
+    }
+  }, [])
+
+  // 连接变化时加载数据库列表
+  useEffect(() => {
+    if (!activeConnectionId) { setDatabases([]); return }
+    metadataApi.databases(activeConnectionId).then((dbs) => {
+      setDatabases((dbs as Array<{name: string}>).map(d => d.name))
+    }).catch(() => setDatabases([]))
+  }, [activeConnectionId])
+
+  // 切换连接
+  const handleConnectionChange = (connId: string) => {
+    const conn = connections.find((c) => c.id === connId)
+    setActiveConnection(connId, conn?.name ?? null)
   }
 
-  if (!activeDatabase) {
-    return (
-      <EmptyState
-        description="请先在「数据库工作台」中选择一个数据库"
-        actionText="前往工作台"
-        onAction={() => navigate('/workbench')}
-      />
-    )
+  // 切换数据库
+  const handleDatabaseChange = (db: string) => {
+    setActiveDatabase(db)
+    clearCompletionCache()
+    // 重新注册补全
+    if (activeConnectionId && monacoRef.current) {
+      completionDisposableRef.current?.dispose()
+      completionDisposableRef.current = monacoRef.current.languages.registerCompletionItemProvider(
+        'sql',
+        createSqlCompletionProvider(activeConnectionId, db, monacoRef.current)
+      )
+    }
   }
+
+
 
   const handleEditorMount: OnMount = (editorInstance, monaco) => {
     editorRef.current = editorInstance
-
+    monacoRef.current = monaco
     // ⌘+Enter / Ctrl+Enter 执行 SQL
     editorInstance.addAction({
       id: 'execute-sql',
@@ -149,12 +172,31 @@ export const SqlEditorPage: React.FC = () => {
         alignItems: 'center',
         justifyContent: 'space-between',
       }}>
-        <Space>
-          <CodeOutlined />
-          <Text strong style={{ fontSize: 13 }}>SQL 编辑器</Text>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            {activeConnectionName} / {activeDatabase}
-          </Text>
+        <Space size={12}>
+          <Space size={4}>
+            <ApiOutlined />
+            <Select
+              size="small"
+              style={{ width: 160 }}
+              placeholder="选择连接"
+              value={activeConnectionId ?? undefined}
+              onChange={handleConnectionChange}
+              options={connections.filter((c) => c.status === 'connected').map((c) => ({ label: c.name, value: c.id }))}
+            />
+          </Space>
+          <Space size={4}>
+            <DatabaseOutlined />
+            <Select
+              size="small"
+              style={{ width: 160 }}
+              placeholder="选择数据库"
+              value={activeDatabase ?? undefined}
+              onChange={handleDatabaseChange}
+              options={databases.map((db) => ({ label: db, value: db }))}
+              disabled={!activeConnectionId}
+              showSearch
+            />
+          </Space>
         </Space>
         <Space>
           <Button

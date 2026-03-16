@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import {
-  Layout, Tree, Tabs, Table, Typography, Input, Space, Button, Tag,
+  Layout, Tree, Tabs, Table, Typography, Input, Space, Button, Tag, Tooltip,
   theme, Spin, Empty,
 } from 'antd'
 import {
@@ -107,10 +107,12 @@ export const WorkbenchPage: React.FC = () => {
         children: filteredTables.map((t) => ({
           key: `${db.name}.${t.name}`,
           title: (
-            <span>
-              {t.name}
-              {t.type === 'view' && <Tag style={{ marginLeft: 4, fontSize: 10 }}>VIEW</Tag>}
-            </span>
+            <Tooltip title={t.name} mouseEnterDelay={0.5}>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block', maxWidth: 180, verticalAlign: 'middle' }}>
+                {t.name}
+                {t.type === 'view' && <Tag style={{ marginLeft: 4, fontSize: 10 }}>VIEW</Tag>}
+              </span>
+            </Tooltip>
           ),
           icon: t.type === 'view' ? <EyeOutlined /> : <TableOutlined />,
           isLeaf: true,
