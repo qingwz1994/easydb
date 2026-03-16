@@ -52,11 +52,13 @@ class MysqlConnectionAdapter : ConnectionAdapter {
                 setProperty("user", config.username)
                 setProperty("password", config.password)
                 setProperty("connectTimeout", "5000")
-                setProperty("socketTimeout", "30000")
+                setProperty("socketTimeout", "0") // 大数据量同步时不超时
                 setProperty("useSSL", "false")
                 setProperty("allowPublicKeyRetrieval", "true")
                 setProperty("serverTimezone", "UTC")
                 setProperty("characterEncoding", "UTF-8")
+                setProperty("rewriteBatchedStatements", "true") // 批量写入优化：合并为多值 INSERT
+                setProperty("cachePrepStmts", "true")
             }
 
             val db = config.database?.let { "/$it" } ?: ""

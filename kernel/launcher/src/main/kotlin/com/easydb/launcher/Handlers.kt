@@ -208,13 +208,18 @@ fun Route.migrationRoutes() {
                     config, SessionPair(sourceSession, targetSession), reporter
                 )
                 val duration = System.currentTimeMillis() - startTime
-                if (result.success) {
-                    taskMgr.markCompleted(task.id, duration)
-                } else {
-                    taskMgr.markFailed(task.id, result.errorMessage ?: "迁移失败")
+                when {
+                    reporter.isCancelled() -> taskMgr.markCancelled(task.id, duration)
+                    result.success -> taskMgr.markCompleted(task.id, duration)
+                    else -> taskMgr.markFailed(task.id, result.errorMessage ?: "迁移失败")
                 }
             } catch (e: Exception) {
-                taskMgr.markFailed(task.id, e.message ?: "迁移异常")
+                val duration = System.currentTimeMillis() - startTime
+                if (reporter.isCancelled()) {
+                    taskMgr.markCancelled(task.id, duration)
+                } else {
+                    taskMgr.markFailed(task.id, e.message ?: "迁移异常")
+                }
             }
         }
 
@@ -265,13 +270,18 @@ fun Route.syncRoutes() {
                     config, SessionPair(sourceSession, targetSession), reporter
                 )
                 val duration = System.currentTimeMillis() - startTime
-                if (result.success) {
-                    taskMgr.markCompleted(task.id, duration)
-                } else {
-                    taskMgr.markFailed(task.id, result.errorMessage ?: "同步失败")
+                when {
+                    reporter.isCancelled() -> taskMgr.markCancelled(task.id, duration)
+                    result.success -> taskMgr.markCompleted(task.id, duration)
+                    else -> taskMgr.markFailed(task.id, result.errorMessage ?: "同步失败")
                 }
             } catch (e: Exception) {
-                taskMgr.markFailed(task.id, e.message ?: "同步异常")
+                val duration = System.currentTimeMillis() - startTime
+                if (reporter.isCancelled()) {
+                    taskMgr.markCancelled(task.id, duration)
+                } else {
+                    taskMgr.markFailed(task.id, e.message ?: "同步异常")
+                }
             }
         }
 

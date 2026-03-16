@@ -97,10 +97,18 @@ class TaskManager {
         }
     }
 
-    /** 标记任务为完成 */
+    /** 标记任务为完成（如果任务已被取消则不覆盖） */
     fun markCompleted(taskId: String, duration: Long) {
         tasks[taskId]?.let {
+            if (it.status == "cancelled") return // 已取消的任务不覆盖为完成
             tasks[taskId] = it.copy(status = "completed", progress = 100, duration = duration)
+        }
+    }
+
+    /** 标记任务为已取消（保留已用时长） */
+    fun markCancelled(taskId: String, duration: Long) {
+        tasks[taskId]?.let {
+            tasks[taskId] = it.copy(status = "cancelled", duration = duration)
         }
     }
 }
