@@ -1,0 +1,57 @@
+# Node.js / Frontend
+node_modules/
+dist/
+.DS_Store
+*.local
+
+# Vite
+apps/desktop-ui/.vite/
+
+# Tauri / Rust (预留)
+apps/desktop-ui/src-tauri/target/
+
+# Kotlin / JVM / Gradle
+kernel/.gradle/
+kernel/build/
+kernel/**/build/
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+.gradle/
+local.properties
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# OS
+Thumbs.db
+
+# Runtime
+.kernel.pid
+.ui.pid
+.kernel.log
+.ui.log
+
+# Temp data files
+docs/*.csv

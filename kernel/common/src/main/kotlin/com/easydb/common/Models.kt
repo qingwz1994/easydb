@@ -1,0 +1,76 @@
+package com.easydb.common
+
+import kotlinx.serialization.Serializable
+
+// ─── 数据库类型枚举 ────────────────────────────────────────
+enum class DbType(val displayName: String) {
+    MYSQL("MySQL"),
+    POSTGRESQL("PostgreSQL"),
+    ORACLE("Oracle"),
+    SQLSERVER("SQL Server"),
+    SQLITE("SQLite");
+}
+
+// ─── 连接配置 ──────────────────────────────────────────────
+@Serializable
+data class ConnectionConfig(
+    val id: String = "",
+    val name: String,
+    val dbType: String = "mysql",
+    val host: String = "127.0.0.1",
+    val port: Int = 3306,
+    val username: String = "",
+    val password: String = "",
+    val database: String? = null,
+    val status: String = "disconnected",
+    val lastUsedAt: String? = null,
+    val ssh: SshConfig? = null,
+    val ssl: SslConfig? = null
+)
+
+// ─── SSH 隧道配置 ──────────────────────────────────────────
+@Serializable
+data class SshConfig(
+    val enabled: Boolean = false,
+    val host: String = "",
+    val port: Int = 22,
+    val username: String = "",
+    val authType: String = "password", // password | privateKey
+    val password: String? = null,
+    val privateKeyPath: String? = null
+)
+
+// ─── SSL 配置 ──────────────────────────────────────────────
+@Serializable
+data class SslConfig(
+    val enabled: Boolean = false,
+    val caPath: String? = null,
+    val certPath: String? = null,
+    val keyPath: String? = null,
+    val rejectUnauthorized: Boolean = true
+)
+
+// ─── 任务状态枚举 ──────────────────────────────────────────
+enum class TaskStatus {
+    PENDING,
+    RUNNING,
+    COMPLETED,
+    FAILED,
+    CANCELLED
+}
+
+// ─── 任务类型枚举 ──────────────────────────────────────────
+enum class TaskType {
+    MIGRATION,
+    SYNC
+}
+
+// ─── 数据库能力声明 ────────────────────────────────────────
+data class DatabaseCapabilities(
+    val supportsTransactions: Boolean = true,
+    val supportsSsh: Boolean = true,
+    val supportsSsl: Boolean = true,
+    val supportsViews: Boolean = true,
+    val supportsStoredProcedures: Boolean = false,
+    val supportsTriggers: Boolean = false
+)

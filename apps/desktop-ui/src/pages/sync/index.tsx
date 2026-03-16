@@ -1,0 +1,134 @@
+import React, { useState } from 'react'
+import {
+  Typography, Select, Button, Card, Alert,
+  theme, Tag,
+} from 'antd'
+import {
+  SyncOutlined, PlayCircleOutlined,
+  WarningOutlined, CheckCircleOutlined,
+} from '@ant-design/icons'
+import { StepBar } from '@/components/StepBar'
+import { useConnectionStore } from '@/stores/connectionStore'
+import { syncApi } from '@/services/api'
+import { toast, handleApiError } from '@/utils/notification'
+import { useNavigate } from 'react-router-dom'
+
+const { Title, Text } = Typography
+
+const STEPS = [
+  { title: '选择连接' },
+  { title: '选择对象' },
+  { title: '确认同步' },
+]
+
+export const SyncPage: React.FC = () => {
+  const { token } = theme.useToken()
+  const navigate = useNavigate()
+  const connections = useConnectionStore((s) => s.connections)
+
+  const [current, setCurrent] = useState(0)
+  const [sourceId, setSourceId] = useState<string>()
+  const [targetId, setTargetId] = useState<string>()
+  const [sourceDb, setSourceDb] = useState<string>()
+  const [targetDb, setTargetDb] = useState<string>()
+  const [submitting, setSubmitting] = useState(false)
+
+  const connOptions = connections.map((c) => ({
+    value: c.id, label: `${c.name} (${c.host}:${c.port})`,
+  }))
+
+  const handleStart = async () => {
+    setSubmitting(true)
+    try {
+      const result = await syncApi.start({
+        sourceConnectionId: sourceId,
+        targetConnectionId: targetId,
+        sourceDatabase: sourceDb,
+        targetDatabase: targetDb,
+      }) as { taskId: string }
+      toast.success(`同步任务已创建：${result.taskId}`)
+      navigate('/task-center')
+    } catch (e) {
+      handleApiError(e, '创建同步任务失败')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const canNext = () => {
+    if (current === 0) return !!sourceId && !!targetId
+    if (current === 1) return !!sourceDb && !!targetDb
+    return true
+  }
+
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <StepBar steps={STEPS} current={current} />
+
+      <div style={{ flex: 1, overflow: 'auto', padding: 24 }}>
+        {current === 0 && (
+          <Card size="small">
+            <Title level={5}><SyncOutlined style={{ marginRight: 8 }} />选择源和目标连接</Title>
+            <div style={{ display: 'flex', gap: 24, marginTop: 16 }}>
+              <div style={{ flex: 1 }}>
+                <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>源连接</Text>
+                <Select value={sourceId} onChange={setSourceId} options={connOptions} placeholder="选择源连接" style={{ width: '100%' }} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>目标连接</Text>
+                <Select value={targetId} onChange={setTargetId} options={connOptions} placeholder="选择目标连接" style={{ width: '100%' }} />
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {current === 1 && (
+          <Card size="small">
+            <Title level={5}>选择同步数据库</Title>
+            <div style={{ display: 'flex', gap: 24, marginTop: 16 }}>
+              <div style={{ flex: 1 }}>
+                <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>源数据库</Text>
+                <Select value={sourceDb} onChange={setSourceDb} placeholder="输入数据库名" style={{ width: '100%' }} showSearch allowClear options={[]} notFoundContent="请手动输入数据库名" onSearch={(v) => setSourceDb(v)} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>目标数据库</Text>
+                <Select value={targetDb} onChange={setTargetDb} placeholder="输入数据库名" style={{ width: '100%' }} showSearch allowClear options={[]} notFoundContent="请手动输入数据库名" onSearch={(v) => setTargetDb(v)} />
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {current === 2 && (
+          <Card size="small">
+            <Title level={5}><CheckCircleOutlined style={{ marginRight: 8, color: token.colorSuccess }} />同步摘要</Title>
+            <div style={{ marginTop: 16 }}>
+              <Text>源：{connections.find((c) => c.id === sourceId)?.name} / {sourceDb}</Text>
+              <br />
+              <Text>目标：{connections.find((c) => c.id === targetId)?.name} / {targetDb}</Text>
+            </div>
+            <Alert
+              style={{ marginTop: 16 }} type="warning"
+              message="操作确认"
+              description="同步操作将覆盖目标表中已存在的同名数据行，请确认设置正确。"
+              showIcon icon={<WarningOutlined />}
+            />
+          </Card>
+        )}
+      </div>
+
+      <div style={{
+        padding: '12px 24px',
+        borderTop: `1px solid ${token.colorBorderSecondary}`,
+        background: token.colorBgContainer,
+        display: 'flex', justifyContent: 'flex-end', gap: 8,
+      }}>
+        {current > 0 && <Button onClick={() => setCurrent(current - 1)}>上一步</Button>}
+        {current < STEPS.length - 1 ? (
+          <Button type="primary" disabled={!canNext()} onClick={() => setCurrent(current + 1)}>下一步</Button>
+        ) : (
+          <Button type="primary" icon={<PlayCircleOutlined />} loading={submitting} onClick={handleStart}>开始同步</Button>
+        )}
+      </div>
+    </div>
+  )
+}

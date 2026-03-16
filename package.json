@@ -1,0 +1,17 @@
+{
+  "name": "easydb",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/desktop-ui"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=apps/desktop-ui",
+    "build": "npm run build --workspace=apps/desktop-ui",
+    "build:kernel": "cd kernel && ./gradlew shadowJar",
+    "build:all": "npm run build:kernel && npm run build"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

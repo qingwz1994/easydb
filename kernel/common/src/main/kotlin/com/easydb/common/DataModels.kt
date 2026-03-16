@@ -1,0 +1,123 @@
+package com.easydb.common
+
+import kotlinx.serialization.Serializable
+
+// ─── 数据库对象模型 ───────────────────────────────────────
+@Serializable
+data class DatabaseInfo(
+    val name: String,
+    val charset: String? = null,
+    val collation: String? = null
+)
+
+@Serializable
+data class TableInfo(
+    val name: String,
+    val schema: String? = null,
+    val type: String = "table", // table | view
+    val rowCount: Long? = null,
+    val comment: String? = null
+)
+
+@Serializable
+data class ColumnInfo(
+    val name: String,
+    val type: String,
+    val nullable: Boolean = true,
+    val defaultValue: String? = null,
+    val isPrimaryKey: Boolean = false,
+    val isAutoIncrement: Boolean = false,
+    val comment: String? = null
+)
+
+@Serializable
+data class IndexInfo(
+    val name: String,
+    val columns: List<String>,
+    val isUnique: Boolean = false,
+    val isPrimary: Boolean = false,
+    val type: String = "BTREE"
+)
+
+@Serializable
+data class TableDefinition(
+    val table: TableInfo,
+    val columns: List<ColumnInfo>,
+    val indexes: List<IndexInfo>,
+    val ddl: String? = null
+)
+
+// ─── SQL 执行模型 ────────────────────────────────────────
+@Serializable
+data class SqlExecuteRequest(
+    val connectionId: String,
+    val database: String,
+    val sql: String
+)
+
+@Serializable
+data class SqlResult(
+    val type: String, // query | update | error
+    val columns: List<String>? = null,
+    val rows: List<Map<String, String?>>? = null,
+    val affectedRows: Int? = null,
+    val duration: Long,
+    val sql: String,
+    val executedAt: String,
+    val error: String? = null
+)
+
+// ─── 迁移模型 ─────────────────────────────────────────────
+@Serializable
+data class MigrationConfig(
+    val sourceConnectionId: String,
+    val targetConnectionId: String,
+    val sourceDatabase: String,
+    val targetDatabase: String,
+    val tables: List<String>,
+    val mode: String = "structure_and_data" // structure_only | data_only | structure_and_data
+)
+
+@Serializable
+data class MigrationPreview(
+    val totalTables: Int,
+    val totalRows: Long? = null,
+    val tables: List<MigrationTablePreview>,
+    val warnings: List<String> = emptyList()
+)
+
+@Serializable
+data class MigrationTablePreview(
+    val tableName: String,
+    val rowCount: Long? = null,
+    val hasStructure: Boolean = true,
+    val hasData: Boolean = true,
+    val risk: String? = null
+)
+
+// ─── 同步模型 ─────────────────────────────────────────────
+@Serializable
+data class SyncConfig(
+    val sourceConnectionId: String,
+    val targetConnectionId: String,
+    val sourceDatabase: String,
+    val targetDatabase: String,
+    val tables: List<String>
+)
+
+@Serializable
+data class SyncPreview(
+    val totalTables: Int,
+    val tables: List<SyncTablePreview>,
+    val warnings: List<String> = emptyList()
+)
+
+@Serializable
+data class SyncTablePreview(
+    val tableName: String,
+    val insertCount: Int = 0,
+    val updateCount: Int = 0,
+    val skipCount: Int = 0,
+    val canSync: Boolean = true,
+    val reason: String? = null
+)

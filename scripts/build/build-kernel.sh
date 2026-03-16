@@ -1,0 +1,1 @@
+File created successfully at: /Users/chenxiaoqing/MyData/Personal/1_Projects/product-design-system/easydb/scripts/build/build-kernel.sh
