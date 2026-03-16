@@ -95,27 +95,33 @@ export const WorkbenchPage: React.FC = () => {
     }
   }, [activeConnectionId])
 
-  // 构建树数据
   const treeData: DataNode[] = databases
-    .filter((db) => db.name.toLowerCase().includes(searchText.toLowerCase()))
-    .map((db) => ({
-      key: db.name,
-      title: db.name,
-      icon: <DatabaseOutlined />,
-      children: activeDatabase === db.name
-        ? tables.map((t) => ({
-            key: `${db.name}.${t.name}`,
-            title: (
-              <span>
-                {t.name}
-                {t.type === 'view' && <Tag style={{ marginLeft: 4, fontSize: 10 }}>VIEW</Tag>}
-              </span>
-            ),
-            icon: t.type === 'view' ? <EyeOutlined /> : <TableOutlined />,
-            isLeaf: true,
-          }))
-        : [],
-    }))
+    .map((db) => {
+      const filteredTables = activeDatabase === db.name
+        ? tables.filter((t) => !searchText || t.name.toLowerCase().includes(searchText.toLowerCase()))
+        : []
+      return {
+        key: db.name,
+        title: db.name,
+        icon: <DatabaseOutlined />,
+        children: filteredTables.map((t) => ({
+          key: `${db.name}.${t.name}`,
+          title: (
+            <span>
+              {t.name}
+              {t.type === 'view' && <Tag style={{ marginLeft: 4, fontSize: 10 }}>VIEW</Tag>}
+            </span>
+          ),
+          icon: t.type === 'view' ? <EyeOutlined /> : <TableOutlined />,
+          isLeaf: true,
+        })),
+      }
+    })
+    .filter((db) => {
+      const dbMatch = db.key.toString().toLowerCase().includes(searchText.toLowerCase())
+      const hasMatchingTable = db.children.length > 0
+      return !searchText || dbMatch || hasMatchingTable
+    })
 
   const handleTreeSelect = (_: React.Key[], info: { node: DataNode }) => {
     const key = info.node.key as string
@@ -209,7 +215,7 @@ export const WorkbenchPage: React.FC = () => {
               {activeConnectionName ?? '对象浏览'}
             </Text>
             <Input
-              placeholder="搜索数据库..."
+              placeholder="搜索数据库或表..."
               prefix={<SearchOutlined />}
               size="small"
               value={searchText}
