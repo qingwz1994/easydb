@@ -48,17 +48,6 @@ export const TaskCenterPage: React.FC = () => {
 
   useEffect(() => { loadTasks() }, [loadTasks])
 
-  useEffect(() => {
-    const hasRunningTask = tasks.some((t) => t.status === 'running')
-    if (!hasRunningTask) return
-
-    const timer = setInterval(() => {
-      loadTasks()
-      setTick((t) => t + 1) // 触发重新渲染以更新实时耗时
-    }, 2000)
-    return () => clearInterval(timer)
-  }, [tasks, loadTasks])
-
   const loadLogs = useCallback(async (taskId: string) => {
     try {
       const logs = await taskApi.logs(taskId) as TaskLog[]
@@ -67,6 +56,18 @@ export const TaskCenterPage: React.FC = () => {
       handleApiError(e, '加载日志失败')
     }
   }, [setTaskLogs])
+
+  useEffect(() => {
+    const hasRunningTask = tasks.some((t) => t.status === 'running')
+    if (!hasRunningTask) return
+
+    const timer = setInterval(() => {
+      loadTasks()
+      if (selectedTaskId) loadLogs(selectedTaskId)
+      setTick((t) => t + 1)
+    }, 2000)
+    return () => clearInterval(timer)
+  }, [tasks, loadTasks, selectedTaskId, loadLogs])
 
   const handleSelectTask = (task: TaskInfo) => {
     setSelectedTask(task.id)
