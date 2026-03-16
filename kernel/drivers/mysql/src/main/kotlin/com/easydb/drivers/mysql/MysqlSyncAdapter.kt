@@ -243,7 +243,7 @@ class MysqlSyncAdapter : SyncAdapter {
         var totalRows = 0L
 
         sourceConn.createStatement().use { stmt ->
-            stmt.fetchSize = Integer.MIN_VALUE // MySQL streaming ResultSet，避免一次性加载到内存
+            stmt.fetchSize = batchSize // 按批次拉取，避免全量加载到内存
             stmt.executeQuery("SELECT * FROM $fullSourceTable").use { rs ->
                 val meta = rs.metaData
                 val columnCount = meta.columnCount
