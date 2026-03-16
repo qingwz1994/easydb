@@ -9,9 +9,10 @@ import {
 } from '@ant-design/icons'
 import { StepBar } from '@/components/StepBar'
 import { useConnectionStore } from '@/stores/connectionStore'
-import { migrationApi, metadataApi } from '@/services/api'
+import { migrationApi, metadataApi, connectionApi } from '@/services/api'
 import { toast, handleApiError } from '@/utils/notification'
 import { useNavigate } from 'react-router-dom'
+import type { ConnectionConfig } from '@/types'
 
 const { Title, Text } = Typography
 
@@ -25,6 +26,14 @@ export const MigrationPage: React.FC = () => {
   const { token } = theme.useToken()
   const navigate = useNavigate()
   const connections = useConnectionStore((s) => s.connections)
+  const setConnections = useConnectionStore((s) => s.setConnections)
+
+  // 刷新页面时自动加载连接列表
+  useEffect(() => {
+    if (connections.length === 0) {
+      connectionApi.list().then((list) => setConnections(list as ConnectionConfig[])).catch(() => {})
+    }
+  }, [])
 
   const [current, setCurrent] = useState(0)
   const [sourceId, setSourceId] = useState<string>()
@@ -34,8 +43,8 @@ export const MigrationPage: React.FC = () => {
   const [mode, setMode] = useState<string>('structure_and_data')
   const [submitting, setSubmitting] = useState(false)
 
-  const [sourceDbs, setSourceDbs] = useState<Array<{ name: string }>>([])
-  const [targetDbs, setTargetDbs] = useState<Array<{ name: string }>>([])
+  const [sourceDbs, setSourceDbs] = useState<string[]>([])
+  const [targetDbs, setTargetDbs] = useState<string[]>([])
   const [loadingSourceDbs, setLoadingSourceDbs] = useState(false)
   const [loadingTargetDbs, setLoadingTargetDbs] = useState(false)
 
@@ -47,7 +56,7 @@ export const MigrationPage: React.FC = () => {
     if (sourceId) {
       setLoadingSourceDbs(true)
       metadataApi.databases(sourceId)
-        .then((dbs) => setSourceDbs(dbs as string[]))
+        .then((dbs) => setSourceDbs((dbs as Array<{name: string}>).map(d => d.name)))
         .catch((e) => handleApiError(e, '加载源数据库列表失败'))
         .finally(() => setLoadingSourceDbs(false))
     } else {
@@ -60,7 +69,7 @@ export const MigrationPage: React.FC = () => {
     if (targetId) {
       setLoadingTargetDbs(true)
       metadataApi.databases(targetId)
-        .then((dbs) => setTargetDbs(dbs as string[]))
+        .then((dbs) => setTargetDbs((dbs as Array<{name: string}>).map(d => d.name)))
         .catch((e) => handleApiError(e, '加载目标数据库列表失败'))
         .finally(() => setLoadingTargetDbs(false))
     } else {
@@ -137,7 +146,7 @@ export const MigrationPage: React.FC = () => {
                   placeholder="选择数据库" style={{ width: '100%' }}
                   showSearch allowClear
                   loading={loadingSourceDbs}
-                  options={sourceDbs.map((db) => ({ value: db.name, label: db.name }))}
+                  options={sourceDbs.map((db) => ({ value: db, label: db }))}
                 />
               </div>
               <div style={{ flex: 1 }}>
@@ -147,7 +156,7 @@ export const MigrationPage: React.FC = () => {
                   placeholder="选择数据库" style={{ width: '100%' }}
                   showSearch allowClear
                   loading={loadingTargetDbs}
-                  options={targetDbs.map((db) => ({ value: db.name, label: db.name }))}
+                  options={targetDbs.map((db) => ({ value: db, label: db }))}
                 />
               </div>
             </div>

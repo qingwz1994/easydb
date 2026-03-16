@@ -15,7 +15,7 @@ import { TaskStatusTag } from '@/components/StatusTag'
 import { LogPanel } from '@/components/LogPanel'
 import { confirmDanger } from '@/components/ConfirmModal'
 import { toast, handleApiError } from '@/utils/notification'
-import { formatDateTime } from '@/utils/format'
+import { formatDateTime, formatDuration, getElapsedMs } from '@/utils/format'
 
 const { Sider, Content } = Layout
 const { Title, Text } = Typography
@@ -32,6 +32,7 @@ export const TaskCenterPage: React.FC = () => {
 
   const [loading, setLoading] = useState(false)
   const [statusFilter, setStatusFilter] = useState<string>()
+  const [, setTick] = useState(0) // 用于刷新实时耗时
 
   const loadTasks = useCallback(async () => {
     setLoading(true)
@@ -51,7 +52,10 @@ export const TaskCenterPage: React.FC = () => {
     const hasRunningTask = tasks.some((t) => t.status === 'running')
     if (!hasRunningTask) return
 
-    const timer = setInterval(loadTasks, 2000)
+    const timer = setInterval(() => {
+      loadTasks()
+      setTick((t) => t + 1) // 触发重新渲染以更新实时耗时
+    }, 2000)
     return () => clearInterval(timer)
   }, [tasks, loadTasks])
 
@@ -98,6 +102,18 @@ export const TaskCenterPage: React.FC = () => {
     {
       title: '进度', dataIndex: 'progress', key: 'progress', width: 120,
       render: (p: number) => <Progress percent={p} size="small" />,
+    },
+    {
+      title: '耗时', key: 'duration', width: 100,
+      render: (_, record) => {
+        if (record.status === 'running' && record.startedAt) {
+          return <Text type="secondary"><ClockCircleOutlined style={{ marginRight: 4 }} />{formatDuration(getElapsedMs(record.startedAt))}</Text>
+        }
+        if (record.duration != null) {
+          return <Text type="secondary">{formatDuration(record.duration)}</Text>
+        }
+        return <Text type="secondary">—</Text>
+      },
     },
     {
       title: '操作', key: 'actions', width: 80,
@@ -175,7 +191,10 @@ export const TaskCenterPage: React.FC = () => {
                   <div><Text type="secondary">开始时间：</Text>{formatDateTime(selectedTask.startedAt)}</div>
                 )}
                 {selectedTask.duration != null && (
-                  <div><Text type="secondary">耗时：</Text>{selectedTask.duration}ms</div>
+                  <div><Text type="secondary">耗时：</Text>{formatDuration(selectedTask.duration)}</div>
+                )}
+                {selectedTask.status === 'running' && selectedTask.startedAt && selectedTask.duration == null && (
+                  <div><Text type="secondary">已用时：</Text><ClockCircleOutlined style={{ marginRight: 4 }} />{formatDuration(getElapsedMs(selectedTask.startedAt))}</div>
                 )}
                 {selectedTask.errorMessage && (
                   <div><Text type="danger">错误：{selectedTask.errorMessage}</Text></div>

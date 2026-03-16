@@ -102,7 +102,7 @@ data class SyncConfig(
     val targetConnectionId: String,
     val sourceDatabase: String,
     val targetDatabase: String,
-    val tables: List<String>
+    val tables: List<String> = emptyList()
 )
 
 @Serializable
