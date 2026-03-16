@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react'
+import React, { useState, useCallback, useRef, useEffect } from 'react'
 import {
   Layout, Button, Space, Typography, Tabs, Table, Tag,
   theme,
@@ -15,6 +15,7 @@ import { sqlApi } from '@/services/api'
 import { EmptyState } from '@/components/EmptyState'
 import { handleApiError, toast } from '@/utils/notification'
 import { useNavigate } from 'react-router-dom'
+import { createSqlCompletionProvider, clearCompletionCache } from './sqlCompletionProvider'
 
 const { Content, Header } = Layout
 const { Text } = Typography
@@ -23,6 +24,7 @@ export const SqlEditorPage: React.FC = () => {
   const { token } = theme.useToken()
   const navigate = useNavigate()
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
+  const completionDisposableRef = useRef<{ dispose: () => void } | null>(null)
 
   const activeConnectionId = useWorkbenchStore((s) => s.activeConnectionId)
   const activeConnectionName = useWorkbenchStore((s) => s.activeConnectionName)
@@ -53,19 +55,41 @@ export const SqlEditorPage: React.FC = () => {
     )
   }
 
-  const handleEditorMount: OnMount = (editor, monaco) => {
-    editorRef.current = editor
+  const handleEditorMount: OnMount = (editorInstance, monaco) => {
+    editorRef.current = editorInstance
 
     // ⌘+Enter / Ctrl+Enter 执行 SQL
-    editor.addAction({
+    editorInstance.addAction({
       id: 'execute-sql',
       label: '执行 SQL',
       keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
       run: () => handleExecute(),
     })
 
-    editor.focus()
+    // 注册 SQL 自动补全
+    if (activeConnectionId && activeDatabase) {
+      completionDisposableRef.current?.dispose()
+      completionDisposableRef.current = monaco.languages.registerCompletionItemProvider(
+        'sql',
+        createSqlCompletionProvider(activeConnectionId, activeDatabase, monaco)
+      )
+    }
+
+    editorInstance.focus()
   }
+
+  // 切换数据库时刷新补全缓存
+  useEffect(() => {
+    clearCompletionCache()
+  }, [activeDatabase])
+
+  // 组件卸载时清理
+  useEffect(() => {
+    return () => {
+      completionDisposableRef.current?.dispose()
+      clearCompletionCache()
+    }
+  }, [])
 
   const handleExecute = useCallback(async () => {
     // 获取选中文本或全部文本
