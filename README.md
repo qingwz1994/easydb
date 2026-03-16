@@ -1,58 +1,199 @@
-# EasyDB 开发环境
+# EasyDB
+
+跨平台数据库管理工具，提供连接管理、对象浏览、SQL 执行、数据迁移与同步能力。首版支持 MySQL，架构上预留多数据库扩展。
+
+## 技术架构
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   Desktop UI (React)                │
+│           Ant Design · Monaco Editor · Zustand      │
+│                 Vite · TypeScript · React 19         │
+├──────────────────────── HTTP ────────────────────────┤
+│                 Kernel (Kotlin / JVM 21)             │
+│  ┌──────────┐ ┌──────────┐ ┌────────────────────┐   │
+│  │ Launcher │ │   API    │ │  Common (接口层)    │   │
+│  │ (Ktor)   │ │ Protocol │ │  ConnectionManager  │   │
+│  └────┬─────┘ └──────────┘ │  TaskManager        │   │
+│       │                    │  SqlExecutionService │   │
+│  ┌────┴───────────────┐    └────────────────────┘   │
+│  │    Drivers (SPI)   │                              │
+│  │ ┌────────────────┐ │    ┌───────────┐             │
+│  │ │  MySQL Driver  │ │    │  Tunnel   │             │
+│  │ │ · Connection   │ │    │  (SSH)    │             │
+│  │ │ · Metadata     │ │    └───────────┘             │
+│  │ │ · Migration    │ │                              │
+│  │ │ · Sync         │ │    ┌───────────────────┐     │
+│  │ │ · Dialect      │ │    │ 预留模块 (空壳)    │     │
+│  │ └────────────────┘ │    │ · compare-engine  │     │
+│  │ ┌────────────────┐ │    │ · metadata        │     │
+│  │ │ PostgreSQL ... │ │    │ · dialect          │     │
+│  │ │   (预留扩展)    │ │    │ · task-center      │     │
+│  │ └────────────────┘ │    └───────────────────┘     │
+│  └────────────────────┘                              │
+└─────────────────────────────────────────────────────┘
+            │                    │
+     ┌──────┴──────┐      ┌─────┴─────┐
+     │ ~/.easydb/  │      │   MySQL   │
+     │ 本地持久化   │      │  Server   │
+     └─────────────┘      └───────────┘
+```
+
+### 核心设计
+
+- **SPI 驱动架构**：`DatabaseAdapter` 接口定义统一的连接、元数据、方言、迁移、同步能力，每种数据库实现一套 Driver
+- **前后端分离**：Kernel 通过 HTTP API 暴露能力，UI 通过 `fetch` 调用
+- **Monorepo 管理**：根目录 `package.json` 管理前端 workspace，`kernel/` 内部用 Gradle 多模块管理
+
+## 技术栈
+
+| 层 | 技术 | 版本 |
+|----|------|------|
+| **前端框架** | React + TypeScript | 19.x / 5.9 |
+| **UI 组件库** | Ant Design | 6.x |
+| **代码编辑器** | Monaco Editor | 4.7 |
+| **状态管理** | Zustand | 5.x |
+| **构建工具** | Vite | 8.x |
+| **路由** | React Router | 7.x |
+| **后端语言** | Kotlin | 1.9.22 |
+| **HTTP 框架** | Ktor | 2.3.7 |
+| **JVM** | OpenJDK | 21 |
+| **构建系统** | Gradle (Kotlin DSL) | 8.x |
+| **序列化** | kotlinx.serialization | 1.6.2 |
+| **SSH 隧道** | Apache Mina SSHD | 0.2.16 |
+| **数据库驱动** | MySQL Connector/J (JDBC) | — |
+
+## 目录结构
+
+```
+easydb/
+├── README.md                        # 本文件
+├── dev.sh                           # 开发环境管理脚本（启动/停止/构建/日志）
+├── package.json                     # NPM workspace 根配置
+│
+├── apps/
+│   └── desktop-ui/                  # 前端应用
+│       ├── src/
+│       │   ├── components/          # 通用组件（ConfirmModal, LogPanel, StepBar...）
+│       │   ├── layouts/             # 布局组件（MainLayout 侧边导航 + 内容区）
+│       │   ├── pages/               # 页面模块
+│       │   │   ├── connection/      #   连接管理（创建/编辑/测试连接）
+│       │   │   ├── workbench/       #   数据库工作台（对象浏览/数据预览）
+│       │   │   ├── sql-editor/      #   SQL 编辑器（Monaco + 执行结果）
+│       │   │   ├── migration/       #   数据迁移（向导式多步操作）
+│       │   │   ├── sync/            #   数据同步
+│       │   │   ├── task-center/     #   任务中心（进度/日志/历史）
+│       │   │   └── settings/        #   设置
+│       │   ├── services/            # API 调用封装
+│       │   ├── stores/              # Zustand 状态管理
+│       │   ├── types/               # TypeScript 类型定义
+│       │   └── utils/               # 工具函数
+│       └── package.json
+│
+├── kernel/                          # 后端内核（Kotlin / Gradle 多模块）
+│   ├── common/                      # 🔵 公共接口与核心服务
+│   │   └── src/.../common/
+│   │       ├── Interfaces.kt        #   核心接口：DatabaseAdapter, ConnectionAdapter,
+│   │       │                        #   MetadataAdapter, MigrationAdapter, SyncAdapter...
+│   │       ├── Models.kt            #   数据模型：ConnectionConfig, MigrationConfig...
+│   │       ├── DataModels.kt        #   元数据模型：DatabaseInfo, TableInfo, ColumnInfo...
+│   │       ├── ConnectionManager.kt #   连接生命周期管理
+│   │       ├── ConnectionStore.kt   #   连接配置持久化（~/.easydb/connections.json）
+│   │       ├── TaskManager.kt       #   异步任务管理（迁移/同步任务的生命周期）
+│   │       ├── SqlExecutionService.kt #  SQL 执行服务
+│   │       └── SqlHistoryStore.kt   #   SQL 历史持久化
+│   │
+│   ├── api/                         # 🔵 HTTP 协议定义
+│   │   └── src/.../api/
+│   │       ├── ConnectionProtocol.kt #  连接相关请求/响应
+│   │       ├── MetadataProtocol.kt  #   元数据相关请求/响应
+│   │       └── TaskProtocol.kt      #   任务相关请求/响应
+│   │
+│   ├── drivers/                     # 🔵 数据库驱动（SPI 实现）
+│   │   └── mysql/                   #   MySQL 驱动（首版核心）
+│   │       ├── MysqlConnectionAdapter.kt  # 连接管理（JDBC）
+│   │       ├── MysqlDatabaseAdapter.kt    # 驱动入口，聚合所有适配器
+│   │       ├── MysqlDatabaseSession.kt    # 会话封装
+│   │       ├── MysqlMetadataAdapter.kt    # 元数据查询（SHOW DATABASES/TABLES/COLUMNS）
+│   │       ├── MysqlDialectAdapter.kt     # SQL 方言（标识符引用、DDL 生成）
+│   │       ├── MysqlMigrationAdapter.kt   # 数据迁移（DDL + 批量 INSERT）
+│   │       └── MysqlSyncAdapter.kt        # 数据同步
+│   │
+│   ├── launcher/                    # 🔵 启动器（HTTP 服务入口）
+│   │   └── src/.../launcher/
+│   │       ├── Main.kt              #   Ktor 服务启动
+│   │       ├── Routes.kt            #   路由注册
+│   │       ├── Handlers.kt          #   请求处理器
+│   │       └── ServiceRegistry.kt   #   服务注册中心（驱动发现）
+│   │
+│   ├── tunnel/                      # 🔵 SSH 隧道
+│   │   └── SshTunnelManager.kt      #   SSH 端口转发管理
+│   │
+│   ├── compare-engine/              # ⚪ 结构比对引擎（预留）
+│   ├── metadata/                    # ⚪ 元数据引擎（预留）
+│   ├── dialect/                     # ⚪ 方言引擎（预留）
+│   ├── sync-engine/                 # ⚪ 同步引擎（预留）
+│   ├── migration-engine/            # ⚪ 迁移引擎（预留）
+│   ├── task-center/                 # ⚪ 任务中心（预留）
+│   │
+│   ├── build.gradle.kts             #   根构建脚本
+│   ├── settings.gradle.kts          #   模块注册
+│   └── gradle.properties            #   版本号统一管理
+│
+├── scripts/                         # 构建与启动脚本
+│   └── build/
+│       ├── build-kernel.sh          #   内核构建
+│       └── start-kernel.sh          #   内核启动
+│
+└── docs/                            # 文档与临时数据
+```
+
+> 🔵 已实现  ⚪ 预留模块（空 build.gradle.kts，待后续版本填充）
 
 ## 快速开始
 
+### 环境要求
+
+- **JDK 21+**（推荐 OpenJDK 21）
+- **Node.js 18+**
+- **npm**
+
+### 启动开发环境
+
 ```bash
-cd easydb
 ./dev.sh start      # 一键启动内核 + 前端
 ```
 
 启动后访问 http://localhost:5173
 
-## 命令一览
+### 常用命令
 
 | 命令 | 说明 |
 |------|------|
 | `./dev.sh start` | 启动内核 + 前端 |
 | `./dev.sh stop` | 停止全部 |
 | `./dev.sh restart` | 重启全部 |
-| `./dev.sh build` | 仅构建内核 (`clean shadowJar`) |
-| `./dev.sh rebuild` | 构建 + 重启全部（**改完代码后用这个**） |
+| `./dev.sh build` | 仅构建内核 |
+| `./dev.sh rebuild` | 构建 + 重启全部（**改完 Kotlin 代码后用这个**） |
 | `./dev.sh status` | 查看运行状态 |
-| `./dev.sh logs` | 查看内核日志 (tail -f) |
+| `./dev.sh logs` | 查看内核日志 |
 | `./dev.sh logs ui` | 查看前端日志 |
 
-### 单独管理
+#### 单独管理
 
 ```bash
-./dev.sh kernel start     # 只启动内核
-./dev.sh kernel stop      # 只停内核
-./dev.sh kernel restart   # 只重启内核
-
-./dev.sh ui start         # 只启动前端
-./dev.sh ui stop          # 只停前端
-./dev.sh ui restart       # 只重启前端
+./dev.sh kernel start|stop|restart   # 内核
+./dev.sh ui start|stop|restart       # 前端
 ```
 
-## 服务端口
+## 服务信息
 
 | 服务 | 端口 | 地址 |
 |------|------|------|
 | 内核 (Ktor) | 18080 | http://127.0.0.1:18080 |
 | 前端 (Vite) | 5173 | http://localhost:5173 |
 
-## 日志文件
-
-| 文件 | 说明 |
-|------|------|
-| `.kernel.log` | 内核运行日志 |
-| `.ui.log` | 前端开发服务器日志 |
-| `.kernel.pid` | 内核进程 PID（自动管理） |
-| `.ui.pid` | 前端进程 PID（自动管理） |
-
-## 数据存储
-
-连接配置和 SQL 历史持久化到本地：
+### 本地数据
 
 ```
 ~/.easydb/
@@ -60,31 +201,14 @@ cd easydb
 └── sql-history.json    # SQL 执行历史（最多 500 条）
 ```
 
-## 常见场景
+## 产品规划
 
-```bash
-# 首次使用
-./dev.sh start
+| 版本 | 目标 |
+|------|------|
+| **v1.0** (当前) | MySQL 连接管理 → 工作台 → SQL 编辑器 → 数据迁移 → 同步 → 任务中心 |
+| v1.1 | 连接分组/收藏、结果导出、任务重试 |
+| v2.0 | PostgreSQL 支持、结构比对增强、跨库迁移 |
 
-# 改了内核 Kotlin 代码
-./dev.sh rebuild
+## License
 
-# 改了前端 React 代码（热更新，无需重启）
-# 直接保存文件即可
-
-# 启动失败？查看日志
-./dev.sh logs
-
-# 端口被占用？
-./dev.sh stop && ./dev.sh start
-```
-
-## 项目结构
-
-```
-easydb/
-├── dev.sh                  # ← 开发环境管理脚本
-├── kernel/                 # Kotlin 内核 (Gradle)
-│   └── launcher/build/libs/launcher-1.0.0-SNAPSHOT-all.jar
-└── apps/desktop-ui/        # React 前端 (Vite)
-```
+Private
