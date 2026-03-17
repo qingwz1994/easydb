@@ -55,6 +55,7 @@ class MysqlConnectionAdapter : ConnectionAdapter {
                 setProperty("socketTimeout", "0") // 大数据量同步时不超时
                 setProperty("useSSL", "false")
                 setProperty("allowPublicKeyRetrieval", "true")
+                setProperty("allowMultiQueries", "true") // 支持多语句执行
                 setProperty("serverTimezone", "UTC")
                 setProperty("characterEncoding", "UTF-8")
                 setProperty("rewriteBatchedStatements", "true") // 批量写入优化：合并为多值 INSERT

@@ -143,12 +143,12 @@ fun Route.sqlRoutes() {
                 error = "连接未打开，请先打开连接"
             )
             historyStore.add(req.connectionId, req.database, req.sql, errorResult)
-            call.ok(errorResult)
+            call.ok(listOf(errorResult))
             return@post
         }
-        val result = sqlService.execute(session, req.database, req.sql)
-        historyStore.add(req.connectionId, req.database, req.sql, result)
-        call.ok(result)
+        val results = sqlService.execute(session, req.database, req.sql)
+        historyStore.add(req.connectionId, req.database, req.sql, results.first())
+        call.ok(results)
     }
 
     get("/history") {

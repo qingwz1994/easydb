@@ -148,13 +148,23 @@ export const SqlEditorPage: React.FC = () => {
     if (!execSql || !activeConnectionId || !activeDatabase) return
     setExecuting(true)
     try {
-      const result = await sqlApi.execute(activeConnectionId, activeDatabase, execSql) as SqlResult
-      setResults((prev) => [result, ...prev])
-      if (result.type === 'error') {
-        toast.error(result.error ?? 'SQL 执行失败')
+      const resultList = await sqlApi.execute(activeConnectionId, activeDatabase, execSql) as SqlResult[]
+      setResults((prev) => [...resultList.reverse(), ...prev])
+      const hasError = resultList.some((r) => r.type === 'error')
+      if (hasError) {
+        const errorMsg = resultList.find((r) => r.type === 'error')?.error ?? 'SQL 执行失败'
+        toast.error(errorMsg)
         setActiveTab('messages')
       } else {
-        setActiveTab('results')
+        const hasQuery = resultList.some((r) => r.type === 'query')
+        if (hasQuery) {
+          setActiveTab('results')
+        } else {
+          // 多条 update 语句汇总
+          const totalAffected = resultList.reduce((sum, r) => sum + (r.affectedRows ?? 0), 0)
+          toast.success(`执行成功，共影响 ${totalAffected} 行`)
+          setActiveTab('results')
+        }
       }
     } catch (e) {
       handleApiError(e, 'SQL 执行失败')
