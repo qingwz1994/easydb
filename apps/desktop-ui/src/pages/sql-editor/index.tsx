@@ -12,6 +12,7 @@ import type { editor } from 'monaco-editor'
 import type { SqlResult, ConnectionConfig } from '@/types'
 import { useWorkbenchStore } from '@/stores/workbenchStore'
 import { useConnectionStore } from '@/stores/connectionStore'
+import { useSqlEditorStore } from '@/stores/sqlEditorStore'
 import { sqlApi, metadataApi, connectionApi } from '@/services/api'
 import { EmptyState } from '@/components/EmptyState'
 import { handleApiError, toast } from '@/utils/notification'
@@ -31,6 +32,7 @@ export const SqlEditorPage: React.FC = () => {
   const setActiveDatabase = useWorkbenchStore((s) => s.setActiveDatabase)
   const connections = useConnectionStore((s) => s.connections)
   const setConnections = useConnectionStore((s) => s.setConnections)
+  const consumePendingSql = useSqlEditorStore((s) => s.consumePendingSql)
 
   const [sql, setSql] = useState('')
   const [executing, setExecuting] = useState(false)
@@ -45,6 +47,25 @@ export const SqlEditorPage: React.FC = () => {
       connectionApi.list().then((list) => {
         setConnections((list as ConnectionConfig[]).filter((c) => c.status === 'connected'))
       }).catch(() => {})
+    }
+  }, [])
+
+  // 消费从其他页面传入的 SQL
+  useEffect(() => {
+    const pending = consumePendingSql()
+    if (pending) {
+      setSql(pending.sql)
+      if (editorRef.current) {
+        editorRef.current.setValue(pending.sql)
+      }
+      if (pending.connectionId) {
+        const conn = connections.find((c) => c.id === pending.connectionId)
+        setActiveConnection(pending.connectionId, conn?.name ?? null)
+      }
+      if (pending.database) {
+        setActiveDatabase(pending.database)
+      }
+      toast.success('SQL 已加载，请审核后手动执行')
     }
   }, [])
 

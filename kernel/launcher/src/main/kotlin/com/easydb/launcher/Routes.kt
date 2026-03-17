@@ -39,6 +39,11 @@ fun Application.configureRoutes() {
             route("/task") {
                 taskRoutes()
             }
+
+            // 结构对比
+            route("/compare") {
+                compareRoutes()
+            }
         }
     }
 }

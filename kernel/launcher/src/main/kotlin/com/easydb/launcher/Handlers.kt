@@ -316,6 +316,42 @@ fun Route.taskRoutes() {
     }
 }
 
+// ─── 结构对比路由 ──────────────────────────────────────────
+fun Route.compareRoutes() {
+    val connMgr = ServiceRegistry.connectionManager
+    val adapter = ServiceRegistry.mysqlAdapter
+    val compareService = StructureCompareService()
+
+    post("/execute") {
+        try {
+            val config = call.receive<CompareConfig>()
+
+            val sourceSession = connMgr.getSession(config.sourceConnectionId)
+            if (sourceSession == null) {
+                call.fail("NOT_CONNECTED", "源连接未打开，请先打开连接")
+                return@post
+            }
+            val targetSession = connMgr.getSession(config.targetConnectionId)
+            if (targetSession == null) {
+                call.fail("NOT_CONNECTED", "目标连接未打开，请先打开连接")
+                return@post
+            }
+
+            val result = compareService.compare(
+                sourceMetadata = adapter.metadataAdapter(),
+                targetMetadata = adapter.metadataAdapter(),
+                sourceDialect = adapter.dialectAdapter(),
+                sourceSession = sourceSession,
+                targetSession = targetSession,
+                config = config
+            )
+            call.ok(result)
+        } catch (e: Exception) {
+            call.fail("COMPARE_ERROR", "结构对比失败: ${e.message}")
+        }
+    }
+}
+
 // ─── 辅助函数 ──────────────────────────────────────────────
 
 private suspend fun getSessionOrFail(

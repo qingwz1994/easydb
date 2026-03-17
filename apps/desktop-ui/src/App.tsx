@@ -10,6 +10,7 @@ import { MigrationPage } from '@/pages/migration'
 import { SyncPage } from '@/pages/sync'
 import { TaskCenterPage } from '@/pages/task-center'
 import { SettingsPage } from '@/pages/settings'
+import { StructureComparePage } from '@/pages/structure-compare'
 
 const App: React.FC = () => {
   return (
@@ -33,6 +34,7 @@ const App: React.FC = () => {
             <Route path="/migration" element={<MigrationPage />} />
             <Route path="/sync" element={<SyncPage />} />
             <Route path="/task-center" element={<TaskCenterPage />} />
+            <Route path="/structure-compare" element={<StructureComparePage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </MainLayout>

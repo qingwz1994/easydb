@@ -49,8 +49,7 @@ yarn-error.log*
 Thumbs.db
 
 # Runtime
-.kernel.pid
-.ui.pid
+*.pid
 .kernel.log
 .ui.log
 

@@ -106,3 +106,9 @@ export const taskApi = {
   cancel: (taskId: string) =>
     request(`/api/task/${taskId}/cancel`, { method: 'POST' }),
 }
+
+// ─── 结构对比 ────────────────────────────────────────────
+export const compareApi = {
+  execute: (config: unknown) =>
+    request('/api/compare/execute', { method: 'POST', body: JSON.stringify(config) }),
+}

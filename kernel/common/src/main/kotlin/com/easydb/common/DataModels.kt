@@ -121,3 +121,69 @@ data class SyncTablePreview(
     val canSync: Boolean = true,
     val reason: String? = null
 )
+
+// ─── 结构对比模型 ──────────────────────────────────────────
+@Serializable
+data class CompareConfig(
+    val sourceConnectionId: String,
+    val targetConnectionId: String,
+    val sourceDatabase: String,
+    val targetDatabase: String,
+    val tables: List<String> = emptyList(),
+    val options: CompareOptions = CompareOptions()
+)
+
+@Serializable
+data class CompareOptions(
+    val ignoreComment: Boolean = true,
+    val ignoreAutoIncrement: Boolean = true,
+    val ignoreCharset: Boolean = false,
+    val ignoreCollation: Boolean = false,
+    val includeDropStatements: Boolean = false
+)
+
+@Serializable
+data class CompareResult(
+    val sourceDatabase: String,
+    val targetDatabase: String,
+    val totalTables: Int,
+    val diffCount: Int,
+    val tables: List<TableCompareResult>
+)
+
+@Serializable
+data class TableCompareResult(
+    val tableName: String,
+    val status: String,        // only_in_source | only_in_target | different | identical
+    val risk: String = "low",  // low | medium | high
+    val columnDiffs: List<ColumnDiff> = emptyList(),
+    val indexDiffs: List<IndexDiff> = emptyList(),
+    val sql: String = "",
+    val summary: String = ""
+)
+
+@Serializable
+data class ColumnDiff(
+    val columnName: String,
+    val status: String,        // added | removed | modified | identical
+    val sourceType: String? = null,
+    val targetType: String? = null,
+    val sourceNullable: Boolean? = null,
+    val targetNullable: Boolean? = null,
+    val sourceDefault: String? = null,
+    val targetDefault: String? = null,
+    val sourceComment: String? = null,
+    val targetComment: String? = null,
+    val details: String = ""
+)
+
+@Serializable
+data class IndexDiff(
+    val indexName: String,
+    val status: String,        // added | removed | modified | identical
+    val sourceColumns: List<String>? = null,
+    val targetColumns: List<String>? = null,
+    val sourceUnique: Boolean? = null,
+    val targetUnique: Boolean? = null,
+    val details: String = ""
+)

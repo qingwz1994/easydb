@@ -196,6 +196,67 @@ export interface SyncTablePreview {
   reason?: string
 }
 
+// 结构对比配置
+export interface CompareConfig {
+  sourceConnectionId: string
+  targetConnectionId: string
+  sourceDatabase: string
+  targetDatabase: string
+  tables: string[]
+  options: CompareOptions
+}
+
+export interface CompareOptions {
+  ignoreComment: boolean
+  ignoreAutoIncrement: boolean
+  ignoreCharset: boolean
+  ignoreCollation: boolean
+  includeDropStatements: boolean
+}
+
+// 结构对比结果
+export interface CompareResult {
+  sourceDatabase: string
+  targetDatabase: string
+  totalTables: number
+  diffCount: number
+  tables: TableCompareResult[]
+}
+
+export interface TableCompareResult {
+  tableName: string
+  status: 'only_in_source' | 'only_in_target' | 'different' | 'identical'
+  risk: 'low' | 'medium' | 'high'
+  columnDiffs: ColumnDiff[]
+  indexDiffs: IndexDiff[]
+  sql: string
+  summary: string
+}
+
+export interface ColumnDiff {
+  columnName: string
+  status: 'added' | 'removed' | 'modified' | 'identical'
+  sourceType?: string
+  targetType?: string
+  sourceNullable?: boolean
+  targetNullable?: boolean
+  sourceDefault?: string
+  targetDefault?: string
+  sourceComment?: string
+  targetComment?: string
+  details: string
+}
+
+export interface IndexDiff {
+  indexName: string
+  status: 'added' | 'removed' | 'modified' | 'identical'
+  sourceColumns?: string[]
+  targetColumns?: string[]
+  sourceUnique?: boolean
+  targetUnique?: boolean
+  details: string
+}
+
 // IPC 响应包装
 export interface IpcResponse<T> {
   success: boolean

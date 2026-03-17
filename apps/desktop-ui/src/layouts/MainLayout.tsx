@@ -7,6 +7,7 @@ import {
   CodeOutlined,
   SwapOutlined,
   SyncOutlined,
+  DiffOutlined,
   UnorderedListOutlined,
   SettingOutlined,
   MenuFoldOutlined,
@@ -24,6 +25,7 @@ const menuItems = [
   { key: '/sql-editor', icon: <CodeOutlined />, label: 'SQL 编辑器' },
   { key: '/migration', icon: <SwapOutlined />, label: '数据迁移' },
   { key: '/sync', icon: <SyncOutlined />, label: '数据同步' },
+  { key: '/structure-compare', icon: <DiffOutlined />, label: '结构对比' },
   { key: '/task-center', icon: <UnorderedListOutlined />, label: '任务中心' },
   { key: '/settings', icon: <SettingOutlined />, label: '设置' },
 ]
@@ -34,6 +36,7 @@ const pageTitle: Record<string, string> = {
   '/sql-editor': 'SQL 编辑器',
   '/migration': '数据迁移',
   '/sync': '数据同步',
+  '/structure-compare': '结构对比',
   '/task-center': '任务中心',
   '/settings': '设置',
 }
