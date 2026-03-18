@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react'
 import {
   Layout, Button, Space, Typography, Tabs, Table, Tag, Select,
-  theme, Card, Descriptions,
+  theme,
 } from 'antd'
 import {
   PlayCircleOutlined, ClearOutlined,
@@ -36,7 +36,6 @@ export const SqlEditorPage: React.FC = () => {
   const completionDisposableRef = useRef<{ dispose: () => void } | null>(null)
 
   const activeConnectionId = useWorkbenchStore((s) => s.activeConnectionId)
-  const activeConnectionName = useWorkbenchStore((s) => s.activeConnectionName)
   const activeDatabase = useWorkbenchStore((s) => s.activeDatabase)
   const setActiveConnection = useWorkbenchStore((s) => s.setActiveConnection)
   const setActiveDatabase = useWorkbenchStore((s) => s.setActiveDatabase)
@@ -50,7 +49,6 @@ export const SqlEditorPage: React.FC = () => {
   const [results, setResults] = useState<SqlResult[]>([])
   const [resultTab, setResultTab] = useState<'results' | 'messages'>('results')
   const [databases, setDatabases] = useState<string[]>([])
-  const [totalExecutions, setTotalExecutions] = useState(0)
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null)
 
   const activeEditorTab = tabs.find((t) => t.key === activeTabKey) || tabs[0]
@@ -175,13 +173,6 @@ export const SqlEditorPage: React.FC = () => {
     }
   }, [])
 
-  // 标签页切换时同步编辑器内容
-  useEffect(() => {
-    if (editorRef.current && activeEditorTab) {
-      editorRef.current.setValue(activeEditorTab.sql)
-    }
-  }, [activeEditorTab])
-
   const handleExecute = useCallback(async () => {
     const editor = editorRef.current
     const selection = editor?.getSelection()
@@ -196,7 +187,6 @@ export const SqlEditorPage: React.FC = () => {
     try {
       const resultList = await sqlApi.execute(activeConnectionId, activeDatabase, execSql) as SqlResult[]
       setResults((prev) => [...resultList.reverse(), ...prev])
-      setTotalExecutions((prev) => prev + 1)
       const hasError = resultList.some((r) => r.type === 'error')
       if (hasError) {
         const errorMsg = resultList.find((r) => r.type === 'error')?.error ?? 'SQL 执行失败'
@@ -235,12 +225,6 @@ export const SqlEditorPage: React.FC = () => {
     ellipsis: true,
     render: (v: unknown) => String(v ?? 'NULL'),
   })) ?? []
-
-  // 执行统计
-  const successCount = results.filter((r) => r.type !== 'error').length
-  const errorCount = results.filter((r) => r.type === 'error').length
-  const totalDuration = results.reduce((sum, r) => sum + r.duration, 0)
-
   return (
     <Layout style={{ height: '100%' }}>
       {/* 工具栏 */}
@@ -340,10 +324,11 @@ export const SqlEditorPage: React.FC = () => {
                 borderBottom: `1px solid ${token.colorBorderSecondary}`,
               }}>
                 <Editor
+                  key={activeTabKey}
                   height="100%"
                   language="sql"
                   theme="vs-dark"
-                  value={activeEditorTab.sql}
+                  defaultValue={activeEditorTab.sql}
                   onChange={(value) => updateTabSql(activeTabKey, value ?? '')}
                   onMount={handleEditorMount}
                   options={{
@@ -444,48 +429,6 @@ export const SqlEditorPage: React.FC = () => {
             </>
           )}
         </Layout.Content>
-
-        {/* 右侧上下文区 */}
-        <Layout.Sider
-          width={200}
-          style={{
-            background: token.colorBgContainer,
-            borderLeft: `1px solid ${token.colorBorderSecondary}`,
-            overflow: 'auto',
-            padding: 12,
-          }}
-        >
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            <Descriptions column={1} size="small" title="上下文">
-              <Descriptions.Item label="连接">{activeConnectionName || '-'}</Descriptions.Item>
-              <Descriptions.Item label="数据库">{activeDatabase || '-'}</Descriptions.Item>
-              <Descriptions.Item label="标签页">{tabs.length}</Descriptions.Item>
-            </Descriptions>
-
-            {results.length > 0 && (
-              <Card size="small" title="执行统计" style={{ fontSize: 12 }}>
-                <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Text type="secondary" style={{ fontSize: 12 }}>执行次数</Text>
-                    <Text style={{ fontSize: 12 }}>{totalExecutions}</Text>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Text type="secondary" style={{ fontSize: 12 }}>成功</Text>
-                    <Text style={{ fontSize: 12, color: token.colorSuccess }}>{successCount}</Text>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Text type="secondary" style={{ fontSize: 12 }}>失败</Text>
-                    <Text style={{ fontSize: 12, color: token.colorError }}>{errorCount}</Text>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Text type="secondary" style={{ fontSize: 12 }}>总耗时</Text>
-                    <Text style={{ fontSize: 12 }}>{totalDuration}ms</Text>
-                  </div>
-                </Space>
-              </Card>
-            )}
-          </Space>
-        </Layout.Sider>
       </Layout>
     </Layout>
   )

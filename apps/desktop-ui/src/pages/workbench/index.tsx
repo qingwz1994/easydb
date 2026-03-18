@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import {
   Layout, Tree, Tabs, Table, Typography, Input, Space, Button, Tag, Tooltip,
-  theme, Spin, Card, Statistic, Row, Col, Select, Descriptions, Alert,
+  theme, Spin, Card, Statistic, Row, Col, Alert,
 } from 'antd'
 import {
   DatabaseOutlined, TableOutlined, EyeOutlined,
@@ -40,19 +40,14 @@ export const WorkbenchPage: React.FC = () => {
   const [previewRows, setPreviewRows] = useState<Record<string, unknown>[]>([])
   const [loading, setLoading] = useState(false)
   const [searchText, setSearchText] = useState('')
-  const [typeFilter, setTypeFilter] = useState<string>('all')
+
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([])
 
   const setPendingSql = useSqlEditorStore((s) => s.setPendingSql)
 
   // 打开 SQL 编辑器并带入当前上下文
-  const openSqlEditor = useCallback((objectHint?: string) => {
-    const hint = objectHint
-      ? `-- 当前对象: ${activeDatabase}.${objectHint}\n`
-      : activeDatabase
-        ? `-- 当前数据库: ${activeDatabase}\n`
-        : ''
-    setPendingSql(hint, activeConnectionId ?? undefined, activeDatabase ?? undefined)
+  const openSqlEditor = useCallback(() => {
+    setPendingSql('', activeConnectionId ?? undefined, activeDatabase ?? undefined)
     navigate('/sql-editor')
   }, [activeConnectionId, activeDatabase, navigate, setPendingSql])
 
@@ -118,7 +113,6 @@ export const WorkbenchPage: React.FC = () => {
         .map((cat) => {
           const items = dbObjects.filter(
             (t) => cat.types.includes(t.type)
-              && (typeFilter === 'all' || cat.types.includes(typeFilter))
               && (!searchText || t.name.toLowerCase().includes(searchText.toLowerCase()))
           )
           return {
@@ -263,18 +257,7 @@ export const WorkbenchPage: React.FC = () => {
               onChange={(e) => setSearchText(e.target.value)}
               allowClear
             />
-            <Select
-              size="small"
-              value={typeFilter}
-              onChange={setTypeFilter}
-              style={{ width: '100%' }}
-              options={[
-                { value: 'all', label: '全部类型' },
-                { value: 'table', label: '表' },
-                { value: 'view', label: '视图' },
-                { value: 'trigger', label: '触发器' },
-              ]}
-            />
+
           </Space>
         </div>
         <Spin spinning={loading}>
@@ -331,7 +314,7 @@ export const WorkbenchPage: React.FC = () => {
                 <Button
                   size="small"
                   icon={<CodeOutlined />}
-                  onClick={() => openSqlEditor(activeTable)}
+                  onClick={() => openSqlEditor()}
                 >
                   打开 SQL 编辑器
                 </Button>
@@ -522,35 +505,6 @@ export const WorkbenchPage: React.FC = () => {
           <EmptyState description="选择左侧对象树中的数据库或表以查看详情" />
         )}
       </Content>
-
-      {/* 右侧上下文区 */}
-      {(activeDatabase || activeTable) && (
-        <Layout.Sider
-          width={200}
-          style={{
-            background: token.colorBgContainer,
-            borderLeft: `1px solid ${token.colorBorderSecondary}`,
-            overflow: 'auto',
-            padding: 12,
-          }}
-        >
-          <Descriptions column={1} size="small" title="当前上下文" style={{ fontSize: 12 }}>
-            <Descriptions.Item label="连接">{activeConnectionName || '-'}</Descriptions.Item>
-            <Descriptions.Item label="数据库">{activeDatabase || '-'}</Descriptions.Item>
-            <Descriptions.Item label="对象">{activeTable || '-'}</Descriptions.Item>
-          </Descriptions>
-          <Button
-            type="primary"
-            size="small"
-            icon={<CodeOutlined />}
-            block
-            style={{ marginTop: 12 }}
-            onClick={() => openSqlEditor(activeTable ?? undefined)}
-          >
-            打开 SQL 编辑器
-          </Button>
-        </Layout.Sider>
-      )}
     </Layout>
   )
 }
