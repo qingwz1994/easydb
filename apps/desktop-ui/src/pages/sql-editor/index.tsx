@@ -22,10 +22,25 @@ const { Content, Header } = Layout
 const { Text } = Typography
 
 // 标签页数据结构
+
+// 尝试从整段 SQL 中提取所有出现的主表名（按顺序）
+const extractAllTableNames = (sql: string): string[] => {
+  if (!sql) return []
+  // 匹配 FROM / UPDATE / INTO 后面的连续字符，忽略前面的内容，并去掉反引号或引号
+  const regex = /(?:from|update|into)\s+([`'"]?[a-zA-Z0-9_$]+[`'"]?)/gi
+  const matches = [...sql.matchAll(regex)]
+  return matches.map(m => m[1].replace(/[`'"]/g, ''))
+}
+
 interface EditorTab {
   key: string
   title: string
   sql: string
+  connectionId?: string
+  database?: string
+  results: SqlResult[]
+  currentBatch: SqlResult[]
+  resultTab: string
 }
 
 let tabCounter = 1
@@ -36,24 +51,34 @@ export const SqlEditorPage: React.FC = () => {
   const completionDisposableRef = useRef<{ dispose: () => void } | null>(null)
 
   const activeConnectionId = useWorkbenchStore((s) => s.activeConnectionId)
-  const activeDatabase = useWorkbenchStore((s) => s.activeDatabase)
   const setActiveConnection = useWorkbenchStore((s) => s.setActiveConnection)
-  const setActiveDatabase = useWorkbenchStore((s) => s.setActiveDatabase)
   const connections = useConnectionStore((s) => s.connections)
   const setConnections = useConnectionStore((s) => s.setConnections)
+  const updateConnection = useConnectionStore((s) => s.updateConnection)
   const consumePendingSql = useSqlEditorStore((s) => s.consumePendingSql)
 
-  const [tabs, setTabs] = useState<EditorTab[]>([{ key: 'tab-1', title: 'SQL 1', sql: '' }])
+  const [tabs, setTabs] = useState<EditorTab[]>([{
+    key: 'tab-1',
+    title: 'SQL 1',
+    sql: '',
+    connectionId: useWorkbenchStore.getState().activeConnectionId ?? undefined,
+    database: useWorkbenchStore.getState().activeDatabase ?? undefined,
+    results: [],
+    currentBatch: [],
+    resultTab: 'result-0',
+  }])
   const [activeTabKey, setActiveTabKey] = useState('tab-1')
   const [executing, setExecuting] = useState(false)
-  const [results, setResults] = useState<SqlResult[]>([])
-  const [resultTab, setResultTab] = useState<'results' | 'messages'>('results')
   const [databases, setDatabases] = useState<string[]>([])
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null)
 
   const activeEditorTab = tabs.find((t) => t.key === activeTabKey) || tabs[0]
 
-  // 自动加载连接列表 + 自动连接
+  const updateActiveTab = useCallback((updates: Partial<EditorTab>) => {
+    setTabs((prev) => prev.map((t) => t.key === activeTabKey ? { ...t, ...updates } : t))
+  }, [activeTabKey])
+
+  // 自动加载连接列表
   useEffect(() => {
     if (connections.length === 0) {
       connectionApi.list().then((list) => {
@@ -80,33 +105,43 @@ export const SqlEditorPage: React.FC = () => {
     const pending = consumePendingSql()
     if (pending) {
       // 写入当前标签页
-      updateTabSql(activeTabKey, pending.sql)
+      updateActiveTab({
+        sql: pending.sql,
+        ...(pending.connectionId && { connectionId: pending.connectionId }),
+        ...(pending.database && { database: pending.database })
+      })
       if (editorRef.current) {
         editorRef.current.setValue(pending.sql)
       }
-      if (pending.connectionId) {
-        const conn = connections.find((c) => c.id === pending.connectionId)
-        setActiveConnection(pending.connectionId, conn?.name ?? null)
-      }
-      if (pending.database) {
-        setActiveDatabase(pending.database)
-      }
       toast.success('SQL 已加载，请审核后手动执行')
     }
-  }, [activeTabKey, connections, consumePendingSql, setActiveConnection, setActiveDatabase, updateTabSql])
+  }, [activeTabKey, consumePendingSql, updateActiveTab])
 
   // 连接变化时加载数据库列表
+  const activeConnIdRef = activeEditorTab?.connectionId
   useEffect(() => {
-    if (!activeConnectionId) { setDatabases([]); return }
-    metadataApi.databases(activeConnectionId).then((dbs) => {
+    if (!activeConnIdRef) { setDatabases([]); return }
+    metadataApi.databases(activeConnIdRef).then((dbs) => {
       setDatabases((dbs as Array<{name: string}>).map(d => d.name))
     }).catch(() => setDatabases([]))
-  }, [activeConnectionId])
+  }, [activeConnIdRef])
 
   const addTab = () => {
     tabCounter++
     const newKey = `tab-${tabCounter}`
-    setTabs((prev) => [...prev, { key: newKey, title: `SQL ${tabCounter}`, sql: '' }])
+    setTabs((prev) => {
+      const currentTab = prev.find((t) => t.key === activeTabKey) || prev[0]
+      return [...prev, {
+        key: newKey,
+        title: `SQL ${tabCounter}`,
+        sql: '',
+        connectionId: currentTab?.connectionId,
+        database: currentTab?.database,
+        results: [],
+        currentBatch: [],
+        resultTab: 'result-0'
+      }]
+    })
     setActiveTabKey(newKey)
   }
 
@@ -122,24 +157,36 @@ export const SqlEditorPage: React.FC = () => {
   const handleTabChange = (key: string) => {
     // 保存当前标签页的 SQL
     if (editorRef.current) {
-      updateTabSql(activeTabKey, editorRef.current.getValue())
+      updateActiveTab({ sql: editorRef.current.getValue() })
     }
     setActiveTabKey(key)
   }
 
-  const handleConnectionChange = (connId: string) => {
+  const handleConnectionChange = async (connId: string) => {
     const conn = connections.find((c) => c.id === connId)
-    setActiveConnection(connId, conn?.name ?? null)
+    if (!conn) return
+
+    if (conn.status !== 'connected') {
+      try {
+        await connectionApi.open(conn.id)
+        updateConnection(conn.id, { status: 'connected' })
+        toast.success(`已连接到「${conn.name}」`)
+      } catch (e) {
+        handleApiError(e, '连接失败')
+        return
+      }
+    }
+    updateActiveTab({ connectionId: connId, database: undefined })
   }
 
   const handleDatabaseChange = (db: string) => {
-    setActiveDatabase(db)
+    updateActiveTab({ database: db })
     clearCompletionCache()
-    if (activeConnectionId && monacoRef.current) {
+    if (activeEditorTab.connectionId && monacoRef.current) {
       completionDisposableRef.current?.dispose()
       completionDisposableRef.current = monacoRef.current.languages.registerCompletionItemProvider(
         'sql',
-        createSqlCompletionProvider(activeConnectionId, db, monacoRef.current)
+        createSqlCompletionProvider(activeEditorTab.connectionId, db, monacoRef.current)
       )
     }
   }
@@ -154,18 +201,19 @@ export const SqlEditorPage: React.FC = () => {
       run: () => handleExecute(),
     })
 
-    if (activeConnectionId && activeDatabase) {
+    if (activeEditorTab.connectionId && activeEditorTab.database) {
       completionDisposableRef.current?.dispose()
       completionDisposableRef.current = monaco.languages.registerCompletionItemProvider(
         'sql',
-        createSqlCompletionProvider(activeConnectionId, activeDatabase, monaco)
+        createSqlCompletionProvider(activeEditorTab.connectionId, activeEditorTab.database, monaco)
       )
     }
 
     editorInstance.focus()
   }
 
-  useEffect(() => { clearCompletionCache() }, [activeDatabase])
+  const activeDbRefForCache = activeEditorTab?.database
+  useEffect(() => { clearCompletionCache() }, [activeDbRefForCache])
   useEffect(() => {
     return () => {
       completionDisposableRef.current?.dispose()
@@ -182,24 +230,25 @@ export const SqlEditorPage: React.FC = () => {
       execSql = editor.getModel()?.getValueInRange(selection)?.trim() ?? execSql
     }
 
-    if (!execSql || !activeConnectionId || !activeDatabase) return
+    if (!execSql || !activeEditorTab.connectionId || !activeEditorTab.database) return
     setExecuting(true)
     try {
-      const resultList = await sqlApi.execute(activeConnectionId, activeDatabase, execSql) as SqlResult[]
-      setResults((prev) => [...resultList.reverse(), ...prev])
+      const resultList = await sqlApi.execute(activeEditorTab.connectionId, activeEditorTab.database, execSql) as SqlResult[]
+      const newResults = [...resultList.reverse(), ...activeEditorTab.results]
+
       const hasError = resultList.some((r) => r.type === 'error')
       if (hasError) {
         const errorMsg = resultList.find((r) => r.type === 'error')?.error ?? 'SQL 执行失败'
         toast.error(errorMsg)
-        setResultTab('messages')
+        updateActiveTab({ results: newResults, currentBatch: resultList, resultTab: 'messages' })
       } else {
         const hasQuery = resultList.some((r) => r.type === 'query')
         if (hasQuery) {
-          setResultTab('results')
+          updateActiveTab({ results: newResults, currentBatch: resultList, resultTab: 'result-0' })
         } else {
           const totalAffected = resultList.reduce((sum, r) => sum + (r.affectedRows ?? 0), 0)
           toast.success(`执行成功，共影响 ${totalAffected} 行`)
-          setResultTab('results')
+          updateActiveTab({ results: newResults, currentBatch: resultList, resultTab: 'messages' }) // 全是 update 的情况跳转到消息
         }
       }
     } catch (e) {
@@ -207,7 +256,7 @@ export const SqlEditorPage: React.FC = () => {
     } finally {
       setExecuting(false)
     }
-  }, [activeEditorTab, activeConnectionId, activeDatabase])
+  }, [activeEditorTab, updateActiveTab])
 
   const handleClear = () => {
     updateTabSql(activeTabKey, '')
@@ -215,16 +264,18 @@ export const SqlEditorPage: React.FC = () => {
     editorRef.current?.focus()
   }
 
-  const latestResult = results[0] ?? null
+  // 渲染时进行同名表统计
+  const currentBatch = activeEditorTab.currentBatch
+  const results = activeEditorTab.results
+  const totalDuration = currentBatch.reduce((sum, r) => sum + (r.duration || 0), 0)
+  const queryResults = currentBatch.filter((r) => r.type === 'query')
+  const tableNameCounts: Record<string, number> = {}
+  
+  // 提前提取出该批次 SQL 中所有涉及的表名
+  // 由于每个 result 的 sql 都是整段未拆分的脚本，提取一次即可获得按执行顺序排列的表名数组
+  const allParsedNames = extractAllTableNames(currentBatch[0]?.sql || '')
+  let queryIndex = 0
 
-  const resultColumns = latestResult?.columns?.map((col) => ({
-    title: col,
-    dataIndex: col,
-    key: col,
-    width: 150,
-    ellipsis: true,
-    render: (v: unknown) => String(v ?? 'NULL'),
-  })) ?? []
   return (
     <Layout style={{ height: '100%' }}>
       {/* 工具栏 */}
@@ -245,9 +296,20 @@ export const SqlEditorPage: React.FC = () => {
               size="small"
               style={{ width: 160 }}
               placeholder="选择连接"
-              value={activeConnectionId ?? undefined}
+              value={activeEditorTab.connectionId ?? undefined}
               onChange={handleConnectionChange}
-              options={connections.filter((c) => c.status === 'connected').map((c) => ({ label: c.name, value: c.id }))}
+              options={connections.map((c) => ({
+                label: (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span>{c.name}</span>
+                    {c.status !== 'connected' && (
+                      <span style={{ fontSize: 12, color: token.colorTextQuaternary }}>未连接</span>
+                    )}
+                  </div>
+                ),
+                value: c.id
+              }))}
+              listHeight={320}
             />
           </Space>
           <Space size={4}>
@@ -256,10 +318,10 @@ export const SqlEditorPage: React.FC = () => {
               size="small"
               style={{ width: 160 }}
               placeholder="选择数据库"
-              value={activeDatabase ?? undefined}
+              value={activeEditorTab.database ?? undefined}
               onChange={handleDatabaseChange}
               options={databases.map((db) => ({ label: db, value: db }))}
-              disabled={!activeConnectionId}
+              disabled={!activeEditorTab.connectionId}
               showSearch
             />
           </Space>
@@ -271,7 +333,7 @@ export const SqlEditorPage: React.FC = () => {
             icon={<PlayCircleOutlined />}
             loading={executing}
             onClick={handleExecute}
-            disabled={!activeEditorTab.sql.trim() || !activeConnectionId || !activeDatabase}
+            disabled={!activeEditorTab.sql.trim() || !activeEditorTab.connectionId || !activeEditorTab.database}
           >
             执行
           </Button>
@@ -305,15 +367,15 @@ export const SqlEditorPage: React.FC = () => {
           </div>
 
           {/* 编辑器区域 */}
-          {!activeConnectionId ? (
+          {!activeEditorTab.connectionId ? (
             <div style={{ flex: 1 }}>
               <EmptyState
-                description="请先选择一个已连接的数据库连接"
+                description="请先在顶部下拉框中选择一个数据库连接"
                 actionText="前往连接管理"
                 onAction={() => { window.location.hash = '/connection' }}
               />
             </div>
-          ) : !activeDatabase ? (
+          ) : !activeEditorTab.database ? (
             <div style={{ flex: 1 }}>
               <EmptyState description="请在工具栏中选择一个数据库" />
             </div>
@@ -354,51 +416,75 @@ export const SqlEditorPage: React.FC = () => {
               </div>
 
               {/* 结果区 */}
-              <Content style={{ overflow: 'auto', background: token.colorBgContainer, flex: 1 }}>
+              <Content style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', background: token.colorBgContainer, flex: 1 }}>
                 <Tabs
-                  activeKey={resultTab}
-                  onChange={(key) => setResultTab(key as 'results' | 'messages')}
+                  activeKey={activeEditorTab.resultTab}
+                  onChange={(key) => updateActiveTab({ resultTab: key })}
                   size="small"
-                  style={{ padding: '0 16px' }}
+                  style={{ padding: '0 16px', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
                   tabBarExtraContent={
-                    latestResult && latestResult.type !== 'error' ? (
+                    currentBatch.length > 0 && !currentBatch.some(r => r.type === 'error') ? (
                       <Text type="secondary" style={{ fontSize: 12 }}>
-                        {latestResult.type === 'query'
-                          ? `${latestResult.rows?.length ?? 0} 行 · ${latestResult.duration}ms`
-                          : `影响 ${latestResult.affectedRows ?? 0} 行 · ${latestResult.duration}ms`
-                        }
+                        共 {currentBatch.length} 条语句 · 耗时 {totalDuration}ms
                       </Text>
                     ) : null
                   }
                   items={[
-                    {
+                    // 为每一个查询类型的结果生成一个 Tab
+                    ...currentBatch.map((r, idx) => {
+                      if (r.type !== 'query') return null
+                      const currentQueryIndex = queryIndex++
+
+                      const cols = r.columns?.map(c => ({
+                        title: c, dataIndex: c, key: c, width: 150, ellipsis: true,
+                        render: (v: unknown) => String(v ?? 'NULL'),
+                      })) ?? []
+                      
+                      const parsedName = allParsedNames[idx]
+                      let displayLabel = `结果 ${currentQueryIndex + 1}`
+                      if (parsedName) {
+                        const count = (tableNameCounts[parsedName] || 0) + 1
+                        tableNameCounts[parsedName] = count
+                        displayLabel = count === 1 ? parsedName : `${parsedName} (${count})`
+                      }
+
+                      return {
+                        key: `result-${currentQueryIndex}`,
+                        label: displayLabel,
+                        children: (
+                          <div style={{ height: 'calc(100vh - 410px)', overflow: 'hidden' }}>
+                            <Table
+                              columns={cols}
+                              dataSource={r.rows?.map((row, i) => ({ ...row, _key: i }))}
+                              rowKey="_key"
+                              pagination={{ defaultPageSize: 50, showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100], size: 'small' }}
+                              size="small"
+                              scroll={{ x: 'max-content', y: 'calc(100vh - 530px)' }}
+                            />
+                          </div>
+                        )
+                      }
+                    }).filter(Boolean) as any[],
+                    // 如果没有任何查询结果，提供一个基础的占位面板
+                    ...(queryResults.length === 0 ? [{
                       key: 'results',
                       label: '结果',
-                      children: latestResult?.type === 'query' ? (
-                        <Table
-                          columns={resultColumns}
-                          dataSource={latestResult.rows?.map((r, i) => ({ ...r, _key: i }))}
-                          rowKey="_key"
-                          pagination={{ defaultPageSize: 50, showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100], size: 'small' }}
-                          size="small"
-                          scroll={{ x: 'max-content' }}
-                        />
-                      ) : latestResult?.type === 'update' ? (
+                      children: currentBatch.some(r => r.type === 'update') ? (
                         <div style={{ padding: 24, textAlign: 'center' }}>
                           <Tag color="success">执行成功</Tag>
                           <Text type="secondary">
-                            影响 {latestResult.affectedRows} 行，耗时 {latestResult.duration}ms
+                            影响 {currentBatch.reduce((sum, r) => sum + (r.affectedRows ?? 0), 0)} 行
                           </Text>
                         </div>
                       ) : (
                         <EmptyState description="执行 SQL 后在此查看结果" />
                       ),
-                    },
+                    }] : []),
                     {
                       key: 'messages',
                       label: `消息${results.length > 0 ? ` (${results.length})` : ''}`,
                       children: (
-                        <div style={{ padding: 12 }}>
+                        <div style={{ padding: 12, overflow: 'auto', height: 'calc(100vh - 400px)' }}>
                           {results.map((r, i) => (
                             <div key={i} style={{
                               padding: '4px 0',

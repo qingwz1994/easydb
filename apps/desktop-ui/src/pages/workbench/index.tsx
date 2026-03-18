@@ -1,12 +1,11 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import {
   Layout, Tree, Tabs, Table, Typography, Input, Space, Button, Tag, Tooltip,
-  theme, Spin, Card, Statistic, Row, Col, Alert,
+  theme, Spin, Card, Statistic, Row, Col,
 } from 'antd'
 import {
   DatabaseOutlined, TableOutlined, EyeOutlined,
   SearchOutlined, CodeOutlined, ThunderboltOutlined, ReloadOutlined,
-  EditOutlined, LockOutlined,
 } from '@ant-design/icons'
 import type { DataNode } from 'antd/es/tree'
 import type { DatabaseInfo, TableInfo, ColumnInfo, IndexInfo } from '@/types'
@@ -124,9 +123,7 @@ export const WorkbenchPage: React.FC = () => {
               key: `${db.name}.${t.name}`,
               title: (
                 <Tooltip title={t.name} mouseEnterDelay={0.5}>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-block', maxWidth: 160, verticalAlign: 'middle' }}>
-                    {t.name}
-                  </span>
+                  <span>{t.name}</span>
                 </Tooltip>
               ),
               icon: t.type === 'view' ? <EyeOutlined /> : t.type === 'trigger' ? <ThunderboltOutlined /> : <TableOutlined />,
@@ -243,6 +240,26 @@ export const WorkbenchPage: React.FC = () => {
           overflow: 'auto',
         }}
       >
+        <style>{`
+          .workbench-object-tree .ant-tree-node-content-wrapper.ant-tree-node-selected {
+            background: ${token.colorPrimaryBg};
+            color: ${token.colorPrimary};
+          }
+          .workbench-object-tree .ant-tree-title {
+            display: inline-block;
+            vertical-align: middle;
+            max-width: calc(100% - 24px); /* 减去图标的宽度 */
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+          .workbench-object-tree .ant-tree-node-content-wrapper {
+            display: inline-flex;
+            align-items: center;
+            width: 100%;
+            overflow: hidden;
+          }
+        `}</style>
         <div style={{ padding: '12px 12px 8px' }}>
           <Space style={{ marginBottom: 8, width: '100%' }} direction="vertical" size={8}>
             <Text strong style={{ fontSize: 13 }}>
@@ -262,6 +279,7 @@ export const WorkbenchPage: React.FC = () => {
         </div>
         <Spin spinning={loading}>
           <Tree
+            className="workbench-object-tree"
             treeData={treeData}
             showIcon
             blockNode
@@ -334,27 +352,26 @@ export const WorkbenchPage: React.FC = () => {
                   label: `数据预览${previewRows.length > 0 ? ` (${previewRows.length})` : ''}`,
                   children: (
                     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
-                      {columns.length > 0 && !columns.some((c) => c.isPrimaryKey) && (
-                        <Alert
-                          type="warning"
-                          showIcon
-                          icon={<LockOutlined />}
-                          message="当前表无主键，数据编辑功能不可用"
-                          style={{ marginBottom: 8, flexShrink: 0 }}
-                          closable
-                        />
-                      )}
-                      {columns.length > 0 && columns.some((c) => c.isPrimaryKey) && (
-                        <Alert
-                          type="info"
-                          showIcon
-                          icon={<EditOutlined />}
-                          message={`可编辑 · 主键：${columns.filter((c) => c.isPrimaryKey).map((c) => c.name).join(', ')}`}
-                          description="单击行可选中当前记录，双击单元格进入编辑。"
-                          style={{ marginBottom: 8, flexShrink: 0 }}
-                          closable
-                        />
-                      )}
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 12,
+                          marginBottom: 8,
+                          padding: '0 2px',
+                          flexShrink: 0,
+                        }}
+                      >
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          {columns.length > 0 && columns.some((c) => c.isPrimaryKey)
+                            ? `可编辑 · 主键：${columns.filter((c) => c.isPrimaryKey).map((c) => c.name).join(', ')}`
+                            : '当前表无主键，数据编辑功能不可用'}
+                        </Text>
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          {previewRows.length > 0 ? `共 ${previewRows.length} 行` : ''}
+                        </Text>
+                      </div>
                       {activeConnectionId && activeDatabase && activeTable ? (
                         <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
                           <EditableDataTable

@@ -21,7 +21,7 @@ const { Text } = Typography
 
 const menuItems = [
   { key: '/connection', icon: <ApiOutlined />, label: '连接管理' },
-  { key: '/workbench', icon: <DatabaseOutlined />, label: '数据库工作台' },
+  { key: '/workbench', icon: <DatabaseOutlined />, label: '工作台' },
   { key: '/sql-editor', icon: <CodeOutlined />, label: 'SQL 编辑器' },
   { key: '/migration', icon: <SwapOutlined />, label: '数据迁移' },
   { key: '/sync', icon: <SyncOutlined />, label: '数据同步' },
@@ -32,7 +32,7 @@ const menuItems = [
 
 const pageTitle: Record<string, string> = {
   '/connection': '连接管理',
-  '/workbench': '数据库工作台',
+  '/workbench': '工作台',
   '/sql-editor': 'SQL 编辑器',
   '/migration': '数据迁移',
   '/sync': '数据同步',

@@ -603,6 +603,13 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
         .editable-data-table:focus {
           outline: none;
         }
+        .editable-data-table .ant-table-wrapper {
+          height: 100%;
+        }
+        .editable-data-table .ant-table-thead > tr > th {
+          background: ${token.colorFillAlter};
+          font-weight: 600;
+        }
         .editable-data-table .ant-table-tbody > tr.row-selected > td {
           background: ${token.colorPrimaryBg};
         }
@@ -629,19 +636,28 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
       `}</style>
       {/* 操作栏 */}
       {isEditable && (
-        <div ref={toolbarRef} style={{ marginBottom: 8, flexShrink: 0 }}>
-          <Space direction="vertical" size={6} style={{ alignItems: 'flex-start' }}>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              单击行可选中当前记录，双击单元格进入编辑；按 Enter 确认，按 Esc 取消，按 Tab 切换下一个单元格。
-            </Text>
-            <Space>
-              <Button size="small" icon={<PlusOutlined />} onClick={addRow}>新增行</Button>
-              <Button size="small" icon={<UndoOutlined />} onClick={undoAll} disabled={!hasChanges}>撤销</Button>
-              <Button size="small" icon={<ExclamationCircleOutlined />} onClick={previewSql} disabled={!hasChanges}>预览 SQL</Button>
-              <Button size="small" type="primary" icon={<SaveOutlined />} onClick={save} loading={saving} disabled={!hasChanges}>
-                保存 {hasChanges ? `(${cellChangeCount + pendingRows.length} 变更)` : ''}
-              </Button>
-            </Space>
+        <div
+          ref={toolbarRef}
+          style={{
+            marginBottom: 8,
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            flexWrap: 'wrap',
+          }}
+        >
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            单击选中，双击编辑，Enter 确认，Esc 取消，Tab 切换
+          </Text>
+          <Space size={8} wrap>
+            <Button size="small" icon={<PlusOutlined />} onClick={addRow}>新增行</Button>
+            <Button size="small" icon={<UndoOutlined />} onClick={undoAll} disabled={!hasChanges}>撤销</Button>
+            <Button size="small" icon={<ExclamationCircleOutlined />} onClick={previewSql} disabled={!hasChanges}>预览 SQL</Button>
+            <Button size="small" type="primary" icon={<SaveOutlined />} onClick={save} loading={saving} disabled={!hasChanges}>
+              保存 {hasChanges ? `(${cellChangeCount + pendingRows.length} 变更)` : ''}
+            </Button>
           </Space>
         </div>
       )}
@@ -656,7 +672,8 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
         style={{
           display: 'flex',
           justifyContent: 'flex-end',
-          paddingTop: 12,
+          alignItems: 'center',
+          padding: '10px 0 0',
           flexShrink: 0,
           background: token.colorBgContainer,
           borderTop: `1px solid ${token.colorBorderSecondary}`,

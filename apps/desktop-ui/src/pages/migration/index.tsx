@@ -27,6 +27,7 @@ export const MigrationPage: React.FC = () => {
   const navigate = useNavigate()
   const connections = useConnectionStore((s) => s.connections)
   const setConnections = useConnectionStore((s) => s.setConnections)
+  const updateConnection = useConnectionStore((s) => s.updateConnection)
 
   // 刷新页面时自动加载连接列表
   useEffect(() => {
@@ -48,8 +49,40 @@ export const MigrationPage: React.FC = () => {
   const [loadingSourceDbs, setLoadingSourceDbs] = useState(false)
   const [loadingTargetDbs, setLoadingTargetDbs] = useState(false)
 
+  const handleConnectionSelect = async (connId: string, type: 'source' | 'target') => {
+    const conn = connections.find((c) => c.id === connId)
+    if (!conn) return
+
+    if (conn.status !== 'connected') {
+      try {
+        await connectionApi.open(conn.id)
+        updateConnection(conn.id, { status: 'connected' })
+        toast.success(`已连接到「${conn.name}」`)
+      } catch (e) {
+        handleApiError(e, '连接失败')
+        return
+      }
+    }
+    
+    if (type === 'source') {
+      setSourceId(connId)
+      setSourceDb(undefined)
+    } else {
+      setTargetId(connId)
+      setTargetDb(undefined)
+    }
+  }
+
   const connOptions = connections.map((c) => ({
-    value: c.id, label: `${c.name} (${c.host}:${c.port})`,
+    value: c.id,
+    label: (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span>{c.name} ({c.host}:{c.port})</span>
+        {c.status !== 'connected' && (
+          <span style={{ fontSize: 12, color: token.colorTextQuaternary }}>未连接</span>
+        )}
+      </div>
+    )
   }))
 
   useEffect(() => {
@@ -117,17 +150,19 @@ export const MigrationPage: React.FC = () => {
               <div style={{ flex: 1 }}>
                 <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>源连接</Text>
                 <Select
-                  value={sourceId} onChange={setSourceId}
+                  value={sourceId} onChange={(v) => handleConnectionSelect(v, 'source')}
                   options={connOptions} placeholder="选择源连接"
                   style={{ width: '100%' }}
+                  listHeight={320}
                 />
               </div>
               <div style={{ flex: 1 }}>
                 <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>目标连接</Text>
                 <Select
-                  value={targetId} onChange={setTargetId}
+                  value={targetId} onChange={(v) => handleConnectionSelect(v, 'target')}
                   options={connOptions} placeholder="选择目标连接"
                   style={{ width: '100%' }}
+                  listHeight={320}
                 />
               </div>
             </div>

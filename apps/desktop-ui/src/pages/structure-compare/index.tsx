@@ -49,6 +49,7 @@ export const StructureComparePage: React.FC = () => {
   const navigate = useNavigate()
   const connections = useConnectionStore((s) => s.connections)
   const setConnections = useConnectionStore((s) => s.setConnections)
+  const updateConnection = useConnectionStore((s) => s.updateConnection)
   const setPendingSql = useSqlEditorStore((s) => s.setPendingSql)
 
   // 配置状态
@@ -73,6 +74,42 @@ export const StructureComparePage: React.FC = () => {
   const [result, setResult] = useState<CompareResult | null>(null)
   const [selectedTable, setSelectedTable] = useState<string | null>(null)
   const [filter, setFilter] = useState<string>('all')
+
+  const handleConnectionSelect = async (connId: string, type: 'source' | 'target') => {
+    const conn = connections.find((c) => c.id === connId)
+    if (!conn) return
+
+    if (conn.status !== 'connected') {
+      try {
+        await connectionApi.open(conn.id)
+        updateConnection(conn.id, { status: 'connected' })
+        toast.success(`已连接到「${conn.name}」`)
+      } catch (e) {
+        handleApiError(e, '连接失败')
+        return
+      }
+    }
+    
+    if (type === 'source') {
+      setSourceConnId(connId)
+      setSourceDb(undefined)
+    } else {
+      setTargetConnId(connId)
+      setTargetDb(undefined)
+    }
+  }
+
+  const connOptions = connections.map((c) => ({
+    value: c.id,
+    label: (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span>{c.name} ({c.host}:{c.port})</span>
+        {c.status !== 'connected' && (
+          <span style={{ fontSize: 12, color: token.colorTextQuaternary }}>未连接</span>
+        )}
+      </div>
+    )
+  }))
 
   // 加载连接列表
   useEffect(() => {
@@ -235,9 +272,9 @@ export const StructureComparePage: React.FC = () => {
             <ApiOutlined />
             <Text type="secondary">源连接</Text>
             <Select
-              size="small" style={{ width: 160 }} placeholder="选择源连接"
-              value={sourceConnId} onChange={setSourceConnId}
-              options={connections.map((c) => ({ label: c.name, value: c.id }))}
+              size="small" style={{ width: 180 }} placeholder="选择源连接"
+              value={sourceConnId} onChange={(v) => handleConnectionSelect(v, 'source')}
+              options={connOptions} listHeight={320}
             />
           </Space>
           <Space size={4}>
@@ -255,9 +292,9 @@ export const StructureComparePage: React.FC = () => {
             <ApiOutlined />
             <Text type="secondary">目标连接</Text>
             <Select
-              size="small" style={{ width: 160 }} placeholder="选择目标连接"
-              value={targetConnId} onChange={setTargetConnId}
-              options={connections.map((c) => ({ label: c.name, value: c.id }))}
+              size="small" style={{ width: 180 }} placeholder="选择目标连接"
+              value={targetConnId} onChange={(v) => handleConnectionSelect(v, 'target')}
+              options={connOptions} listHeight={320}
             />
           </Space>
           <Space size={4}>
