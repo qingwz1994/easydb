@@ -44,6 +44,8 @@ export const connectionApi = {
     request('/api/connection/test', { method: 'POST', body: JSON.stringify(data) }),
   open: (id: string) =>
     request(`/api/connection/${id}/open`, { method: 'POST' }),
+  close: (id: string) =>
+    request(`/api/connection/${id}/close`, { method: 'POST' }),
 }
 
 // ─── 元数据 ─────────────────────────────────────────────
@@ -60,6 +62,11 @@ export const metadataApi = {
     request(`/api/metadata/${connectionId}/${database}/tables/${table}/preview`),
   ddl: (connectionId: string, database: string, table: string) =>
     request(`/api/metadata/${connectionId}/${database}/tables/${table}/ddl`),
+  editData: (connectionId: string, database: string, table: string, changes: unknown[], dryRun = false) =>
+    request(`/api/metadata/${connectionId}/${database}/tables/${table}/edit`, {
+      method: 'POST',
+      body: JSON.stringify({ connectionId, database, table, changes, dryRun }),
+    }),
 }
 
 // ─── SQL 执行 ────────────────────────────────────────────

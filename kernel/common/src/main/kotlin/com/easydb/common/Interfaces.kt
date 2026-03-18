@@ -41,6 +41,7 @@ interface DatabaseSession {
 interface MetadataAdapter {
     fun listDatabases(session: DatabaseSession): List<DatabaseInfo>
     fun listTables(session: DatabaseSession, database: String): List<TableInfo>
+    fun listTriggers(session: DatabaseSession, database: String): List<TriggerInfo> = emptyList()
     fun getTableDefinition(session: DatabaseSession, database: String, table: String): TableDefinition
     fun getIndexes(session: DatabaseSession, database: String, table: String): List<IndexInfo>
     fun previewRows(session: DatabaseSession, database: String, table: String, limit: Int = 100): List<Map<String, String?>>
@@ -52,6 +53,32 @@ interface DialectAdapter {
     fun quoteIdentifier(name: String): String
     fun buildCreateTable(table: TableDefinition): String
     fun buildInsert(tableName: String, columns: List<String>): String
+
+    /** 生成 UPDATE SQL */
+    fun buildUpdateSql(tableName: String, setCols: List<String>, whereCols: List<String>): String {
+        val setClause = setCols.joinToString(", ") { "${quoteIdentifier(it)} = ?" }
+        val whereClause = whereCols.joinToString(" AND ") { "${quoteIdentifier(it)} = ?" }
+        return "UPDATE ${quoteIdentifier(tableName)} SET $setClause WHERE $whereClause"
+    }
+
+    /** 生成 DELETE SQL */
+    fun buildDeleteSql(tableName: String, whereCols: List<String>): String {
+        val whereClause = whereCols.joinToString(" AND ") { "${quoteIdentifier(it)} = ?" }
+        return "DELETE FROM ${quoteIdentifier(tableName)} WHERE $whereClause"
+    }
+
+    /** 生成 INSERT SQL（带值占位符） */
+    fun buildInsertSql(tableName: String, columns: List<String>): String {
+        val cols = columns.joinToString(", ") { quoteIdentifier(it) }
+        val placeholders = columns.joinToString(", ") { "?" }
+        return "INSERT INTO ${quoteIdentifier(tableName)} ($cols) VALUES ($placeholders)"
+    }
+
+    /** 转义字符串值 */
+    fun escapeValue(value: String?): String {
+        if (value == null) return "NULL"
+        return "'${value.replace("'", "''")}'"
+    }
 }
 
 // ─── 同步适配器 ───────────────────────────────────────────

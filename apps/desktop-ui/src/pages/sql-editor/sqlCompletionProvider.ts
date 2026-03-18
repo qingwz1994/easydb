@@ -1,4 +1,4 @@
-import type { languages, editor, Position, CancellationToken } from 'monaco-editor'
+import type { languages, editor, Position } from 'monaco-editor'
 import { metadataApi } from '@/services/api'
 
 // ─── SQL 关键字 ─────────────────────────────────────────────
@@ -128,9 +128,7 @@ export function createSqlCompletionProvider(
 
     async provideCompletionItems(
       model: editor.ITextModel,
-      position: Position,
-      _context: languages.CompletionContext,
-      _token: CancellationToken
+      position: Position
     ): Promise<languages.CompletionList> {
       const word = model.getWordUntilPosition(position)
       const range = {

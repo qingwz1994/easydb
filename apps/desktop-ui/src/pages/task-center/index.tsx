@@ -1,11 +1,12 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import {
-  Layout, Table, Typography, Space, Select, Button, Progress,
-  theme,
+  Layout, Table, Typography, Space, Select, Button, Progress, Input,
+  theme, Descriptions, Card, Tag,
 } from 'antd'
 import {
   UnorderedListOutlined, ReloadOutlined,
-  ClockCircleOutlined, StopOutlined,
+  ClockCircleOutlined, StopOutlined, SearchOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import type { TaskInfo, TaskLog } from '@/types'
@@ -13,7 +14,8 @@ import { useTaskStore } from '@/stores/taskStore'
 import { taskApi } from '@/services/api'
 import { TaskStatusTag } from '@/components/StatusTag'
 import { LogPanel } from '@/components/LogPanel'
-import { confirmDanger } from '@/components/ConfirmModal'
+import { confirmDanger } from '@/components/confirmDanger'
+import { EmptyState } from '@/components/EmptyState'
 import { toast, handleApiError } from '@/utils/notification'
 import { formatDateTime, formatDuration, getElapsedMs } from '@/utils/format'
 
@@ -32,7 +34,9 @@ export const TaskCenterPage: React.FC = () => {
 
   const [loading, setLoading] = useState(false)
   const [statusFilter, setStatusFilter] = useState<string>()
-  const [, setTick] = useState(0) // 用于刷新实时耗时
+  const [typeFilter, setTypeFilter] = useState<string>()
+  const [searchText, setSearchText] = useState('')
+  const [, setTick] = useState(0)
 
   const loadTasks = useCallback(async () => {
     setLoading(true)
@@ -69,6 +73,13 @@ export const TaskCenterPage: React.FC = () => {
     return () => clearInterval(timer)
   }, [tasks, loadTasks, selectedTaskId, loadLogs])
 
+  // 搜索 + 类型过滤
+  const filteredTasks = tasks.filter((t) => {
+    const matchSearch = !searchText || t.name.toLowerCase().includes(searchText.toLowerCase())
+    const matchType = !typeFilter || t.type === typeFilter
+    return matchSearch && matchType
+  })
+
   const handleSelectTask = (task: TaskInfo) => {
     setSelectedTask(task.id)
     loadLogs(task.id)
@@ -87,6 +98,28 @@ export const TaskCenterPage: React.FC = () => {
     })
   }
 
+  // 日志导出
+  const handleExportLogs = () => {
+    if (!selectedTaskId || !selectedTask) return
+    const logs = taskLogs[selectedTaskId] ?? []
+    const content = [
+      `任务名称: ${selectedTask.name}`,
+      `任务类型: ${selectedTask.type === 'migration' ? '迁移' : '同步'}`,
+      `状态: ${selectedTask.status}`,
+      `创建时间: ${selectedTask.createdAt ? formatDateTime(selectedTask.createdAt) : '-'}`,
+      '---',
+      ...logs.map((l) => `[${l.timestamp ?? ''}] [${l.level ?? 'INFO'}] ${l.message}`),
+    ].join('\n')
+    const blob = new Blob([content], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${selectedTask.name}-log.txt`
+    a.click()
+    URL.revokeObjectURL(url)
+    toast.success('日志已导出')
+  }
+
   const selectedTask = tasks.find((t) => t.id === selectedTaskId)
   const selectedLogs = selectedTaskId ? (taskLogs[selectedTaskId] ?? []) : []
 
@@ -94,7 +127,7 @@ export const TaskCenterPage: React.FC = () => {
     { title: '任务名称', dataIndex: 'name', key: 'name', ellipsis: true },
     {
       title: '类型', dataIndex: 'type', key: 'type', width: 80,
-      render: (t: string) => t === 'migration' ? '迁移' : '同步',
+      render: (t: string) => <Tag>{t === 'migration' ? '迁移' : '同步'}</Tag>,
     },
     {
       title: '状态', dataIndex: 'status', key: 'status', width: 90,
@@ -103,6 +136,10 @@ export const TaskCenterPage: React.FC = () => {
     {
       title: '进度', dataIndex: 'progress', key: 'progress', width: 120,
       render: (p: number) => <Progress percent={p} size="small" />,
+    },
+    {
+      title: '创建时间', dataIndex: 'createdAt', key: 'createdAt', width: 150,
+      render: (v: string) => v ? <Text type="secondary" style={{ fontSize: 12 }}>{formatDateTime(v)}</Text> : '-',
     },
     {
       title: '耗时', key: 'duration', width: 100,
@@ -135,9 +172,26 @@ export const TaskCenterPage: React.FC = () => {
           任务中心
         </Title>
         <Space>
+          <Input
+            placeholder="搜索任务..."
+            prefix={<SearchOutlined />}
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            style={{ width: 180 }}
+            allowClear
+          />
+          <Select
+            value={typeFilter} onChange={setTypeFilter}
+            placeholder="任务类型" allowClear
+            style={{ width: 100 }}
+            options={[
+              { value: 'migration', label: '迁移' },
+              { value: 'sync', label: '同步' },
+            ]}
+          />
           <Select
             value={statusFilter} onChange={setStatusFilter}
-            placeholder="状态筛选" allowClear
+            placeholder="筛选状态" allowClear
             style={{ width: 120 }}
             options={[
               { value: 'running', label: '运行中' },
@@ -153,28 +207,36 @@ export const TaskCenterPage: React.FC = () => {
       <Layout style={{ flex: 1, minHeight: 0, background: 'transparent' }}>
         {/* 左侧任务列表 */}
         <div style={{ flex: 1, marginRight: 16 }}>
-          <Table
-            columns={columns}
-            dataSource={tasks}
-            rowKey="id"
-            loading={loading}
-            pagination={false}
-            size="small"
-            onRow={(record) => ({
-              onClick: () => handleSelectTask(record),
-              style: {
-                cursor: 'pointer',
-                background: record.id === selectedTaskId ? token.colorPrimaryBg : undefined,
-              },
-            })}
-            locale={{ emptyText: '暂无任务' }}
-          />
+          {tasks.length === 0 && !loading ? (
+            <EmptyState description="暂无任务，在「数据迁移」或「数据同步」中创建任务" />
+          ) : (
+            <Table
+              columns={columns}
+              dataSource={filteredTasks}
+              rowKey="id"
+              loading={loading}
+              pagination={false}
+              size="small"
+              onRow={(record) => ({
+                onClick: () => handleSelectTask(record),
+                style: {
+                  cursor: 'pointer',
+                  background: record.id === selectedTaskId ? token.colorPrimaryBg : undefined,
+                },
+              })}
+              locale={{
+                emptyText: searchText || statusFilter || typeFilter
+                  ? '没有匹配的任务'
+                  : '暂无任务',
+              }}
+            />
+          )}
         </div>
 
         {/* 右侧详情 */}
         {selectedTask && (
           <Sider
-            width={360}
+            width={380}
             style={{
               background: token.colorBgContainer,
               borderRadius: token.borderRadius,
@@ -182,33 +244,57 @@ export const TaskCenterPage: React.FC = () => {
               overflow: 'auto',
             }}
           >
-            <Text strong style={{ fontSize: 14 }}>{selectedTask.name}</Text>
-            <div style={{ marginTop: 12 }}>
-              <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                <div><Text type="secondary">类型：</Text>{selectedTask.type === 'migration' ? '迁移' : '同步'}</div>
-                <div><Text type="secondary">状态：</Text><TaskStatusTag status={selectedTask.status} /></div>
-                <div><Text type="secondary">进度：</Text><Progress percent={selectedTask.progress} size="small" /></div>
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Text strong style={{ fontSize: 14 }}>{selectedTask.name}</Text>
+
+              <Descriptions column={1} size="small" bordered>
+                <Descriptions.Item label="类型">{selectedTask.type === 'migration' ? '迁移' : '同步'}</Descriptions.Item>
+                <Descriptions.Item label="状态"><TaskStatusTag status={selectedTask.status} /></Descriptions.Item>
+                <Descriptions.Item label="进度"><Progress percent={selectedTask.progress} size="small" style={{ marginBottom: 0 }} /></Descriptions.Item>
+                {selectedTask.createdAt && (
+                  <Descriptions.Item label="创建时间">{formatDateTime(selectedTask.createdAt)}</Descriptions.Item>
+                )}
                 {selectedTask.startedAt && (
-                  <div><Text type="secondary">开始时间：</Text>{formatDateTime(selectedTask.startedAt)}</div>
+                  <Descriptions.Item label="开始时间">{formatDateTime(selectedTask.startedAt)}</Descriptions.Item>
                 )}
                 {selectedTask.duration != null && (
-                  <div><Text type="secondary">耗时：</Text>{formatDuration(selectedTask.duration)}</div>
+                  <Descriptions.Item label="耗时">{formatDuration(selectedTask.duration)}</Descriptions.Item>
                 )}
                 {selectedTask.status === 'running' && selectedTask.startedAt && selectedTask.duration == null && (
-                  <div><Text type="secondary">已用时：</Text><ClockCircleOutlined style={{ marginRight: 4 }} />{formatDuration(getElapsedMs(selectedTask.startedAt))}</div>
+                  <Descriptions.Item label="已用时">
+                    <ClockCircleOutlined style={{ marginRight: 4 }} />
+                    {formatDuration(getElapsedMs(selectedTask.startedAt))}
+                  </Descriptions.Item>
                 )}
-                {selectedTask.errorMessage && (
-                  <div><Text type="danger">错误：{selectedTask.errorMessage}</Text></div>
-                )}
-              </Space>
-            </div>
+              </Descriptions>
 
-            <div style={{ marginTop: 16 }}>
-              <Text strong style={{ fontSize: 13 }}>执行日志</Text>
-              <div style={{ marginTop: 8 }}>
+              {selectedTask.errorMessage && (
+                <Card size="small" title="错误信息" style={{ borderColor: token.colorError }}>
+                  <Text type="danger" style={{ fontSize: 12 }}>{selectedTask.errorMessage}</Text>
+                </Card>
+              )}
+
+              {selectedTask.progressMessage && (
+                <Card size="small" title="当前步骤">
+                  <Text type="secondary" style={{ fontSize: 12 }}>{selectedTask.progressMessage}</Text>
+                </Card>
+              )}
+
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <Text strong style={{ fontSize: 13 }}>执行日志</Text>
+                  <Button
+                    size="small"
+                    icon={<DownloadOutlined />}
+                    onClick={handleExportLogs}
+                    disabled={selectedLogs.length === 0}
+                  >
+                    导出
+                  </Button>
+                </div>
                 <LogPanel logs={selectedLogs} height={240} />
               </div>
-            </div>
+            </Space>
           </Sider>
         )}
       </Layout>

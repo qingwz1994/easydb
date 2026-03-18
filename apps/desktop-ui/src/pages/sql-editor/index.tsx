@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react'
 import {
   Layout, Button, Space, Typography, Tabs, Table, Tag, Select,
-  theme,
+  theme, Card, Descriptions,
 } from 'antd'
 import {
   PlayCircleOutlined, ClearOutlined,
@@ -21,12 +21,22 @@ import { createSqlCompletionProvider, clearCompletionCache } from './sqlCompleti
 const { Content, Header } = Layout
 const { Text } = Typography
 
+// 标签页数据结构
+interface EditorTab {
+  key: string
+  title: string
+  sql: string
+}
+
+let tabCounter = 1
+
 export const SqlEditorPage: React.FC = () => {
   const { token } = theme.useToken()
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
   const completionDisposableRef = useRef<{ dispose: () => void } | null>(null)
 
   const activeConnectionId = useWorkbenchStore((s) => s.activeConnectionId)
+  const activeConnectionName = useWorkbenchStore((s) => s.activeConnectionName)
   const activeDatabase = useWorkbenchStore((s) => s.activeDatabase)
   const setActiveConnection = useWorkbenchStore((s) => s.setActiveConnection)
   const setActiveDatabase = useWorkbenchStore((s) => s.setActiveDatabase)
@@ -34,27 +44,45 @@ export const SqlEditorPage: React.FC = () => {
   const setConnections = useConnectionStore((s) => s.setConnections)
   const consumePendingSql = useSqlEditorStore((s) => s.consumePendingSql)
 
-  const [sql, setSql] = useState('')
+  const [tabs, setTabs] = useState<EditorTab[]>([{ key: 'tab-1', title: 'SQL 1', sql: '' }])
+  const [activeTabKey, setActiveTabKey] = useState('tab-1')
   const [executing, setExecuting] = useState(false)
   const [results, setResults] = useState<SqlResult[]>([])
-  const [activeTab, setActiveTab] = useState<'results' | 'messages'>('results')
+  const [resultTab, setResultTab] = useState<'results' | 'messages'>('results')
   const [databases, setDatabases] = useState<string[]>([])
+  const [totalExecutions, setTotalExecutions] = useState(0)
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null)
 
-  // 自动加载连接列表
+  const activeEditorTab = tabs.find((t) => t.key === activeTabKey) || tabs[0]
+
+  // 自动加载连接列表 + 自动连接
   useEffect(() => {
     if (connections.length === 0) {
       connectionApi.list().then((list) => {
-        setConnections((list as ConnectionConfig[]).filter((c) => c.status === 'connected'))
+        const allConns = list as ConnectionConfig[]
+        setConnections(allConns)
+        // 自动连接：如果没有活跃连接但有已连接的连接，自动选中第一个
+        if (!activeConnectionId) {
+          const connected = allConns.find((c) => c.status === 'connected')
+          if (connected) {
+            setActiveConnection(connected.id, connected.name)
+          }
+        }
       }).catch(() => {})
     }
+  }, [activeConnectionId, connections.length, setActiveConnection, setConnections])
+
+  // 标签页操作
+  const updateTabSql = useCallback((key: string, sql: string) => {
+    setTabs((prev) => prev.map((t) => t.key === key ? { ...t, sql } : t))
   }, [])
 
   // 消费从其他页面传入的 SQL
   useEffect(() => {
     const pending = consumePendingSql()
     if (pending) {
-      setSql(pending.sql)
+      // 写入当前标签页
+      updateTabSql(activeTabKey, pending.sql)
       if (editorRef.current) {
         editorRef.current.setValue(pending.sql)
       }
@@ -67,7 +95,7 @@ export const SqlEditorPage: React.FC = () => {
       }
       toast.success('SQL 已加载，请审核后手动执行')
     }
-  }, [])
+  }, [activeTabKey, connections, consumePendingSql, setActiveConnection, setActiveDatabase, updateTabSql])
 
   // 连接变化时加载数据库列表
   useEffect(() => {
@@ -77,17 +105,38 @@ export const SqlEditorPage: React.FC = () => {
     }).catch(() => setDatabases([]))
   }, [activeConnectionId])
 
-  // 切换连接
+  const addTab = () => {
+    tabCounter++
+    const newKey = `tab-${tabCounter}`
+    setTabs((prev) => [...prev, { key: newKey, title: `SQL ${tabCounter}`, sql: '' }])
+    setActiveTabKey(newKey)
+  }
+
+  const removeTab = (targetKey: string) => {
+    if (tabs.length <= 1) return // 至少保留一个标签页
+    const newTabs = tabs.filter((t) => t.key !== targetKey)
+    if (activeTabKey === targetKey) {
+      setActiveTabKey(newTabs[newTabs.length - 1].key)
+    }
+    setTabs(newTabs)
+  }
+
+  const handleTabChange = (key: string) => {
+    // 保存当前标签页的 SQL
+    if (editorRef.current) {
+      updateTabSql(activeTabKey, editorRef.current.getValue())
+    }
+    setActiveTabKey(key)
+  }
+
   const handleConnectionChange = (connId: string) => {
     const conn = connections.find((c) => c.id === connId)
     setActiveConnection(connId, conn?.name ?? null)
   }
 
-  // 切换数据库
   const handleDatabaseChange = (db: string) => {
     setActiveDatabase(db)
     clearCompletionCache()
-    // 重新注册补全
     if (activeConnectionId && monacoRef.current) {
       completionDisposableRef.current?.dispose()
       completionDisposableRef.current = monacoRef.current.languages.registerCompletionItemProvider(
@@ -97,12 +146,9 @@ export const SqlEditorPage: React.FC = () => {
     }
   }
 
-
-
   const handleEditorMount: OnMount = (editorInstance, monaco) => {
     editorRef.current = editorInstance
     monacoRef.current = monaco
-    // ⌘+Enter / Ctrl+Enter 执行 SQL
     editorInstance.addAction({
       id: 'execute-sql',
       label: '执行 SQL',
@@ -110,7 +156,6 @@ export const SqlEditorPage: React.FC = () => {
       run: () => handleExecute(),
     })
 
-    // 注册 SQL 自动补全
     if (activeConnectionId && activeDatabase) {
       completionDisposableRef.current?.dispose()
       completionDisposableRef.current = monaco.languages.registerCompletionItemProvider(
@@ -122,12 +167,7 @@ export const SqlEditorPage: React.FC = () => {
     editorInstance.focus()
   }
 
-  // 切换数据库时刷新补全缓存
-  useEffect(() => {
-    clearCompletionCache()
-  }, [activeDatabase])
-
-  // 组件卸载时清理
+  useEffect(() => { clearCompletionCache() }, [activeDatabase])
   useEffect(() => {
     return () => {
       completionDisposableRef.current?.dispose()
@@ -135,11 +175,17 @@ export const SqlEditorPage: React.FC = () => {
     }
   }, [])
 
+  // 标签页切换时同步编辑器内容
+  useEffect(() => {
+    if (editorRef.current && activeEditorTab) {
+      editorRef.current.setValue(activeEditorTab.sql)
+    }
+  }, [activeEditorTab])
+
   const handleExecute = useCallback(async () => {
-    // 获取选中文本或全部文本
     const editor = editorRef.current
     const selection = editor?.getSelection()
-    let execSql = sql.trim()
+    let execSql = activeEditorTab.sql.trim()
 
     if (editor && selection && !selection.isEmpty()) {
       execSql = editor.getModel()?.getValueInRange(selection)?.trim() ?? execSql
@@ -150,20 +196,20 @@ export const SqlEditorPage: React.FC = () => {
     try {
       const resultList = await sqlApi.execute(activeConnectionId, activeDatabase, execSql) as SqlResult[]
       setResults((prev) => [...resultList.reverse(), ...prev])
+      setTotalExecutions((prev) => prev + 1)
       const hasError = resultList.some((r) => r.type === 'error')
       if (hasError) {
         const errorMsg = resultList.find((r) => r.type === 'error')?.error ?? 'SQL 执行失败'
         toast.error(errorMsg)
-        setActiveTab('messages')
+        setResultTab('messages')
       } else {
         const hasQuery = resultList.some((r) => r.type === 'query')
         if (hasQuery) {
-          setActiveTab('results')
+          setResultTab('results')
         } else {
-          // 多条 update 语句汇总
           const totalAffected = resultList.reduce((sum, r) => sum + (r.affectedRows ?? 0), 0)
           toast.success(`执行成功，共影响 ${totalAffected} 行`)
-          setActiveTab('results')
+          setResultTab('results')
         }
       }
     } catch (e) {
@@ -171,16 +217,16 @@ export const SqlEditorPage: React.FC = () => {
     } finally {
       setExecuting(false)
     }
-  }, [sql, activeConnectionId, activeDatabase])
+  }, [activeEditorTab, activeConnectionId, activeDatabase])
 
   const handleClear = () => {
-    setSql('')
+    updateTabSql(activeTabKey, '')
+    editorRef.current?.setValue('')
     editorRef.current?.focus()
   }
 
   const latestResult = results[0] ?? null
 
-  // 结果表格列
   const resultColumns = latestResult?.columns?.map((col) => ({
     title: col,
     dataIndex: col,
@@ -189,6 +235,11 @@ export const SqlEditorPage: React.FC = () => {
     ellipsis: true,
     render: (v: unknown) => String(v ?? 'NULL'),
   })) ?? []
+
+  // 执行统计
+  const successCount = results.filter((r) => r.type !== 'error').length
+  const errorCount = results.filter((r) => r.type === 'error').length
+  const totalDuration = results.reduce((sum, r) => sum + r.duration, 0)
 
   return (
     <Layout style={{ height: '100%' }}>
@@ -236,7 +287,7 @@ export const SqlEditorPage: React.FC = () => {
             icon={<PlayCircleOutlined />}
             loading={executing}
             onClick={handleExecute}
-            disabled={!sql.trim()}
+            disabled={!activeEditorTab.sql.trim() || !activeConnectionId || !activeDatabase}
           >
             执行
           </Button>
@@ -246,113 +297,196 @@ export const SqlEditorPage: React.FC = () => {
         </Space>
       </Header>
 
-      {/* Monaco SQL 编辑器 */}
-      <div style={{
-        height: 240,
-        borderBottom: `1px solid ${token.colorBorderSecondary}`,
-      }}>
-        <Editor
-          height="100%"
-          language="sql"
-          theme="vs-dark"
-          value={sql}
-          onChange={(value) => setSql(value ?? '')}
-          onMount={handleEditorMount}
-          options={{
-            fontSize: 13,
-            fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-            lineNumbers: 'on',
-            minimap: { enabled: false },
-            scrollBeyondLastLine: false,
-            wordWrap: 'on',
-            automaticLayout: true,
-            tabSize: 2,
-            suggestOnTriggerCharacters: true,
-            quickSuggestions: true,
-            folding: true,
-            renderLineHighlight: 'line',
-            selectionHighlight: true,
-            occurrencesHighlight: 'singleFile',
-            bracketPairColorization: { enabled: true },
-            padding: { top: 8, bottom: 8 },
-            placeholder: '输入 SQL 语句... (⌘+Enter 执行，支持选中部分执行)',
-          } as editor.IStandaloneEditorConstructionOptions}
-        />
-      </div>
+      <Layout style={{ flex: 1 }}>
+        <Layout.Content style={{ display: 'flex', flexDirection: 'column' }}>
+          {/* 编辑器标签页 */}
+          <div style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
+            <Tabs
+              type="editable-card"
+              size="small"
+              activeKey={activeTabKey}
+              onChange={handleTabChange}
+              onEdit={(targetKey, action) => {
+                if (action === 'add') addTab()
+                if (action === 'remove') removeTab(targetKey as string)
+              }}
+              style={{ margin: '0 8px' }}
+              tabBarStyle={{ marginBottom: 0 }}
+              items={tabs.map((tab) => ({
+                key: tab.key,
+                label: tab.title,
+                closable: tabs.length > 1,
+              }))}
+            />
+          </div>
 
-      {/* 结果区 */}
-      <Content style={{ overflow: 'auto', background: token.colorBgContainer }}>
-        <Tabs
-          activeKey={activeTab}
-          onChange={(key) => setActiveTab(key as 'results' | 'messages')}
-          size="small"
-          style={{ padding: '0 16px' }}
-          tabBarExtraContent={
-            latestResult && latestResult.type !== 'error' ? (
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                {latestResult.type === 'query'
-                  ? `${latestResult.rows?.length ?? 0} 行 · ${latestResult.duration}ms`
-                  : `影响 ${latestResult.affectedRows ?? 0} 行 · ${latestResult.duration}ms`
-                }
-              </Text>
-            ) : null
-          }
-          items={[
-            {
-              key: 'results',
-              label: '结果',
-              children: latestResult?.type === 'query' ? (
-                <Table
-                  columns={resultColumns}
-                  dataSource={latestResult.rows?.map((r, i) => ({ ...r, _key: i }))}
-                  rowKey="_key"
-                  pagination={{ defaultPageSize: 50, showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100], size: 'small' }}
-                  size="small"
-                  scroll={{ x: 'max-content' }}
+          {/* 编辑器区域 */}
+          {!activeConnectionId ? (
+            <div style={{ flex: 1 }}>
+              <EmptyState
+                description="请先选择一个已连接的数据库连接"
+                actionText="前往连接管理"
+                onAction={() => { window.location.hash = '/connection' }}
+              />
+            </div>
+          ) : !activeDatabase ? (
+            <div style={{ flex: 1 }}>
+              <EmptyState description="请在工具栏中选择一个数据库" />
+            </div>
+          ) : (
+            <>
+              <div style={{
+                height: 240,
+                borderBottom: `1px solid ${token.colorBorderSecondary}`,
+              }}>
+                <Editor
+                  height="100%"
+                  language="sql"
+                  theme="vs-dark"
+                  value={activeEditorTab.sql}
+                  onChange={(value) => updateTabSql(activeTabKey, value ?? '')}
+                  onMount={handleEditorMount}
+                  options={{
+                    fontSize: 13,
+                    fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+                    lineNumbers: 'on',
+                    minimap: { enabled: false },
+                    scrollBeyondLastLine: false,
+                    wordWrap: 'on',
+                    automaticLayout: true,
+                    tabSize: 2,
+                    suggestOnTriggerCharacters: true,
+                    quickSuggestions: true,
+                    folding: true,
+                    renderLineHighlight: 'line',
+                    selectionHighlight: true,
+                    occurrencesHighlight: 'singleFile',
+                    bracketPairColorization: { enabled: true },
+                    padding: { top: 8, bottom: 8 },
+                    placeholder: '输入 SQL 语句... (⌘+Enter 执行，支持选中部分执行)',
+                  } as editor.IStandaloneEditorConstructionOptions}
                 />
-              ) : latestResult?.type === 'update' ? (
-                <div style={{ padding: 24, textAlign: 'center' }}>
-                  <Tag color="success">执行成功</Tag>
-                  <Text type="secondary">
-                    影响 {latestResult.affectedRows} 行，耗时 {latestResult.duration}ms
-                  </Text>
-                </div>
-              ) : (
-                <EmptyState description="执行 SQL 后在此查看结果" />
-              ),
-            },
-            {
-              key: 'messages',
-              label: '消息',
-              children: (
-                <div style={{ padding: 12 }}>
-                  {results.map((r, i) => (
-                    <div key={i} style={{
-                      padding: '4px 0',
-                      fontSize: 12,
-                      fontFamily: 'Menlo, Monaco, monospace',
-                      color: r.type === 'error' ? '#ff4d4f' : token.colorTextSecondary,
-                    }}>
-                      <Text type="secondary" style={{ fontSize: 11, marginRight: 8 }}>
-                        {r.executedAt?.slice(11, 19)}
+              </div>
+
+              {/* 结果区 */}
+              <Content style={{ overflow: 'auto', background: token.colorBgContainer, flex: 1 }}>
+                <Tabs
+                  activeKey={resultTab}
+                  onChange={(key) => setResultTab(key as 'results' | 'messages')}
+                  size="small"
+                  style={{ padding: '0 16px' }}
+                  tabBarExtraContent={
+                    latestResult && latestResult.type !== 'error' ? (
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {latestResult.type === 'query'
+                          ? `${latestResult.rows?.length ?? 0} 行 · ${latestResult.duration}ms`
+                          : `影响 ${latestResult.affectedRows ?? 0} 行 · ${latestResult.duration}ms`
+                        }
                       </Text>
-                      {r.type === 'error'
-                        ? `❌ ${r.error}`
-                        : r.type === 'query'
-                          ? `✅ 查询返回 ${r.rows?.length ?? 0} 行 (${r.duration}ms)`
-                          : `✅ 影响 ${r.affectedRows} 行 (${r.duration}ms)`
-                      }
-                    </div>
-                  ))}
-                  {results.length === 0 && (
-                    <Text type="secondary">暂无执行消息</Text>
-                  )}
-                </div>
-              ),
-            },
-          ]}
-        />
-      </Content>
+                    ) : null
+                  }
+                  items={[
+                    {
+                      key: 'results',
+                      label: '结果',
+                      children: latestResult?.type === 'query' ? (
+                        <Table
+                          columns={resultColumns}
+                          dataSource={latestResult.rows?.map((r, i) => ({ ...r, _key: i }))}
+                          rowKey="_key"
+                          pagination={{ defaultPageSize: 50, showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100], size: 'small' }}
+                          size="small"
+                          scroll={{ x: 'max-content' }}
+                        />
+                      ) : latestResult?.type === 'update' ? (
+                        <div style={{ padding: 24, textAlign: 'center' }}>
+                          <Tag color="success">执行成功</Tag>
+                          <Text type="secondary">
+                            影响 {latestResult.affectedRows} 行，耗时 {latestResult.duration}ms
+                          </Text>
+                        </div>
+                      ) : (
+                        <EmptyState description="执行 SQL 后在此查看结果" />
+                      ),
+                    },
+                    {
+                      key: 'messages',
+                      label: `消息${results.length > 0 ? ` (${results.length})` : ''}`,
+                      children: (
+                        <div style={{ padding: 12 }}>
+                          {results.map((r, i) => (
+                            <div key={i} style={{
+                              padding: '4px 0',
+                              fontSize: 12,
+                              fontFamily: 'Menlo, Monaco, monospace',
+                              color: r.type === 'error' ? '#ff4d4f' : token.colorTextSecondary,
+                            }}>
+                              <Text type="secondary" style={{ fontSize: 11, marginRight: 8 }}>
+                                {r.executedAt?.slice(11, 19)}
+                              </Text>
+                              {r.type === 'error'
+                                ? `❌ ${r.error}`
+                                : r.type === 'query'
+                                  ? `✅ 查询返回 ${r.rows?.length ?? 0} 行 (${r.duration}ms)`
+                                  : `✅ 影响 ${r.affectedRows} 行 (${r.duration}ms)`
+                              }
+                            </div>
+                          ))}
+                          {results.length === 0 && (
+                            <Text type="secondary">暂无执行消息</Text>
+                          )}
+                        </div>
+                      ),
+                    },
+                  ]}
+                />
+              </Content>
+            </>
+          )}
+        </Layout.Content>
+
+        {/* 右侧上下文区 */}
+        <Layout.Sider
+          width={200}
+          style={{
+            background: token.colorBgContainer,
+            borderLeft: `1px solid ${token.colorBorderSecondary}`,
+            overflow: 'auto',
+            padding: 12,
+          }}
+        >
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Descriptions column={1} size="small" title="上下文">
+              <Descriptions.Item label="连接">{activeConnectionName || '-'}</Descriptions.Item>
+              <Descriptions.Item label="数据库">{activeDatabase || '-'}</Descriptions.Item>
+              <Descriptions.Item label="标签页">{tabs.length}</Descriptions.Item>
+            </Descriptions>
+
+            {results.length > 0 && (
+              <Card size="small" title="执行统计" style={{ fontSize: 12 }}>
+                <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>执行次数</Text>
+                    <Text style={{ fontSize: 12 }}>{totalExecutions}</Text>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>成功</Text>
+                    <Text style={{ fontSize: 12, color: token.colorSuccess }}>{successCount}</Text>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>失败</Text>
+                    <Text style={{ fontSize: 12, color: token.colorError }}>{errorCount}</Text>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>总耗时</Text>
+                    <Text style={{ fontSize: 12 }}>{totalDuration}ms</Text>
+                  </div>
+                </Space>
+              </Card>
+            )}
+          </Space>
+        </Layout.Sider>
+      </Layout>
     </Layout>
   )
 }

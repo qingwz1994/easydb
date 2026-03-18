@@ -33,7 +33,7 @@ export const MigrationPage: React.FC = () => {
     if (connections.length === 0) {
       connectionApi.list().then((list) => setConnections(list as ConnectionConfig[])).catch(() => {})
     }
-  }, [])
+  }, [connections.length, setConnections])
 
   const [current, setCurrent] = useState(0)
   const [sourceId, setSourceId] = useState<string>()

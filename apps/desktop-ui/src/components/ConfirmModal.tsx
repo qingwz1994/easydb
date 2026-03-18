@@ -53,25 +53,3 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
     {content}
   </Modal>
 )
-
-/**
- * 命令式调用：危险操作确认
- * 用于不需要控制 open 状态的场景
- */
-export function confirmDanger(config: {
-  title?: string
-  content: React.ReactNode
-  okText?: string
-  onOk: () => void | Promise<void>
-}) {
-  Modal.confirm({
-    title: config.title ?? '确认删除',
-    icon: <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />,
-    content: config.content,
-    okText: config.okText ?? '删除',
-    cancelText: '取消',
-    okButtonProps: { danger: true },
-    centered: true,
-    onOk: config.onOk,
-  })
-}

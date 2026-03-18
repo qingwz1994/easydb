@@ -62,7 +62,7 @@ export interface DatabaseInfo {
 export interface TableInfo {
   name: string
   schema?: string
-  type: 'table' | 'view'
+  type: 'table' | 'view' | 'trigger'
   rowCount?: number
   comment?: string
 }
@@ -116,6 +116,7 @@ export interface TaskInfo {
   type: TaskType
   status: TaskStatus
   progress: number
+  createdAt?: string
   startedAt?: string
   completedAt?: string
   duration?: number
@@ -123,6 +124,7 @@ export interface TaskInfo {
   failureCount?: number
   skippedCount?: number
   errorMessage?: string
+  progressMessage?: string
 }
 
 // 任务步骤
@@ -266,3 +268,27 @@ export interface IpcResponse<T> {
     message: string
   }
 }
+
+// 数据编辑
+export interface RowChange {
+  type: 'insert' | 'update' | 'delete'
+  primaryKeys: Record<string, string | null>
+  values: Record<string, string | null>
+  oldValues: Record<string, string | null>
+}
+
+export interface DataEditRequest {
+  connectionId: string
+  database: string
+  table: string
+  changes: RowChange[]
+  dryRun?: boolean
+}
+
+export interface DataEditResult {
+  success: boolean
+  sqlStatements: string[]
+  affectedRows: number
+  errors: string[]
+}
+

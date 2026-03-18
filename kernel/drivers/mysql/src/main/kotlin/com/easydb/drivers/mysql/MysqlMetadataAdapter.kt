@@ -55,6 +55,32 @@ class MysqlMetadataAdapter : MetadataAdapter {
         return result
     }
 
+    override fun listTriggers(session: DatabaseSession, database: String): List<TriggerInfo> {
+        val conn = (session as MysqlDatabaseSession).connection
+        val result = mutableListOf<TriggerInfo>()
+        conn.prepareStatement("""
+            SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, EVENT_MANIPULATION,
+                   ACTION_TIMING, ACTION_STATEMENT
+            FROM INFORMATION_SCHEMA.TRIGGERS
+            WHERE TRIGGER_SCHEMA = ?
+            ORDER BY TRIGGER_NAME
+        """.trimIndent()).use { stmt ->
+            stmt.setString(1, database)
+            stmt.executeQuery().use { rs ->
+                while (rs.next()) {
+                    result.add(TriggerInfo(
+                        name = rs.getString("TRIGGER_NAME"),
+                        table = rs.getString("EVENT_OBJECT_TABLE"),
+                        event = rs.getString("EVENT_MANIPULATION"),
+                        timing = rs.getString("ACTION_TIMING"),
+                        statement = rs.getString("ACTION_STATEMENT")
+                    ))
+                }
+            }
+        }
+        return result
+    }
+
     override fun getTableDefinition(session: DatabaseSession, database: String, table: String): TableDefinition {
         val columns = getColumns(session, database, table)
         val indexes = getIndexes(session, database, table)

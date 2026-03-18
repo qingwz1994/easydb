@@ -95,7 +95,17 @@ fun Route.metadataRoutes() {
     get("/{connectionId}/{database}/objects") {
         val session = getSessionOrFail(call, connMgr) ?: return@get
         val database = call.parameters["database"]!!
-        call.ok(adapter.metadataAdapter().listTables(session, database))
+        val metaAdapter = adapter.metadataAdapter()
+        val tables = metaAdapter.listTables(session, database)
+        val triggers = metaAdapter.listTriggers(session, database).map { trigger ->
+            TableInfo(
+                name = trigger.name,
+                schema = database,
+                type = "trigger",
+                comment = trigger.comment ?: "${trigger.timing ?: ""} ${trigger.event ?: ""} ON ${trigger.table ?: ""}".trim()
+            )
+        }
+        call.ok(tables + triggers)
     }
 
     get("/{connectionId}/{database}/tables/{table}/definition") {
@@ -116,7 +126,8 @@ fun Route.metadataRoutes() {
         val session = getSessionOrFail(call, connMgr) ?: return@get
         val database = call.parameters["database"]!!
         val table = call.parameters["table"]!!
-        call.ok(adapter.metadataAdapter().previewRows(session, database, table))
+        val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 1000
+        call.ok(adapter.metadataAdapter().previewRows(session, database, table, limit))
     }
 
     get("/{connectionId}/{database}/tables/{table}/ddl") {
@@ -124,6 +135,47 @@ fun Route.metadataRoutes() {
         val database = call.parameters["database"]!!
         val table = call.parameters["table"]!!
         call.ok(adapter.metadataAdapter().getDdl(session, database, table))
+    }
+
+    // 数据编辑
+    post("/{connectionId}/{database}/tables/{table}/edit") {
+        val session = getSessionOrFail(call, connMgr) ?: return@post
+        val database = call.parameters["database"]!!
+        val table = call.parameters["table"]!!
+        val req = call.receive<DataEditRequest>()
+        val editService = DataEditService()
+        val dialect = adapter.dialectAdapter()
+        val sqlStatements = editService.generateSql(dialect, table, req.changes)
+
+        if (req.dryRun) {
+            call.ok(DataEditResult(success = true, sqlStatements = sqlStatements))
+        } else {
+            try {
+                // 通过反射获取底层 JDBC 连接（同 SqlExecutionService）
+                val connField = session.javaClass.getDeclaredField("connection")
+                connField.isAccessible = true
+                val jdbcConn = connField.get(session) as java.sql.Connection
+
+                var totalAffected = 0
+                jdbcConn.createStatement().use { stmt ->
+                    stmt.execute("USE ${dialect.quoteIdentifier(database)}")
+                    for (sql in sqlStatements) {
+                        totalAffected += stmt.executeUpdate(sql)
+                    }
+                }
+                call.ok(DataEditResult(
+                    success = true,
+                    sqlStatements = sqlStatements,
+                    affectedRows = totalAffected
+                ))
+            } catch (e: Exception) {
+                call.ok(DataEditResult(
+                    success = false,
+                    sqlStatements = sqlStatements,
+                    errors = listOf(e.message ?: "执行失败")
+                ))
+            }
+        }
     }
 }
 

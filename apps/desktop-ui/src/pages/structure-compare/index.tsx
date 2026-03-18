@@ -81,7 +81,7 @@ export const StructureComparePage: React.FC = () => {
         setConnections(list as ConnectionConfig[])
       }).catch(() => {})
     }
-  }, [])
+  }, [connections.length, setConnections])
 
   // 加载源数据库
   useEffect(() => {

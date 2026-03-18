@@ -14,8 +14,18 @@ data class DatabaseInfo(
 data class TableInfo(
     val name: String,
     val schema: String? = null,
-    val type: String = "table", // table | view
+    val type: String = "table", // table | view | trigger
     val rowCount: Long? = null,
+    val comment: String? = null
+)
+
+@Serializable
+data class TriggerInfo(
+    val name: String,
+    val table: String? = null,
+    val event: String? = null,     // INSERT | UPDATE | DELETE
+    val timing: String? = null,    // BEFORE | AFTER
+    val statement: String? = null,
     val comment: String? = null
 )
 
@@ -187,3 +197,30 @@ data class IndexDiff(
     val targetUnique: Boolean? = null,
     val details: String = ""
 )
+
+// ─── 数据编辑模型 ──────────────────────────────────────────
+@Serializable
+data class DataEditRequest(
+    val connectionId: String,
+    val database: String,
+    val table: String,
+    val changes: List<RowChange>,
+    val dryRun: Boolean = false   // true 只生成 SQL 不执行
+)
+
+@Serializable
+data class RowChange(
+    val type: String,          // insert | update | delete
+    val primaryKeys: Map<String, String?> = emptyMap(),  // 主键值（update/delete 用）
+    val values: Map<String, String?> = emptyMap(),        // 新值（insert/update 用）
+    val oldValues: Map<String, String?> = emptyMap()      // 旧值（update 用于冲突检测）
+)
+
+@Serializable
+data class DataEditResult(
+    val success: Boolean,
+    val sqlStatements: List<String>,
+    val affectedRows: Int = 0,
+    val errors: List<String> = emptyList()
+)
+
