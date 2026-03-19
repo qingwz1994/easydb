@@ -19,6 +19,8 @@ export interface SelectedContext {
   connectionId: string
   database?: string
   table?: string
+  /** 选中分类节点时标识：tables / views / triggers */
+  category?: string
 }
 
 interface WorkbenchState {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef, useDeferredValue } from 'react'
+import React, { useEffect, useState, useCallback, useRef, useDeferredValue, useMemo } from 'react'
 import {
   Layout, Tree, Tabs, Table, Typography, Input, Space, Button, Tag, Tooltip, Select,
   theme, Card, Statistic, Row, Col,
@@ -21,6 +21,99 @@ import { useNavigate } from 'react-router-dom'
 
 const { Sider, Content } = Layout
 const { Text } = Typography
+
+/** 分类列表视图 — 独立组件，搜索状态局部化避免父组件重渲染 */
+const CategoryListView: React.FC<{
+  connectionId: string
+  database: string
+  category: string
+  objects: TableInfo[]
+  objectCategories: { key: string; label: string; types: string[]; icon: React.ReactNode }[]
+  onSelectObject: (name: string) => void
+}> = ({ database, category, objects, objectCategories, onSelectObject }) => {
+  const [search, setSearch] = useState('')
+  const deferredSearch = useDeferredValue(search)
+
+  const catDef = objectCategories.find((c) => c.key === category)
+  const categoryObjects = objects.filter((t) => catDef?.types.includes(t.type))
+  const filtered = deferredSearch
+    ? categoryObjects.filter(
+        (t) =>
+          t.name.toLowerCase().includes(deferredSearch.toLowerCase()) ||
+          (t.comment && t.comment.toLowerCase().includes(deferredSearch.toLowerCase()))
+      )
+    : categoryObjects
+
+  const catColumns =
+    category === 'tables'
+      ? [
+          { title: '表名', dataIndex: 'name', key: 'name', ellipsis: true,
+            render: (name: string) => <Text copyable={{ text: name }} style={{ fontSize: 13 }}>{name}</Text>,
+          },
+          { title: '注释', dataIndex: 'comment', key: 'comment', ellipsis: true,
+            render: (v: string) => v || <Text type="secondary">—</Text>,
+          },
+          { title: '行数(约)', dataIndex: 'rowCount', key: 'rowCount', width: 100,
+            render: (v: number) => (v != null ? v.toLocaleString() : '—'),
+          },
+          { title: '类型', dataIndex: 'type', key: 'type', width: 80,
+            render: (v: string) => <Tag>{v.toUpperCase()}</Tag>,
+          },
+        ]
+      : category === 'views'
+        ? [
+            { title: '视图名', dataIndex: 'name', key: 'name', ellipsis: true,
+              render: (name: string) => <Text copyable={{ text: name }} style={{ fontSize: 13 }}>{name}</Text>,
+            },
+            { title: '注释', dataIndex: 'comment', key: 'comment', ellipsis: true,
+              render: (v: string) => v || <Text type="secondary">—</Text>,
+            },
+          ]
+        : [
+            { title: '名称', dataIndex: 'name', key: 'name', ellipsis: true,
+              render: (name: string) => <Text style={{ fontSize: 13 }}>{name}</Text>,
+            },
+            { title: '类型', dataIndex: 'type', key: 'type', width: 100,
+              render: (v: string) => <Tag>{v.toUpperCase()}</Tag>,
+            },
+          ]
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', padding: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <Space>
+          <Text strong style={{ fontSize: 15 }}>
+            {catDef?.icon}
+            <span style={{ marginLeft: 6 }}>{database} / {catDef?.label} ({categoryObjects.length})</span>
+          </Text>
+        </Space>
+        <Input
+          placeholder="搜索名称或注释..."
+          prefix={<SearchOutlined />}
+          size="small"
+          style={{ width: 240 }}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          allowClear
+        />
+      </div>
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        <Table
+          dataSource={filtered}
+          columns={catColumns}
+          rowKey="name"
+          size="small"
+          pagination={filtered.length > 100 ? { pageSize: 100, showSizeChanger: true, showTotal: (t) => `共 ${t} 项` } : false}
+          scroll={{ y: 'calc(100vh - 200px)' }}
+          onRow={(record) => ({
+            onClick: () => onSelectObject(record.name),
+            style: { cursor: 'pointer' },
+          })}
+        />
+      </div>
+    </div>
+  )
+}
 
 export const WorkbenchPage: React.FC = () => {
   const { token } = theme.useToken()
@@ -162,11 +255,11 @@ export const WorkbenchPage: React.FC = () => {
   }, [selectedCtx, navigate, setPendingSql])
 
   // --- 对象分类 ---
-  const objectCategories: { key: string; label: string; types: string[]; icon: React.ReactNode }[] = [
+  const objectCategories = useMemo(() => [
     { key: 'tables', label: '表', types: ['table'], icon: <TableOutlined /> },
     { key: 'views', label: '视图', types: ['view'], icon: <EyeOutlined /> },
     { key: 'triggers', label: '触发器', types: ['trigger'], icon: <ThunderboltOutlined /> },
-  ]
+  ], [])
 
   // --- 构建多连接对象树 ---
   // key 编码规则：
@@ -175,7 +268,7 @@ export const WorkbenchPage: React.FC = () => {
   //   分类节点: "cat:{connId}:{dbName}:{catKey}"
   //   对象节点: "obj:{connId}:{dbName}:{objName}"
 
-  const treeData: DataNode[] = openConnections.map((conn) => {
+  const treeData: DataNode[] = useMemo(() => openConnections.map((conn) => {
     const connDbs = databasesMap[conn.id] || []
     const isLoading = loadingConns.has(conn.id)
 
@@ -203,7 +296,6 @@ export const WorkbenchPage: React.FC = () => {
               key: `cat:${conn.id}:${db.name}:${cat.key}`,
               title: `${cat.label} (${items.length})`,
               icon: cat.icon,
-              selectable: false,
               children: items.map((t) => ({
                 key: `obj:${conn.id}:${db.name}:${t.name}`,
                 title: (
@@ -248,7 +340,7 @@ export const WorkbenchPage: React.FC = () => {
       icon: <ApiOutlined style={{ color: token.colorPrimary }} />,
       children: isLoading ? [{ key: `loading:${conn.id}`, title: '加载中...', isLeaf: true, selectable: false }] : dbChildren,
     } as DataNode
-  })
+  }), [openConnections, databasesMap, objectsMap, loadingConns, deferredSearch, objectCategories, token, handleRemoveConnection])
 
   // --- 搜索时自动展开所有匹配的节点 ---
   const prevExpandedRef = useRef<React.Key[]>([])
@@ -318,8 +410,21 @@ export const WorkbenchPage: React.FC = () => {
       setActiveDatabase(dbName)
       setActiveTable(objName)
       loadTableDetail(connId, dbName, objName)
+    } else if (key.startsWith('cat:')) {
+      // 选中分类节点: "cat:{connId}:{dbName}:{catKey}"
+      const parts = key.slice(4).split(':')
+      const connId = parts[0]
+      const dbName = parts[1]
+      const catKey = parts.slice(2).join(':')
+      const conn = openConnections.find((c) => c.id === connId)
+      setSelectedCtx({ connectionId: connId, database: dbName, category: catKey })
+      setActiveConnection(connId, conn?.name ?? null)
+      setActiveDatabase(dbName)
+      setColumns([])
+      setIndexes([])
+      setDdl('')
+      setPreviewRows([])
     }
-    // cat: 分类节点不做选中
   }
 
   // --- 树节点展开 ---
@@ -402,9 +507,11 @@ export const WorkbenchPage: React.FC = () => {
   const selectedTreeKeys: React.Key[] = selectedCtx
     ? (selectedCtx.table && selectedCtx.database
       ? [`obj:${selectedCtx.connectionId}:${selectedCtx.database}:${selectedCtx.table}`]
-      : selectedCtx.database
-        ? [`db:${selectedCtx.connectionId}:${selectedCtx.database}`]
-        : [`conn:${selectedCtx.connectionId}`]
+      : selectedCtx.category && selectedCtx.database
+        ? [`cat:${selectedCtx.connectionId}:${selectedCtx.database}:${selectedCtx.category}`]
+        : selectedCtx.database
+          ? [`db:${selectedCtx.connectionId}:${selectedCtx.database}`]
+          : [`conn:${selectedCtx.connectionId}`]
     )
     : []
 
@@ -644,6 +751,19 @@ export const WorkbenchPage: React.FC = () => {
               ]}
             />
           </div>
+        ) : selectedCtx?.category && selectedCtx?.database ? (
+          <CategoryListView
+            connectionId={selectedCtx.connectionId}
+            database={selectedCtx.database!}
+            category={selectedCtx.category!}
+            objects={objectsMap[`${selectedCtx.connectionId}::${selectedCtx.database}`] || []}
+            objectCategories={objectCategories}
+            onSelectObject={(name) => {
+              setSelectedCtx({ connectionId: selectedCtx.connectionId, database: selectedCtx.database, table: name })
+              setActiveTable(name)
+              loadTableDetail(selectedCtx.connectionId, selectedCtx.database!, name)
+            }}
+          />
         ) : selectedCtx?.database ? (
           /* 数据库级概览 */
           <div style={{ padding: 24 }}>
