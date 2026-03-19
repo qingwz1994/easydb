@@ -1,12 +1,12 @@
 import React, { useEffect, useState, useCallback, useRef, useDeferredValue, useMemo } from 'react'
 import {
   Layout, Tree, Tabs, Table, Typography, Input, Space, Button, Tag, Tooltip, Select,
-  theme, Card, Statistic, Row, Col,
+  theme, Card, Statistic, Row, Col, Breadcrumb,
 } from 'antd'
 import {
   DatabaseOutlined, TableOutlined, EyeOutlined,
   SearchOutlined, CodeOutlined, ThunderboltOutlined, ReloadOutlined,
-  ApiOutlined, CloseOutlined, PlusOutlined,
+  ApiOutlined, CloseOutlined, PlusOutlined, LeftOutlined,
 } from '@ant-design/icons'
 import type { DataNode } from 'antd/es/tree'
 import type { DatabaseInfo, TableInfo, ColumnInfo, IndexInfo, ConnectionConfig } from '@/types'
@@ -630,24 +630,76 @@ export const WorkbenchPage: React.FC = () => {
                 overflow: hidden;
               }
             `}</style>
-            {/* 固定头部：表名 + 按钮 */}
+            {/* 固定头部：面包屑导航 + 按钮 */}
             <div style={{ padding: '12px 16px 0 16px', flexShrink: 0 }}>
-              <Space style={{ marginBottom: 8 }}>
-                <Text strong>
-                  <TableOutlined style={{ marginRight: 4 }} />
-                  {selectedCtx.database}.{selectedCtx.table}
-                </Text>
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  ({openConnections.find((c) => c.id === selectedCtx.connectionId)?.name})
-                </Text>
-                <Button
-                  size="small"
-                  icon={<CodeOutlined />}
-                  onClick={() => openSqlEditor()}
-                >
-                  打开 SQL 编辑器
-                </Button>
-              </Space>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <Space>
+                  <LeftOutlined
+                    style={{ fontSize: 12, color: token.colorTextSecondary, cursor: 'pointer' }}
+                    onClick={() => {
+                      // 回到分类列表：根据当前表类型确定分类
+                      const objKey = `${selectedCtx.connectionId}::${selectedCtx.database}`
+                      const obj = (objectsMap[objKey] || []).find((t) => t.name === selectedCtx.table)
+                      const catKey = obj?.type === 'view' ? 'views' : obj?.type === 'trigger' ? 'triggers' : 'tables'
+                      setSelectedCtx({ connectionId: selectedCtx.connectionId, database: selectedCtx.database, category: catKey })
+                    }}
+                  />
+                  <Breadcrumb
+                    separator="/"
+                    items={[
+                      {
+                        title: (
+                          <span
+                            style={{ cursor: 'pointer', color: token.colorTextSecondary }}
+                            onClick={() => setSelectedCtx({ connectionId: selectedCtx.connectionId, database: selectedCtx.database })}
+                          >
+                            <DatabaseOutlined style={{ marginRight: 4 }} />
+                            {selectedCtx.database}
+                          </span>
+                        ),
+                      },
+                      {
+                        title: (() => {
+                          const objKey = `${selectedCtx.connectionId}::${selectedCtx.database}`
+                          const objs = objectsMap[objKey] || []
+                          const obj = objs.find((t) => t.name === selectedCtx.table)
+                          const catKey = obj?.type === 'view' ? 'views' : obj?.type === 'trigger' ? 'triggers' : 'tables'
+                          const catDef = objectCategories.find((c) => c.key === catKey)
+                          const count = objs.filter((t) => catDef?.types.includes(t.type)).length
+                          return (
+                            <span
+                              style={{ cursor: 'pointer', color: token.colorTextSecondary }}
+                              onClick={() => setSelectedCtx({ connectionId: selectedCtx.connectionId, database: selectedCtx.database, category: catKey })}
+                            >
+                              {catDef?.icon}
+                              <span style={{ marginLeft: 4 }}>{catDef?.label} ({count})</span>
+                            </span>
+                          )
+                        })(),
+                      },
+                      {
+                        title: (
+                          <Text strong style={{ fontSize: 13 }}>
+                            {selectedCtx.table}
+                          </Text>
+                        ),
+                      },
+                    ]}
+                  />
+                </Space>
+                <Space size={8}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    ({openConnections.find((c) => c.id === selectedCtx.connectionId)?.name})
+                  </Text>
+                  <Button
+                    size="small"
+                    icon={<CodeOutlined />}
+                    onClick={() => openSqlEditor()}
+                  >
+                    打开 SQL 编辑器
+                  </Button>
+                </Space>
+              </div>
             </div>
 
             {/* Tabs */}
