@@ -34,7 +34,7 @@ export const ConnectionPage: React.FC = () => {
   const addConnection = useConnectionStore((s) => s.addConnection)
   const updateConnection = useConnectionStore((s) => s.updateConnection)
   const removeConnection = useConnectionStore((s) => s.removeConnection)
-  const setActiveConnection = useWorkbenchStore((s) => s.setActiveConnection)
+  const addOpenConnection = useWorkbenchStore((s) => s.addOpenConnection)
 
   // Local state
   const [loading, setLoading] = useState(false)
@@ -147,7 +147,7 @@ export const ConnectionPage: React.FC = () => {
     try {
       await connectionApi.open(conn.id)
       updateConnection(conn.id, { status: 'connected' })
-      setActiveConnection(conn.id, conn.name)
+      addOpenConnection(conn.id, conn.name)
       toast.success(`已连接到「${conn.name}」`)
       navigate('/workbench')
     } catch (e) {
@@ -451,7 +451,7 @@ export const ConnectionPage: React.FC = () => {
               {selectedConn.status === 'connected' ? (
                 <>
                   <Button block size="small" type="primary" onClick={() => {
-                    setActiveConnection(selectedConn.id, selectedConn.name)
+                    addOpenConnection(selectedConn.id, selectedConn.name)
                     navigate('/workbench')
                   }}>
                     进入工作台

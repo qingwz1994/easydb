@@ -1,18 +1,20 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import {
-  Layout, Tree, Tabs, Table, Typography, Input, Space, Button, Tag, Tooltip,
-  theme, Spin, Card, Statistic, Row, Col,
+  Layout, Tree, Tabs, Table, Typography, Input, Space, Button, Tag, Tooltip, Select,
+  theme, Card, Statistic, Row, Col,
 } from 'antd'
 import {
   DatabaseOutlined, TableOutlined, EyeOutlined,
   SearchOutlined, CodeOutlined, ThunderboltOutlined, ReloadOutlined,
+  ApiOutlined, CloseOutlined, PlusOutlined,
 } from '@ant-design/icons'
 import type { DataNode } from 'antd/es/tree'
-import type { DatabaseInfo, TableInfo, ColumnInfo, IndexInfo } from '@/types'
+import type { DatabaseInfo, TableInfo, ColumnInfo, IndexInfo, ConnectionConfig } from '@/types'
 import { useWorkbenchStore } from '@/stores/workbenchStore'
+import { useConnectionStore } from '@/stores/connectionStore'
 import { useSqlEditorStore } from '@/stores/sqlEditorStore'
-import { metadataApi } from '@/services/api'
-import { handleApiError } from '@/utils/notification'
+import { metadataApi, connectionApi } from '@/services/api'
+import { handleApiError, toast } from '@/utils/notification'
 import { EmptyState } from '@/components/EmptyState'
 import { EditableDataTable } from '@/components/EditableDataTable'
 import { useNavigate } from 'react-router-dom'
@@ -20,72 +22,102 @@ import { useNavigate } from 'react-router-dom'
 const { Sider, Content } = Layout
 const { Text } = Typography
 
+// 当前选中的上下文
+interface SelectedContext {
+  connectionId: string
+  database?: string
+  table?: string
+}
+
 export const WorkbenchPage: React.FC = () => {
   const { token } = theme.useToken()
   const navigate = useNavigate()
 
-  const activeConnectionId = useWorkbenchStore((s) => s.activeConnectionId)
-  const activeConnectionName = useWorkbenchStore((s) => s.activeConnectionName)
-  const activeDatabase = useWorkbenchStore((s) => s.activeDatabase)
-  const activeTable = useWorkbenchStore((s) => s.activeTable)
+  // --- Store ---
+  const openConnections = useWorkbenchStore((s) => s.openConnections)
+  const addOpenConnection = useWorkbenchStore((s) => s.addOpenConnection)
+  const removeOpenConnection = useWorkbenchStore((s) => s.removeOpenConnection)
+  const setActiveConnection = useWorkbenchStore((s) => s.setActiveConnection)
   const setActiveDatabase = useWorkbenchStore((s) => s.setActiveDatabase)
   const setActiveTable = useWorkbenchStore((s) => s.setActiveTable)
 
-  const [databases, setDatabases] = useState<DatabaseInfo[]>([])
+  const connections = useConnectionStore((s) => s.connections)
+  const setConnections = useConnectionStore((s) => s.setConnections)
+  const updateConnection = useConnectionStore((s) => s.updateConnection)
+
+  // --- Local state ---
+  // per-connection databases: connId → DatabaseInfo[]
+  const [databasesMap, setDatabasesMap] = useState<Record<string, DatabaseInfo[]>>({})
+  // per-connection+db objects: "connId::dbName" → TableInfo[]
   const [objectsMap, setObjectsMap] = useState<Record<string, TableInfo[]>>({})
+  // Detail state for selected table
   const [columns, setColumns] = useState<ColumnInfo[]>([])
   const [indexes, setIndexes] = useState<IndexInfo[]>([])
   const [ddl, setDdl] = useState('')
   const [previewRows, setPreviewRows] = useState<Record<string, unknown>[]>([])
-  const [loading, setLoading] = useState(false)
+  const [loadingConns, setLoadingConns] = useState<Set<string>>(new Set())
   const [searchText, setSearchText] = useState('')
-
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([])
+
+  // 当前选中的上下文
+  const [selectedCtx, setSelectedCtx] = useState<SelectedContext | null>(null)
 
   const setPendingSql = useSqlEditorStore((s) => s.setPendingSql)
 
-  // 打开 SQL 编辑器并带入当前上下文
-  const openSqlEditor = useCallback(() => {
-    setPendingSql('', activeConnectionId ?? undefined, activeDatabase ?? undefined)
-    navigate('/sql-editor')
-  }, [activeConnectionId, activeDatabase, navigate, setPendingSql])
+  // --- 自动加载连接列表 ---
+  useEffect(() => {
+    if (connections.length === 0) {
+      connectionApi.list().then((list) => {
+        setConnections(list as ConnectionConfig[])
+      }).catch(() => {})
+    }
+  }, [connections.length, setConnections])
 
-  // 加载数据库列表
-  const loadDatabases = useCallback(async () => {
-    if (!activeConnectionId) return
-    setLoading(true)
+  // --- 加载某个连接的数据库列表 ---
+  const loadDatabases = useCallback(async (connId: string) => {
+    setLoadingConns((prev) => new Set(prev).add(connId))
     try {
-      const dbs = await metadataApi.databases(activeConnectionId) as DatabaseInfo[]
-      setDatabases(dbs)
+      const dbs = await metadataApi.databases(connId) as DatabaseInfo[]
+      setDatabasesMap((prev) => ({ ...prev, [connId]: dbs }))
     } catch (e) {
       handleApiError(e, '加载数据库列表失败')
     } finally {
-      setLoading(false)
+      setLoadingConns((prev) => {
+        const next = new Set(prev)
+        next.delete(connId)
+        return next
+      })
     }
-  }, [activeConnectionId])
+  }, [])
 
-  useEffect(() => { loadDatabases() }, [loadDatabases])
+  // 当 openConnections 变化时，自动加载新增连接的数据库列表
+  useEffect(() => {
+    for (const conn of openConnections) {
+      if (!databasesMap[conn.id]) {
+        loadDatabases(conn.id)
+      }
+    }
+  }, [openConnections, databasesMap, loadDatabases])
 
-  // 选中数据库时加载对象
-  const loadTables = useCallback(async (dbName: string) => {
-    if (!activeConnectionId) return
+  // --- 加载某库下的对象列表 ---
+  const loadTables = useCallback(async (connId: string, dbName: string) => {
+    const key = `${connId}::${dbName}`
     try {
-      const tbls = await metadataApi.objects(activeConnectionId, dbName) as TableInfo[]
-      setObjectsMap((prev) => ({ ...prev, [dbName]: tbls }))
+      const tbls = await metadataApi.objects(connId, dbName) as TableInfo[]
+      setObjectsMap((prev) => ({ ...prev, [key]: tbls }))
     } catch (e) {
       handleApiError(e, '加载对象列表失败')
     }
-  }, [activeConnectionId])
+  }, [])
 
-  // 选中表时加载详情
-  const loadTableDetail = useCallback(async (dbName: string, tableName: string) => {
-    if (!activeConnectionId) return
+  // --- 加载表详情 ---
+  const loadTableDetail = useCallback(async (connId: string, dbName: string, tableName: string) => {
     try {
       const [def, idxs, rows, ddlStr] = await Promise.all([
-        metadataApi.tableDefinition(activeConnectionId, dbName, tableName) as Promise<{ columns: ColumnInfo[] }>,
-        metadataApi.indexes(activeConnectionId, dbName, tableName) as Promise<IndexInfo[]>,
-        metadataApi.previewRows(activeConnectionId, dbName, tableName) as Promise<Record<string, unknown>[]>,
-        metadataApi.ddl(activeConnectionId, dbName, tableName) as Promise<string>,
+        metadataApi.tableDefinition(connId, dbName, tableName) as Promise<{ columns: ColumnInfo[] }>,
+        metadataApi.indexes(connId, dbName, tableName) as Promise<IndexInfo[]>,
+        metadataApi.previewRows(connId, dbName, tableName) as Promise<Record<string, unknown>[]>,
+        metadataApi.ddl(connId, dbName, tableName) as Promise<string>,
       ])
       setColumns(def.columns || [])
       setIndexes(idxs)
@@ -94,84 +126,215 @@ export const WorkbenchPage: React.FC = () => {
     } catch (e) {
       handleApiError(e, '加载表详情失败')
     }
-  }, [activeConnectionId])
+  }, [])
 
-  // 对象类型分类配置
+  // --- 添加连接到工作台 ---
+  const handleAddConnection = useCallback(async (connId: string) => {
+    const conn = connections.find((c) => c.id === connId)
+    if (!conn) return
+
+    // 未连接的自动连接
+    if (conn.status !== 'connected') {
+      try {
+        await connectionApi.open(conn.id)
+        updateConnection(conn.id, { status: 'connected' })
+        toast.success(`已连接到「${conn.name}」`)
+      } catch (e) {
+        handleApiError(e, '连接失败')
+        return
+      }
+    }
+    addOpenConnection(conn.id, conn.name)
+  }, [connections, updateConnection, addOpenConnection])
+
+  // --- 从工作台移除连接 ---
+  const handleRemoveConnection = useCallback((connId: string) => {
+    removeOpenConnection(connId)
+    // 清理相关缓存
+    setDatabasesMap((prev) => {
+      const next = { ...prev }
+      delete next[connId]
+      return next
+    })
+    setObjectsMap((prev) => {
+      const next = { ...prev }
+      for (const k of Object.keys(next)) {
+        if (k.startsWith(`${connId}::`)) delete next[k]
+      }
+      return next
+    })
+    // 清理选中上下文
+    if (selectedCtx?.connectionId === connId) {
+      setSelectedCtx(null)
+      setColumns([])
+      setIndexes([])
+      setDdl('')
+      setPreviewRows([])
+    }
+  }, [removeOpenConnection, selectedCtx])
+
+  // --- 打开 SQL 编辑器 ---
+  const openSqlEditor = useCallback(() => {
+    const connId = selectedCtx?.connectionId ?? undefined
+    const db = selectedCtx?.database ?? undefined
+    setPendingSql('', connId, db)
+    navigate('/sql-editor')
+  }, [selectedCtx, navigate, setPendingSql])
+
+  // --- 对象分类 ---
   const objectCategories: { key: string; label: string; types: string[]; icon: React.ReactNode }[] = [
     { key: 'tables', label: '表', types: ['table'], icon: <TableOutlined /> },
     { key: 'views', label: '视图', types: ['view'], icon: <EyeOutlined /> },
     { key: 'triggers', label: '触发器', types: ['trigger'], icon: <ThunderboltOutlined /> },
   ]
 
-  const treeData: DataNode[] = databases
-    .map((db) => {
-      // 从 objectsMap 中获取该数据库的对象列表
-      const dbObjects = objectsMap[db.name] || []
+  // --- 构建多连接对象树 ---
+  // key 编码规则：
+  //   连接节点: "conn:{connId}"
+  //   数据库节点: "db:{connId}:{dbName}"
+  //   分类节点: "cat:{connId}:{dbName}:{catKey}"
+  //   对象节点: "obj:{connId}:{dbName}:{objName}"
 
-      const categoryChildren: DataNode[] = objectCategories
-        .map((cat) => {
-          const items = dbObjects.filter(
-            (t) => cat.types.includes(t.type)
-              && (!searchText || t.name.toLowerCase().includes(searchText.toLowerCase()))
-          )
-          return {
-            key: `${db.name}::${cat.key}`,
-            title: `${cat.label} (${items.length})`,
-            icon: cat.icon,
-            selectable: false,
-            children: items.map((t) => ({
-              key: `${db.name}.${t.name}`,
-              title: (
-                <Tooltip title={t.name} mouseEnterDelay={0.5}>
-                  <span>{t.name}</span>
-                </Tooltip>
-              ),
-              icon: t.type === 'view' ? <EyeOutlined /> : t.type === 'trigger' ? <ThunderboltOutlined /> : <TableOutlined />,
-              isLeaf: true,
-            })),
-          } as DataNode
-        })
-        .filter((cat) => {
-          // 搜索时只保留有匹配对象的分类
-          return !searchText || (cat.children && cat.children.length > 0)
-        })
+  const treeData: DataNode[] = openConnections.map((conn) => {
+    const connDbs = databasesMap[conn.id] || []
+    const isLoading = loadingConns.has(conn.id)
 
-      return {
-        key: db.name,
-        title: db.name,
-        icon: <DatabaseOutlined />,
-        children: categoryChildren,
-      }
-    })
-    .filter((db) => {
-      const dbMatch = db.key.toString().toLowerCase().includes(searchText.toLowerCase())
-      const hasMatchingChild = db.children.some((cat: DataNode) => cat.children && cat.children.length > 0)
-      return !searchText || dbMatch || hasMatchingChild
-    })
+    const dbChildren: DataNode[] = connDbs
+      .filter((db) => !searchText || db.name.toLowerCase().includes(searchText.toLowerCase()))
+      .map((db) => {
+        const objKey = `${conn.id}::${db.name}`
+        const dbObjects = objectsMap[objKey] || []
 
+        const categoryChildren: DataNode[] = objectCategories
+          .map((cat) => {
+            const items = dbObjects.filter(
+              (t) => cat.types.includes(t.type)
+                && (!searchText || t.name.toLowerCase().includes(searchText.toLowerCase()))
+            )
+            return {
+              key: `cat:${conn.id}:${db.name}:${cat.key}`,
+              title: `${cat.label} (${items.length})`,
+              icon: cat.icon,
+              selectable: false,
+              children: items.map((t) => ({
+                key: `obj:${conn.id}:${db.name}:${t.name}`,
+                title: (
+                  <Tooltip title={t.name} mouseEnterDelay={0.5}>
+                    <span>{t.name}</span>
+                  </Tooltip>
+                ),
+                icon: t.type === 'view' ? <EyeOutlined /> : t.type === 'trigger' ? <ThunderboltOutlined /> : <TableOutlined />,
+                isLeaf: true,
+              })),
+            } as DataNode
+          })
+          .filter((cat) => !searchText || (cat.children && cat.children.length > 0))
+
+        return {
+          key: `db:${conn.id}:${db.name}`,
+          title: db.name,
+          icon: <DatabaseOutlined />,
+          children: categoryChildren,
+        } as DataNode
+      })
+
+    return {
+      key: `conn:${conn.id}`,
+      title: (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', paddingRight: 4 }}>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+            {conn.name}
+          </span>
+          <Tooltip title="从工作台移除">
+            <CloseOutlined
+              style={{ fontSize: 11, color: token.colorTextQuaternary, flexShrink: 0, marginLeft: 4 }}
+              onClick={(e) => {
+                e.stopPropagation()
+                handleRemoveConnection(conn.id)
+              }}
+            />
+          </Tooltip>
+        </div>
+      ),
+      icon: <ApiOutlined style={{ color: token.colorPrimary }} />,
+      children: isLoading ? [{ key: `loading:${conn.id}`, title: '加载中...', isLeaf: true, selectable: false }] : dbChildren,
+    } as DataNode
+  })
+
+  // --- 树节点选中 ---
   const handleTreeSelect = (_: React.Key[], info: { node: DataNode }) => {
-    const key = info.node.key as string
-    // 分类节点（如 dbName::tables）不做选中操作
-    if (key.includes('::')) return
-    if (key.includes('.')) {
-      // 选中具体对象
-      const [db, objName] = key.split('.')
-      setActiveDatabase(db)
+    const key = String(info.node.key)
+
+    if (key.startsWith('conn:')) {
+      // 选中连接节点
+      const connId = key.slice(5)
+      const conn = openConnections.find((c) => c.id === connId)
+      setSelectedCtx({ connectionId: connId })
+      setActiveConnection(connId, conn?.name ?? null)
+      setColumns([])
+      setIndexes([])
+      setDdl('')
+      setPreviewRows([])
+    } else if (key.startsWith('db:')) {
+      // 选中数据库节点: "db:{connId}:{dbName}"
+      const parts = key.slice(3).split(':')
+      const connId = parts[0]
+      const dbName = parts.slice(1).join(':')
+      const conn = openConnections.find((c) => c.id === connId)
+      setSelectedCtx({ connectionId: connId, database: dbName })
+      setActiveConnection(connId, conn?.name ?? null)
+      setActiveDatabase(dbName)
+      loadTables(connId, dbName)
+      setColumns([])
+      setIndexes([])
+      setDdl('')
+      setPreviewRows([])
+    } else if (key.startsWith('obj:')) {
+      // 选中对象节点: "obj:{connId}:{dbName}:{objName}"
+      const parts = key.slice(4).split(':')
+      const connId = parts[0]
+      const dbName = parts[1]
+      const objName = parts.slice(2).join(':')
+      const conn = openConnections.find((c) => c.id === connId)
+      setSelectedCtx({ connectionId: connId, database: dbName, table: objName })
+      setActiveConnection(connId, conn?.name ?? null)
+      setActiveDatabase(dbName)
       setActiveTable(objName)
-      loadTableDetail(db, objName)
-    } else {
-      // 选中数据库
-      setActiveDatabase(key)
-      setActiveTable(null)
-      loadTables(key)
-      // 选中时自动展开
-      if (!expandedKeys.includes(key)) {
-        setExpandedKeys((prev) => [...prev, key])
+      loadTableDetail(connId, dbName, objName)
+    }
+    // cat: 分类节点不做选中
+  }
+
+  // --- 树节点展开 ---
+  const handleTreeExpand = (keys: React.Key[], info: { node: DataNode; expanded: boolean }) => {
+    setExpandedKeys(keys)
+    const key = String(info.node.key)
+    if (info.expanded) {
+      if (key.startsWith('conn:')) {
+        // 展开连接节点时加载数据库列表
+        const connId = key.slice(5)
+        if (!databasesMap[connId]) {
+          loadDatabases(connId)
+        }
+      } else if (key.startsWith('db:')) {
+        // 展开数据库节点时加载表列表
+        const parts = key.slice(3).split(':')
+        const connId = parts[0]
+        const dbName = parts.slice(1).join(':')
+        const objKey = `${connId}::${dbName}`
+        if (!objectsMap[objKey]) {
+          loadTables(connId, dbName)
+        }
       }
     }
   }
 
-  // 表结构列定义
+  // 可添加的连接列表（排除已在工作台中的）
+  const availableConnections = connections.filter(
+    (c) => !openConnections.some((o) => o.id === c.id)
+  )
+
+  // --- 表结构列定义 ---
   const columnTableColumns = [
     { title: '字段名', dataIndex: 'name', key: 'name', width: 160 },
     { title: '类型', dataIndex: 'type', key: 'type', width: 140 },
@@ -218,26 +381,27 @@ export const WorkbenchPage: React.FC = () => {
     },
   ]
 
-  if (!activeConnectionId) {
-    return (
-      <EmptyState
-        description="请先在「连接管理」中打开一个连接"
-        actionText="前往连接管理"
-        onAction={() => navigate('/connection')}
-      />
+  // 当前选中节点的 tree key
+  const selectedTreeKeys: React.Key[] = selectedCtx
+    ? (selectedCtx.table && selectedCtx.database
+      ? [`obj:${selectedCtx.connectionId}:${selectedCtx.database}:${selectedCtx.table}`]
+      : selectedCtx.database
+        ? [`db:${selectedCtx.connectionId}:${selectedCtx.database}`]
+        : [`conn:${selectedCtx.connectionId}`]
     )
-  }
-
+    : []
 
   return (
     <Layout style={{ height: '100%' }}>
       {/* 左侧对象树 */}
       <Sider
-        width={260}
+        width={280}
         style={{
           background: token.colorBgContainer,
           borderRight: `1px solid ${token.colorBorderSecondary}`,
           overflow: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
         }}
       >
         <style>{`
@@ -248,7 +412,7 @@ export const WorkbenchPage: React.FC = () => {
           .workbench-object-tree .ant-tree-title {
             display: inline-block;
             vertical-align: middle;
-            max-width: calc(100% - 24px); /* 减去图标的宽度 */
+            max-width: calc(100% - 24px);
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -262,10 +426,29 @@ export const WorkbenchPage: React.FC = () => {
         `}</style>
         <div style={{ padding: '12px 12px 8px' }}>
           <Space style={{ marginBottom: 8, width: '100%' }} direction="vertical" size={8}>
-            <Text strong style={{ fontSize: 13 }}>
-              <DatabaseOutlined style={{ marginRight: 4 }} />
-              {activeConnectionName ?? '对象浏览'}
-            </Text>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <Select
+                size="small"
+                style={{ flex: 1 }}
+                placeholder="添加连接..."
+                value={undefined}
+                onChange={handleAddConnection}
+                options={availableConnections.map((c) => ({
+                  label: (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+                      {c.status !== 'connected' && (
+                        <span style={{ fontSize: 11, color: token.colorTextQuaternary, marginLeft: 4, flexShrink: 0 }}>未连接</span>
+                      )}
+                    </div>
+                  ),
+                  value: c.id,
+                }))}
+                listHeight={320}
+                suffixIcon={<PlusOutlined />}
+                notFoundContent={<Text type="secondary" style={{ fontSize: 12 }}>所有连接已添加</Text>}
+              />
+            </div>
             <Input
               placeholder="搜索数据库或对象..."
               prefix={<SearchOutlined />}
@@ -274,32 +457,33 @@ export const WorkbenchPage: React.FC = () => {
               onChange={(e) => setSearchText(e.target.value)}
               allowClear
             />
-
           </Space>
         </div>
-        <Spin spinning={loading}>
-          <Tree
-            className="workbench-object-tree"
-            treeData={treeData}
-            showIcon
-            blockNode
-            onSelect={handleTreeSelect}
-            selectedKeys={activeTable && activeDatabase ? [`${activeDatabase}.${activeTable}`] : activeDatabase ? [activeDatabase] : []}
-            expandedKeys={expandedKeys}
-            onExpand={(keys, { node, expanded }) => {
-              setExpandedKeys(keys)
-              // 新展开数据库节点时预加载表
-              if (expanded && !String(node.key).includes('.')) {
-                loadTables(String(node.key))
-              }
-            }}
-          />
-        </Spin>
+        <div style={{ flex: 1, overflow: 'auto' }}>
+          {openConnections.length === 0 ? (
+            <div style={{ padding: '24px 12px', textAlign: 'center' }}>
+              <Text type="secondary" style={{ fontSize: 13 }}>
+                从上方下拉框添加连接
+              </Text>
+            </div>
+          ) : (
+            <Tree
+              className="workbench-object-tree"
+              treeData={treeData}
+              showIcon
+              blockNode
+              onSelect={handleTreeSelect}
+              selectedKeys={selectedTreeKeys}
+              expandedKeys={expandedKeys}
+              onExpand={handleTreeExpand}
+            />
+          )}
+        </div>
       </Sider>
 
       {/* 右侧详情区 */}
       <Content style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', background: token.colorBgLayout }}>
-        {activeTable && activeDatabase ? (
+        {selectedCtx?.table && selectedCtx?.database ? (
           <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
             <style>{`
               .workbench-detail-tabs.ant-tabs {
@@ -327,7 +511,10 @@ export const WorkbenchPage: React.FC = () => {
               <Space style={{ marginBottom: 8 }}>
                 <Text strong>
                   <TableOutlined style={{ marginRight: 4 }} />
-                  {activeDatabase}.{activeTable}
+                  {selectedCtx.database}.{selectedCtx.table}
+                </Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  ({openConnections.find((c) => c.id === selectedCtx.connectionId)?.name})
                 </Text>
                 <Button
                   size="small"
@@ -339,7 +526,7 @@ export const WorkbenchPage: React.FC = () => {
               </Space>
             </div>
 
-            {/* Tabs：导航固定，内容区填充剩余空间 */}
+            {/* Tabs */}
             <Tabs
               className="workbench-detail-tabs"
               size="small"
@@ -372,15 +559,15 @@ export const WorkbenchPage: React.FC = () => {
                           {previewRows.length > 0 ? `共 ${previewRows.length} 行` : ''}
                         </Text>
                       </div>
-                      {activeConnectionId && activeDatabase && activeTable ? (
+                      {selectedCtx.connectionId && selectedCtx.database && selectedCtx.table ? (
                         <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
                           <EditableDataTable
-                            connectionId={activeConnectionId}
-                            database={activeDatabase}
-                            tableName={activeTable}
+                            connectionId={selectedCtx.connectionId}
+                            database={selectedCtx.database}
+                            tableName={selectedCtx.table}
                             columns={columns}
                             dataSource={previewRows}
-                            onRefresh={() => loadTableDetail(activeDatabase, activeTable)}
+                            onRefresh={() => loadTableDetail(selectedCtx.connectionId, selectedCtx.database!, selectedCtx.table!)}
                           />
                         </div>
                       ) : (
@@ -440,14 +627,17 @@ export const WorkbenchPage: React.FC = () => {
               ]}
             />
           </div>
-        ) : activeDatabase ? (
+        ) : selectedCtx?.database ? (
           /* 数据库级概览 */
           <div style={{ padding: 24 }}>
             <Space direction="vertical" size={16} style={{ width: '100%' }}>
               <Space>
                 <Text strong style={{ fontSize: 16 }}>
                   <DatabaseOutlined style={{ marginRight: 6 }} />
-                  {activeDatabase}
+                  {selectedCtx.database}
+                </Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  ({openConnections.find((c) => c.id === selectedCtx.connectionId)?.name})
                 </Text>
                 <Button
                   size="small"
@@ -458,68 +648,76 @@ export const WorkbenchPage: React.FC = () => {
                 </Button>
               </Space>
 
-              <Row gutter={16}>
-                <Col span={6}>
-                  <Card size="small">
-                    <Statistic
-                      title="表"
-                      value={(objectsMap[activeDatabase] || []).filter((t) => t.type === 'table').length}
-                      valueStyle={{ color: token.colorPrimary }}
-                      prefix={<TableOutlined />}
-                    />
-                  </Card>
-                </Col>
-                <Col span={6}>
-                  <Card size="small">
-                    <Statistic
-                      title="视图"
-                      value={(objectsMap[activeDatabase] || []).filter((t) => t.type === 'view').length}
-                      valueStyle={{ color: token.colorInfo }}
-                      prefix={<EyeOutlined />}
-                    />
-                  </Card>
-                </Col>
-                <Col span={6}>
-                  <Card size="small">
-                    <Statistic
-                      title="触发器"
-                      value={(objectsMap[activeDatabase] || []).filter((t) => t.type === 'trigger').length}
-                      valueStyle={{ color: token.colorWarning }}
-                      prefix={<ThunderboltOutlined />}
-                    />
-                  </Card>
-                </Col>
-                <Col span={6}>
-                  <Card size="small">
-                    <Statistic
-                      title="对象总数"
-                      value={(objectsMap[activeDatabase] || []).length}
-                    />
-                  </Card>
-                </Col>
-              </Row>
+              {(() => {
+                const objKey = `${selectedCtx.connectionId}::${selectedCtx.database}`
+                const dbObjects = objectsMap[objKey] || []
+                return (
+                  <>
+                    <Row gutter={16}>
+                      <Col span={6}>
+                        <Card size="small">
+                          <Statistic
+                            title="表"
+                            value={dbObjects.filter((t) => t.type === 'table').length}
+                            valueStyle={{ color: token.colorPrimary }}
+                            prefix={<TableOutlined />}
+                          />
+                        </Card>
+                      </Col>
+                      <Col span={6}>
+                        <Card size="small">
+                          <Statistic
+                            title="视图"
+                            value={dbObjects.filter((t) => t.type === 'view').length}
+                            valueStyle={{ color: token.colorInfo }}
+                            prefix={<EyeOutlined />}
+                          />
+                        </Card>
+                      </Col>
+                      <Col span={6}>
+                        <Card size="small">
+                          <Statistic
+                            title="触发器"
+                            value={dbObjects.filter((t) => t.type === 'trigger').length}
+                            valueStyle={{ color: token.colorWarning }}
+                            prefix={<ThunderboltOutlined />}
+                          />
+                        </Card>
+                      </Col>
+                      <Col span={6}>
+                        <Card size="small">
+                          <Statistic
+                            title="对象总数"
+                            value={dbObjects.length}
+                          />
+                        </Card>
+                      </Col>
+                    </Row>
 
-              {(objectsMap[activeDatabase] || []).length === 0 ? (
-                <EmptyState description="当前数据库下无对象" />
-              ) : (
-                <Card size="small" title="快捷操作">
-                  <Space>
-                    <Button
-                      icon={<CodeOutlined />}
-                      onClick={() => openSqlEditor()}
-                    >
-                      打开 SQL 编辑器
-                    </Button>
-                    <Button icon={<ReloadOutlined />} onClick={() => loadTables(activeDatabase)}>
-                      刷新对象列表
-                    </Button>
-                  </Space>
-                </Card>
-              )}
+                    {dbObjects.length === 0 ? (
+                      <EmptyState description="当前数据库下无对象" />
+                    ) : (
+                      <Card size="small" title="快捷操作">
+                        <Space>
+                          <Button
+                            icon={<CodeOutlined />}
+                            onClick={() => openSqlEditor()}
+                          >
+                            打开 SQL 编辑器
+                          </Button>
+                          <Button icon={<ReloadOutlined />} onClick={() => loadTables(selectedCtx.connectionId, selectedCtx.database!)}>
+                            刷新对象列表
+                          </Button>
+                        </Space>
+                      </Card>
+                    )}
+                  </>
+                )
+              })()}
             </Space>
           </div>
         ) : (
-          <EmptyState description="选择左侧对象树中的数据库或表以查看详情" />
+          <EmptyState description={openConnections.length === 0 ? '从左侧添加连接开始浏览' : '选择左侧对象树中的数据库或表以查看详情'} />
         )}
       </Content>
     </Layout>
