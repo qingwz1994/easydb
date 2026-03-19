@@ -5,7 +5,7 @@ import {
 } from 'antd'
 import {
   PlayCircleOutlined, ClearOutlined,
-  DatabaseOutlined, ApiOutlined,
+  DatabaseOutlined, ApiOutlined, CodeOutlined, PlusOutlined,
 } from '@ant-design/icons'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
@@ -32,18 +32,7 @@ const extractAllTableNames = (sql: string): string[] => {
   return matches.map(m => m[1].replace(/[`'"]/g, ''))
 }
 
-interface EditorTab {
-  key: string
-  title: string
-  sql: string
-  connectionId?: string
-  database?: string
-  results: SqlResult[]
-  currentBatch: SqlResult[]
-  resultTab: string
-}
-
-let tabCounter = 1
+// 标签页数据结构已移至 sqlEditorStore，此处不再定义
 
 export const SqlEditorPage: React.FC = () => {
   const { token } = theme.useToken()
@@ -51,32 +40,36 @@ export const SqlEditorPage: React.FC = () => {
   const completionDisposableRef = useRef<{ dispose: () => void } | null>(null)
 
   const activeConnectionId = useWorkbenchStore((s) => s.activeConnectionId)
+  const activeDatabase = useWorkbenchStore((s) => s.activeDatabase)
   const setActiveConnection = useWorkbenchStore((s) => s.setActiveConnection)
+  const setActiveDatabase = useWorkbenchStore((s) => s.setActiveDatabase)
   const connections = useConnectionStore((s) => s.connections)
   const setConnections = useConnectionStore((s) => s.setConnections)
   const updateConnection = useConnectionStore((s) => s.updateConnection)
+
+  // --- 从 store 读取标签页状态（路由切换不丢失） ---
+  const tabs = useSqlEditorStore((s) => s.tabs)
+  const activeTabKey = useSqlEditorStore((s) => s.activeTabKey)
+  const storeAddTab = useSqlEditorStore((s) => s.addTab)
+  const storeRemoveTab = useSqlEditorStore((s) => s.removeTab)
+  const storeUpdateTab = useSqlEditorStore((s) => s.updateTab)
+  const storeSetActiveTabKey = useSqlEditorStore((s) => s.setActiveTabKey)
   const consumePendingSql = useSqlEditorStore((s) => s.consumePendingSql)
 
-  const [tabs, setTabs] = useState<EditorTab[]>([{
-    key: 'tab-1',
-    title: 'SQL 1',
-    sql: '',
-    connectionId: useWorkbenchStore.getState().activeConnectionId ?? undefined,
-    database: useWorkbenchStore.getState().activeDatabase ?? undefined,
-    results: [],
-    currentBatch: [],
-    resultTab: 'result-0',
-  }])
-  const [activeTabKey, setActiveTabKey] = useState('tab-1')
   const [executing, setExecuting] = useState(false)
   const [databases, setDatabases] = useState<string[]>([])
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null)
 
-  const activeEditorTab = tabs.find((t) => t.key === activeTabKey) || tabs[0]
+  const activeEditorTab = tabs.find((t) => t.key === activeTabKey) ?? tabs[0]
 
-  const updateActiveTab = useCallback((updates: Partial<EditorTab>) => {
-    setTabs((prev) => prev.map((t) => t.key === activeTabKey ? { ...t, ...updates } : t))
-  }, [activeTabKey])
+  // 工具栏上下文：有 tab 严格读 tab（不穿透），无 tab fallback 到 workbenchStore
+  const hasTabs = tabs.length > 0
+  const currentConnId = hasTabs ? activeEditorTab?.connectionId : (activeConnectionId ?? undefined)
+  const currentDatabase = hasTabs ? activeEditorTab?.database : (activeDatabase ?? undefined)
+
+  const updateActiveTab = useCallback((updates: Partial<typeof activeEditorTab>) => {
+    storeUpdateTab(activeTabKey, updates)
+  }, [activeTabKey, storeUpdateTab])
 
   // 自动加载连接列表
   useEffect(() => {
@@ -84,7 +77,6 @@ export const SqlEditorPage: React.FC = () => {
       connectionApi.list().then((list) => {
         const allConns = list as ConnectionConfig[]
         setConnections(allConns)
-        // 自动连接：如果没有活跃连接但有已连接的连接，自动选中第一个
         if (!activeConnectionId) {
           const connected = allConns.find((c) => c.status === 'connected')
           if (connected) {
@@ -97,61 +89,37 @@ export const SqlEditorPage: React.FC = () => {
 
   // 标签页操作
   const updateTabSql = useCallback((key: string, sql: string) => {
-    setTabs((prev) => prev.map((t) => t.key === key ? { ...t, sql } : t))
-  }, [])
+    storeUpdateTab(key, { sql })
+  }, [storeUpdateTab])
 
-  // 消费从其他页面传入的 SQL
+  // 消费从其他页面传入的 SQL：始终新建标签页（不覆盖现有 tab）
   useEffect(() => {
     const pending = consumePendingSql()
     if (pending) {
-      // 写入当前标签页
-      updateActiveTab({
-        sql: pending.sql,
-        ...(pending.connectionId && { connectionId: pending.connectionId }),
-        ...(pending.database && { database: pending.database })
-      })
-      if (editorRef.current) {
-        editorRef.current.setValue(pending.sql)
+      const newKey = storeAddTab(pending.connectionId, pending.database)
+      if (pending.sql) {
+        storeUpdateTab(newKey, { sql: pending.sql })
+        toast.success('SQL 已加载，请审核后手动执行')
       }
-      toast.success('SQL 已加载，请审核后手动执行')
     }
-  }, [activeTabKey, consumePendingSql, updateActiveTab])
+  // 仅在组件挂载时消费一次
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-  // 连接变化时加载数据库列表
-  const activeConnIdRef = activeEditorTab?.connectionId
+  // 连接变化时加载数据库列表（从工具栏上下文读取）
   useEffect(() => {
-    if (!activeConnIdRef) { setDatabases([]); return }
-    metadataApi.databases(activeConnIdRef).then((dbs) => {
+    if (!currentConnId) { setDatabases([]); return }
+    metadataApi.databases(currentConnId).then((dbs) => {
       setDatabases((dbs as Array<{name: string}>).map(d => d.name))
     }).catch(() => setDatabases([]))
-  }, [activeConnIdRef])
+  }, [currentConnId])
 
   const addTab = () => {
-    tabCounter++
-    const newKey = `tab-${tabCounter}`
-    setTabs((prev) => {
-      const currentTab = prev.find((t) => t.key === activeTabKey) || prev[0]
-      return [...prev, {
-        key: newKey,
-        title: `SQL ${tabCounter}`,
-        sql: '',
-        connectionId: currentTab?.connectionId,
-        database: currentTab?.database,
-        results: [],
-        currentBatch: [],
-        resultTab: 'result-0'
-      }]
-    })
-    setActiveTabKey(newKey)
+    storeAddTab(currentConnId, currentDatabase)
   }
 
   const removeTab = (targetKey: string) => {
-    if (tabs.length <= 1) return // 至少保留一个标签页
-    const newTabs = tabs.filter((t) => t.key !== targetKey)
-    if (activeTabKey === targetKey) {
-      setActiveTabKey(newTabs[newTabs.length - 1].key)
-    }
-    setTabs(newTabs)
+    storeRemoveTab(targetKey)
   }
 
   const handleTabChange = (key: string) => {
@@ -159,7 +127,7 @@ export const SqlEditorPage: React.FC = () => {
     if (editorRef.current) {
       updateActiveTab({ sql: editorRef.current.getValue() })
     }
-    setActiveTabKey(key)
+    storeSetActiveTabKey(key)
   }
 
   const handleConnectionChange = async (connId: string) => {
@@ -176,13 +144,21 @@ export const SqlEditorPage: React.FC = () => {
         return
       }
     }
-    updateActiveTab({ connectionId: connId, database: undefined })
+    if (activeEditorTab) {
+      updateActiveTab({ connectionId: connId, database: undefined })
+    } else {
+      setActiveConnection(connId, conn.name)
+    }
   }
 
   const handleDatabaseChange = (db: string) => {
-    updateActiveTab({ database: db })
+    if (activeEditorTab) {
+      updateActiveTab({ database: db })
+    } else {
+      setActiveDatabase(db)
+    }
     clearCompletionCache()
-    if (activeEditorTab.connectionId && monacoRef.current) {
+    if (activeEditorTab?.connectionId && monacoRef.current) {
       completionDisposableRef.current?.dispose()
       completionDisposableRef.current = monacoRef.current.languages.registerCompletionItemProvider(
         'sql',
@@ -201,7 +177,7 @@ export const SqlEditorPage: React.FC = () => {
       run: () => handleExecute(),
     })
 
-    if (activeEditorTab.connectionId && activeEditorTab.database) {
+    if (activeEditorTab?.connectionId && activeEditorTab?.database) {
       completionDisposableRef.current?.dispose()
       completionDisposableRef.current = monaco.languages.registerCompletionItemProvider(
         'sql',
@@ -224,17 +200,17 @@ export const SqlEditorPage: React.FC = () => {
   const handleExecute = useCallback(async () => {
     const editor = editorRef.current
     const selection = editor?.getSelection()
-    let execSql = activeEditorTab.sql.trim()
+    let execSql = activeEditorTab?.sql?.trim() ?? ''
 
     if (editor && selection && !selection.isEmpty()) {
       execSql = editor.getModel()?.getValueInRange(selection)?.trim() ?? execSql
     }
 
-    if (!execSql || !activeEditorTab.connectionId || !activeEditorTab.database) return
+    if (!execSql || !activeEditorTab?.connectionId || !activeEditorTab?.database) return
     setExecuting(true)
     try {
       const resultList = await sqlApi.execute(activeEditorTab.connectionId, activeEditorTab.database, execSql) as SqlResult[]
-      const newResults = [...resultList.reverse(), ...activeEditorTab.results]
+      const newResults = [...[...resultList].reverse(), ...activeEditorTab.results]
 
       const hasError = resultList.some((r) => r.type === 'error')
       if (hasError) {
@@ -265,14 +241,12 @@ export const SqlEditorPage: React.FC = () => {
   }
 
   // 渲染时进行同名表统计
-  const currentBatch = activeEditorTab.currentBatch
-  const results = activeEditorTab.results
+  const currentBatch = activeEditorTab?.currentBatch ?? []
+  const results = activeEditorTab?.results ?? []
   const totalDuration = currentBatch.reduce((sum, r) => sum + (r.duration || 0), 0)
   const queryResults = currentBatch.filter((r) => r.type === 'query')
   const tableNameCounts: Record<string, number> = {}
   
-  // 提前提取出该批次 SQL 中所有涉及的表名
-  // 由于每个 result 的 sql 都是整段未拆分的脚本，提取一次即可获得按执行顺序排列的表名数组
   const allParsedNames = extractAllTableNames(currentBatch[0]?.sql || '')
   let queryIndex = 0
 
@@ -296,7 +270,7 @@ export const SqlEditorPage: React.FC = () => {
               size="small"
               style={{ width: 160 }}
               placeholder="选择连接"
-              value={activeEditorTab.connectionId ?? undefined}
+              value={currentConnId}
               onChange={handleConnectionChange}
               options={connections.map((c) => ({
                 label: (
@@ -318,10 +292,10 @@ export const SqlEditorPage: React.FC = () => {
               size="small"
               style={{ width: 160 }}
               placeholder="选择数据库"
-              value={activeEditorTab.database ?? undefined}
+              value={currentDatabase}
               onChange={handleDatabaseChange}
               options={databases.map((db) => ({ label: db, value: db }))}
-              disabled={!activeEditorTab.connectionId}
+              disabled={!currentConnId}
               showSearch
             />
           </Space>
@@ -333,7 +307,7 @@ export const SqlEditorPage: React.FC = () => {
             icon={<PlayCircleOutlined />}
             loading={executing}
             onClick={handleExecute}
-            disabled={!activeEditorTab.sql.trim() || !activeEditorTab.connectionId || !activeEditorTab.database}
+            disabled={!activeEditorTab?.sql?.trim() || !currentConnId || !currentDatabase}
           >
             执行
           </Button>
@@ -345,6 +319,17 @@ export const SqlEditorPage: React.FC = () => {
 
       <Layout style={{ flex: 1 }}>
         <Layout.Content style={{ display: 'flex', flexDirection: 'column' }}>
+          {tabs.length === 0 ? (
+            /* 无标签页时的空状态引导 */
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+              <div style={{ fontSize: 48, color: token.colorTextQuaternary }}>
+                <CodeOutlined />
+              </div>
+              <Text type="secondary" style={{ fontSize: 14 }}>点击下方按钮新建一个查询标签页</Text>
+              <Button type="primary" icon={<PlusOutlined />} onClick={addTab}>新建查询</Button>
+            </div>
+          ) : (
+          <>
           {/* 编辑器标签页 */}
           <div style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
             <Tabs
@@ -361,7 +346,7 @@ export const SqlEditorPage: React.FC = () => {
               items={tabs.map((tab) => ({
                 key: tab.key,
                 label: tab.title,
-                closable: tabs.length > 1,
+                closable: true,
               }))}
             />
           </div>
@@ -464,6 +449,7 @@ export const SqlEditorPage: React.FC = () => {
                           </div>
                         )
                       }
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     }).filter(Boolean) as any[],
                     // 如果没有任何查询结果，提供一个基础的占位面板
                     ...(queryResults.length === 0 ? [{
@@ -513,6 +499,8 @@ export const SqlEditorPage: React.FC = () => {
                 />
               </Content>
             </>
+          )}
+          </>
           )}
         </Layout.Content>
       </Layout>

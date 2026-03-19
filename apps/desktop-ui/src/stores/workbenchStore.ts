@@ -1,17 +1,24 @@
 import { create } from 'zustand'
+import type { DatabaseInfo, TableInfo } from '@/types'
 
 /**
  * 工作台上下文 Store
  * 跟踪当前连接、当前数据库、当前选中对象等全局上下文，
  * 供工作台、SQL 编辑器、迁移、同步等页面共享。
  *
- * - openConnections: 工作台中同时打开的多个连接（多连接并行浏览）
- * - activeConnectionId: 当前聚焦的连接（用于 SQL 编辑器等页面的默认上下文）
+ * 状态全部存在 Zustand 中，路由切换不会丢失。
  */
 
 interface OpenConnection {
   id: string
   name: string
+}
+
+/** 当前选中的上下文 */
+export interface SelectedContext {
+  connectionId: string
+  database?: string
+  table?: string
 }
 
 interface WorkbenchState {
@@ -28,16 +35,30 @@ interface WorkbenchState {
   /** 侧栏是否折叠 */
   siderCollapsed: boolean
 
-  /** 添加连接到工作台树 */
+  // --- 对象树持久化状态 ---
+  /** 对象树展开的 key */
+  treeExpandedKeys: React.Key[]
+  /** per-connection 数据库列表缓存 */
+  databasesMap: Record<string, DatabaseInfo[]>
+  /** per-connection+db 对象列表缓存: "connId::dbName" → TableInfo[] */
+  objectsMap: Record<string, TableInfo[]>
+  /** 当前选中节点上下文 */
+  selectedCtx: SelectedContext | null
+
+  // --- 操作方法 ---
   addOpenConnection: (id: string, name: string) => void
-  /** 从工作台树移除连接 */
   removeOpenConnection: (id: string) => void
-  /** 设置当前聚焦连接（同时加入 openConnections） */
   setActiveConnection: (id: string | null, name?: string | null) => void
   setActiveDatabase: (db: string | null) => void
   setActiveTable: (table: string | null) => void
   setSiderCollapsed: (collapsed: boolean) => void
   clearContext: () => void
+
+  // --- 对象树操作 ---
+  setTreeExpandedKeys: (keys: React.Key[]) => void
+  setDatabasesMap: (updater: Record<string, DatabaseInfo[]> | ((prev: Record<string, DatabaseInfo[]>) => Record<string, DatabaseInfo[]>)) => void
+  setObjectsMap: (updater: Record<string, TableInfo[]> | ((prev: Record<string, TableInfo[]>) => Record<string, TableInfo[]>)) => void
+  setSelectedCtx: (ctx: SelectedContext | null) => void
 }
 
 export const useWorkbenchStore = create<WorkbenchState>((set) => ({
@@ -47,6 +68,12 @@ export const useWorkbenchStore = create<WorkbenchState>((set) => ({
   activeDatabase: null,
   activeTable: null,
   siderCollapsed: false,
+
+  // 对象树持久化状态初始值
+  treeExpandedKeys: [],
+  databasesMap: {},
+  objectsMap: {},
+  selectedCtx: null,
 
   addOpenConnection: (id, name) =>
     set((state) => {
@@ -62,8 +89,23 @@ export const useWorkbenchStore = create<WorkbenchState>((set) => ({
     set((state) => {
       const newList = state.openConnections.filter((c) => c.id !== id)
       const wasActive = state.activeConnectionId === id
+      // 清理该连接的缓存
+      const newDbMap = { ...state.databasesMap }
+      delete newDbMap[id]
+      const newObjMap = { ...state.objectsMap }
+      for (const k of Object.keys(newObjMap)) {
+        if (k.startsWith(`${id}::`)) delete newObjMap[k]
+      }
+      const newExpandedKeys = state.treeExpandedKeys.filter(
+        (k) => !String(k).includes(id)
+      )
+      const clearSelected = state.selectedCtx?.connectionId === id
       return {
         openConnections: newList,
+        databasesMap: newDbMap,
+        objectsMap: newObjMap,
+        treeExpandedKeys: newExpandedKeys,
+        ...(clearSelected ? { selectedCtx: null } : {}),
         ...(wasActive
           ? {
               activeConnectionId: newList.length > 0 ? newList[newList.length - 1].id : null,
@@ -77,7 +119,6 @@ export const useWorkbenchStore = create<WorkbenchState>((set) => ({
 
   setActiveConnection: (id, name = null) =>
     set((state) => {
-      // 如果设为 null，清空上下文
       if (!id) {
         return {
           activeConnectionId: null,
@@ -86,7 +127,6 @@ export const useWorkbenchStore = create<WorkbenchState>((set) => ({
           activeTable: null,
         }
       }
-      // 同时确保在 openConnections 中
       const alreadyOpen = state.openConnections.some((c) => c.id === id)
       return {
         activeConnectionId: id,
@@ -115,5 +155,26 @@ export const useWorkbenchStore = create<WorkbenchState>((set) => ({
       activeConnectionName: null,
       activeDatabase: null,
       activeTable: null,
+      treeExpandedKeys: [],
+      databasesMap: {},
+      objectsMap: {},
+      selectedCtx: null,
     }),
+
+  // --- 对象树操作 ---
+  setTreeExpandedKeys: (keys) =>
+    set({ treeExpandedKeys: keys }),
+
+  setDatabasesMap: (updater) =>
+    set((state) => ({
+      databasesMap: typeof updater === 'function' ? updater(state.databasesMap) : updater,
+    })),
+
+  setObjectsMap: (updater) =>
+    set((state) => ({
+      objectsMap: typeof updater === 'function' ? updater(state.objectsMap) : updater,
+    })),
+
+  setSelectedCtx: (ctx) =>
+    set({ selectedCtx: ctx }),
 }))

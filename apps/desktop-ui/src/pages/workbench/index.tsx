@@ -22,45 +22,37 @@ import { useNavigate } from 'react-router-dom'
 const { Sider, Content } = Layout
 const { Text } = Typography
 
-// 当前选中的上下文
-interface SelectedContext {
-  connectionId: string
-  database?: string
-  table?: string
-}
-
 export const WorkbenchPage: React.FC = () => {
   const { token } = theme.useToken()
   const navigate = useNavigate()
 
-  // --- Store ---
+  // --- Store（持久化状态，路由切换不丢失） ---
   const openConnections = useWorkbenchStore((s) => s.openConnections)
   const addOpenConnection = useWorkbenchStore((s) => s.addOpenConnection)
   const removeOpenConnection = useWorkbenchStore((s) => s.removeOpenConnection)
   const setActiveConnection = useWorkbenchStore((s) => s.setActiveConnection)
   const setActiveDatabase = useWorkbenchStore((s) => s.setActiveDatabase)
   const setActiveTable = useWorkbenchStore((s) => s.setActiveTable)
+  const databasesMap = useWorkbenchStore((s) => s.databasesMap)
+  const setDatabasesMap = useWorkbenchStore((s) => s.setDatabasesMap)
+  const objectsMap = useWorkbenchStore((s) => s.objectsMap)
+  const setObjectsMap = useWorkbenchStore((s) => s.setObjectsMap)
+  const expandedKeys = useWorkbenchStore((s) => s.treeExpandedKeys)
+  const setExpandedKeys = useWorkbenchStore((s) => s.setTreeExpandedKeys)
+  const selectedCtx = useWorkbenchStore((s) => s.selectedCtx)
+  const setSelectedCtx = useWorkbenchStore((s) => s.setSelectedCtx)
 
   const connections = useConnectionStore((s) => s.connections)
   const setConnections = useConnectionStore((s) => s.setConnections)
   const updateConnection = useConnectionStore((s) => s.updateConnection)
 
-  // --- Local state ---
-  // per-connection databases: connId → DatabaseInfo[]
-  const [databasesMap, setDatabasesMap] = useState<Record<string, DatabaseInfo[]>>({})
-  // per-connection+db objects: "connId::dbName" → TableInfo[]
-  const [objectsMap, setObjectsMap] = useState<Record<string, TableInfo[]>>({})
-  // Detail state for selected table
+  // --- Local state（页面级临时状态）---
   const [columns, setColumns] = useState<ColumnInfo[]>([])
   const [indexes, setIndexes] = useState<IndexInfo[]>([])
   const [ddl, setDdl] = useState('')
   const [previewRows, setPreviewRows] = useState<Record<string, unknown>[]>([])
   const [loadingConns, setLoadingConns] = useState<Set<string>>(new Set())
   const [searchText, setSearchText] = useState('')
-  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([])
-
-  // 当前选中的上下文
-  const [selectedCtx, setSelectedCtx] = useState<SelectedContext | null>(null)
 
   const setPendingSql = useSqlEditorStore((s) => s.setPendingSql)
 
@@ -88,7 +80,7 @@ export const WorkbenchPage: React.FC = () => {
         return next
       })
     }
-  }, [])
+  }, [setDatabasesMap])
 
   // 当 openConnections 变化时，自动加载新增连接的数据库列表
   useEffect(() => {
@@ -108,7 +100,7 @@ export const WorkbenchPage: React.FC = () => {
     } catch (e) {
       handleApiError(e, '加载对象列表失败')
     }
-  }, [])
+  }, [setObjectsMap])
 
   // --- 加载表详情 ---
   const loadTableDetail = useCallback(async (connId: string, dbName: string, tableName: string) => {
@@ -149,23 +141,10 @@ export const WorkbenchPage: React.FC = () => {
 
   // --- 从工作台移除连接 ---
   const handleRemoveConnection = useCallback((connId: string) => {
+    // store 的 removeOpenConnection 会自动清理 databasesMap、objectsMap、expandedKeys、selectedCtx
+    const wasCurrent = selectedCtx?.connectionId === connId
     removeOpenConnection(connId)
-    // 清理相关缓存
-    setDatabasesMap((prev) => {
-      const next = { ...prev }
-      delete next[connId]
-      return next
-    })
-    setObjectsMap((prev) => {
-      const next = { ...prev }
-      for (const k of Object.keys(next)) {
-        if (k.startsWith(`${connId}::`)) delete next[k]
-      }
-      return next
-    })
-    // 清理选中上下文
-    if (selectedCtx?.connectionId === connId) {
-      setSelectedCtx(null)
+    if (wasCurrent) {
       setColumns([])
       setIndexes([])
       setDdl('')
