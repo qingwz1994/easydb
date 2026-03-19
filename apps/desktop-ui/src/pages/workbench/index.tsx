@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useRef, useDeferredValue } from 'react'
 import {
   Layout, Tree, Tabs, Table, Typography, Input, Space, Button, Tag, Tooltip, Select,
   theme, Card, Statistic, Row, Col,
@@ -53,6 +53,7 @@ export const WorkbenchPage: React.FC = () => {
   const [previewRows, setPreviewRows] = useState<Record<string, unknown>[]>([])
   const [loadingConns, setLoadingConns] = useState<Set<string>>(new Set())
   const [searchText, setSearchText] = useState('')
+  const deferredSearch = useDeferredValue(searchText)
 
   const setPendingSql = useSqlEditorStore((s) => s.setPendingSql)
 
@@ -179,16 +180,24 @@ export const WorkbenchPage: React.FC = () => {
     const isLoading = loadingConns.has(conn.id)
 
     const dbChildren: DataNode[] = connDbs
-      .filter((db) => !searchText || db.name.toLowerCase().includes(searchText.toLowerCase()))
       .map((db) => {
         const objKey = `${conn.id}::${db.name}`
         const dbObjects = objectsMap[objKey] || []
+        const lowerSearch = deferredSearch.toLowerCase()
+        const dbNameMatches = !deferredSearch || db.name.toLowerCase().includes(lowerSearch)
+        // 数据库内是否有匹配的对象
+        const hasMatchingObjects = deferredSearch && dbObjects.some(
+          (t) => t.name.toLowerCase().includes(lowerSearch)
+        )
+
+        // 数据库名不匹配且子对象也不匹配 → 过滤掉
+        if (deferredSearch && !dbNameMatches && !hasMatchingObjects) return null
 
         const categoryChildren: DataNode[] = objectCategories
           .map((cat) => {
             const items = dbObjects.filter(
               (t) => cat.types.includes(t.type)
-                && (!searchText || t.name.toLowerCase().includes(searchText.toLowerCase()))
+                && (!deferredSearch || dbNameMatches || t.name.toLowerCase().includes(lowerSearch))
             )
             return {
               key: `cat:${conn.id}:${db.name}:${cat.key}`,
@@ -207,7 +216,7 @@ export const WorkbenchPage: React.FC = () => {
               })),
             } as DataNode
           })
-          .filter((cat) => !searchText || (cat.children && cat.children.length > 0))
+          .filter((cat) => !deferredSearch || (cat.children && cat.children.length > 0))
 
         return {
           key: `db:${conn.id}:${db.name}`,
@@ -216,6 +225,7 @@ export const WorkbenchPage: React.FC = () => {
           children: categoryChildren,
         } as DataNode
       })
+      .filter(Boolean) as DataNode[]
 
     return {
       key: `conn:${conn.id}`,
@@ -239,6 +249,34 @@ export const WorkbenchPage: React.FC = () => {
       children: isLoading ? [{ key: `loading:${conn.id}`, title: '加载中...', isLeaf: true, selectable: false }] : dbChildren,
     } as DataNode
   })
+
+  // --- 搜索时自动展开所有匹配的节点 ---
+  const prevExpandedRef = useRef<React.Key[]>([])
+  useEffect(() => {
+    if (deferredSearch) {
+      // 保存搜索前的展开状态
+      if (prevExpandedRef.current.length === 0) {
+        prevExpandedRef.current = [...expandedKeys]
+      }
+      // 展开所有有子节点的节点
+      const allKeys: React.Key[] = []
+      const collectKeys = (nodes: DataNode[]) => {
+        for (const node of nodes) {
+          if (node.children && node.children.length > 0) {
+            allKeys.push(node.key)
+            collectKeys(node.children)
+          }
+        }
+      }
+      collectKeys(treeData)
+      setExpandedKeys(allKeys)
+    } else if (prevExpandedRef.current.length > 0) {
+      // 搜索清空时恢复之前的展开状态
+      setExpandedKeys(prevExpandedRef.current)
+      prevExpandedRef.current = []
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deferredSearch])
 
   // --- 树节点选中 ---
   const handleTreeSelect = (_: React.Key[], info: { node: DataNode }) => {

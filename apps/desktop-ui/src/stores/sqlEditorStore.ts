@@ -53,7 +53,9 @@ export const useSqlEditorStore = create<SqlEditorState>((set, get) => ({
 
   addTab: (connectionId, database) => {
     const { tabCounter, tabs, activeTabKey } = get()
-    const newCounter = tabCounter + 1
+    // 所有 tab 关闭后重新从 1 开始编号
+    const baseCounter = tabs.length === 0 ? 0 : tabCounter
+    const newCounter = baseCounter + 1
     const newKey = `tab-${newCounter}`
     // 继承当前 tab 的连接上下文（如果未指定）
     const currentTab = tabs.find((t) => t.key === activeTabKey) || tabs[0]

@@ -1,11 +1,11 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react'
 import {
-  Layout, Button, Space, Typography, Tabs, Table, Tag, Select,
+  Layout, Button, Space, Typography, Tabs, Table, Tag, Select, Tooltip,
   theme,
 } from 'antd'
 import {
   PlayCircleOutlined, ClearOutlined,
-  DatabaseOutlined, ApiOutlined, CodeOutlined, PlusOutlined,
+  DatabaseOutlined, ApiOutlined, CodeOutlined, PlusOutlined, QuestionCircleOutlined,
 } from '@ant-design/icons'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
@@ -188,6 +188,20 @@ export const SqlEditorPage: React.FC = () => {
     editorInstance.focus()
   }
 
+  // --- 连接/数据库变化时自动重新注册 CompletionProvider ---
+  useEffect(() => {
+    if (currentConnId && currentDatabase && monacoRef.current) {
+      completionDisposableRef.current?.dispose()
+      completionDisposableRef.current = monacoRef.current.languages.registerCompletionItemProvider(
+        'sql',
+        createSqlCompletionProvider(currentConnId, currentDatabase, monacoRef.current)
+      )
+    }
+    return () => {
+      completionDisposableRef.current?.dispose()
+    }
+  }, [currentConnId, currentDatabase])
+
   const activeDbRefForCache = activeEditorTab?.database
   useEffect(() => { clearCompletionCache() }, [activeDbRefForCache])
   useEffect(() => {
@@ -314,6 +328,21 @@ export const SqlEditorPage: React.FC = () => {
           <Button size="small" icon={<ClearOutlined />} onClick={handleClear}>
             清空
           </Button>
+          <Tooltip
+            title={
+              <div style={{ fontSize: 12, lineHeight: 1.8 }}>
+                <div><b>快捷键</b></div>
+                <div>⌘+Enter — 执行 SQL</div>
+                <div style={{ marginTop: 4 }}><b>智能提示</b></div>
+                <div>输入 <code>表名.</code> — 自动补全字段</div>
+                <div>先写 FROM 表名，再编辑 SELECT — 直接提示字段</div>
+                <div>支持选中部分 SQL 单独执行</div>
+              </div>
+            }
+            placement="bottomRight"
+          >
+            <QuestionCircleOutlined style={{ color: token.colorTextQuaternary, fontSize: 14, cursor: 'pointer' }} />
+          </Tooltip>
         </Space>
       </Header>
 

@@ -70,8 +70,8 @@ async function ensureColumnsLoaded(connectionId: string, database: string, table
   if (table?.columns) return table.columns
 
   try {
-    const columns = await metadataApi.tableDefinition(connectionId, database, tableName) as Array<{ name: string }>
-    const colNames = columns.map((c) => c.name)
+    const result = await metadataApi.tableDefinition(connectionId, database, tableName) as { columns: Array<{ name: string }> }
+    const colNames = result.columns.map((c) => c.name)
     if (table) table.columns = colNames
     return colNames
   } catch {
