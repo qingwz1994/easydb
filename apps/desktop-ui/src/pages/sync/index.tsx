@@ -113,14 +113,14 @@ export const SyncPage: React.FC = () => {
   const handleStart = async () => {
     setSubmitting(true)
     try {
-      const result = await syncApi.start({
+      await syncApi.start({
         sourceConnectionId: sourceId,
         targetConnectionId: targetId,
         sourceDatabase: sourceDb,
         targetDatabase: targetDb,
         tables: [],
-      }) as { taskId: string }
-      toast.success(`同步任务已创建：${result.taskId}`)
+      })
+      toast.success('同步任务已创建，可在任务中心查看进度')
       navigate('/task-center')
     } catch (e) {
       handleApiError(e, '创建同步任务失败')

@@ -46,6 +46,9 @@ interface MetadataAdapter {
     fun getIndexes(session: DatabaseSession, database: String, table: String): List<IndexInfo>
     fun previewRows(session: DatabaseSession, database: String, table: String, limit: Int = 100): List<Map<String, String?>>
     fun getDdl(session: DatabaseSession, database: String, table: String): String
+    fun createDatabase(session: DatabaseSession, name: String, charset: String = "utf8mb4", collation: String = "utf8mb4_general_ci")
+    fun listCharsets(session: DatabaseSession): List<CharsetInfo> = emptyList()
+    fun dropDatabase(session: DatabaseSession, name: String)
 }
 
 // ─── 方言适配器 ───────────────────────────────────────────
@@ -112,6 +115,16 @@ data class TaskResult(
     val successCount: Int = 0,
     val failureCount: Int = 0,
     val skippedCount: Int = 0,
+    val errorMessage: String? = null,
+    val verification: List<TableVerifyResult>? = null
+)
+
+@Serializable
+data class TableVerifyResult(
+    val tableName: String,
+    val sourceRows: Long,        // 源库行数（information_schema 估算）
+    val targetRows: Long,        // 目标库行数（同步过程实际写入数）
+    val status: String,          // match | mismatch | failed
     val errorMessage: String? = null
 )
 

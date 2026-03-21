@@ -82,6 +82,52 @@ fun Route.connectionRoutes() {
     }
 }
 
+/** 从 JSON body 解析 TableDefinition */
+private fun parseTableDefinition(body: kotlinx.serialization.json.JsonObject): TableDefinition {
+    fun kotlinx.serialization.json.JsonElement?.str(): String =
+        (this as? kotlinx.serialization.json.JsonPrimitive)?.content ?: ""
+    fun kotlinx.serialization.json.JsonElement?.bool(): Boolean =
+        (this as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: false
+
+    val tableName = body["tableName"].str()
+    val comment = body["comment"].str()
+
+    val columnsArr = body["columns"] as? kotlinx.serialization.json.JsonArray ?: kotlinx.serialization.json.JsonArray(emptyList())
+    val columns = columnsArr.map { elem ->
+        val obj = elem as kotlinx.serialization.json.JsonObject
+        val lengthStr = (obj["length"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: ""
+        ColumnInfo(
+            name = obj["name"].str(),
+            type = obj["type"].str() + if (lengthStr.isNotBlank()) "($lengthStr)" else "",
+            nullable = obj["nullable"].bool(),
+            defaultValue = (obj["defaultValue"] as? kotlinx.serialization.json.JsonPrimitive)?.content,
+            isPrimaryKey = obj["isPrimaryKey"].bool(),
+            isAutoIncrement = obj["isAutoIncrement"].bool(),
+            comment = (obj["comment"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+        )
+    }
+
+    val indexesArr = body["indexes"] as? kotlinx.serialization.json.JsonArray ?: kotlinx.serialization.json.JsonArray(emptyList())
+    val indexes = indexesArr.map { elem ->
+        val obj = elem as kotlinx.serialization.json.JsonObject
+        val idxCols = (obj["columns"] as? kotlinx.serialization.json.JsonArray)?.map {
+            (it as kotlinx.serialization.json.JsonPrimitive).content
+        } ?: emptyList()
+        IndexInfo(
+            name = obj["name"].str(),
+            columns = idxCols,
+            isUnique = obj["isUnique"].bool(),
+            isPrimary = obj["isPrimary"].bool()
+        )
+    }
+
+    return TableDefinition(
+        table = TableInfo(name = tableName, comment = comment),
+        columns = columns,
+        indexes = indexes
+    )
+}
+
 // ─── 元数据路由 ────────────────────────────────────────────
 fun Route.metadataRoutes() {
     val adapter = ServiceRegistry.mysqlAdapter
@@ -90,6 +136,87 @@ fun Route.metadataRoutes() {
     get("/{connectionId}/databases") {
         val session = getSessionOrFail(call, connMgr) ?: return@get
         call.ok(adapter.metadataAdapter().listDatabases(session))
+    }
+
+    // 获取字符集列表（必须在 /{connectionId}/{database} 参数路由之前注册）
+    get("/{connectionId}/charsets") {
+        val session = getSessionOrFail(call, connMgr) ?: return@get
+        call.ok(adapter.metadataAdapter().listCharsets(session))
+    }
+
+    // 新建数据库
+    post("/{connectionId}/create-database") {
+        val session = getSessionOrFail(call, connMgr) ?: return@post
+        try {
+            val body = call.receive<kotlinx.serialization.json.JsonObject>()
+            val name = body["name"]?.let { (it as kotlinx.serialization.json.JsonPrimitive).content }
+                ?: return@post call.fail("INVALID_REQUEST", "缺少 name 参数")
+            val charset = body["charset"]?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content } ?: "utf8mb4"
+            val collation = body["collation"]?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content } ?: "utf8mb4_general_ci"
+            adapter.metadataAdapter().createDatabase(session, name, charset, collation)
+            call.ok(true)
+        } catch (e: Exception) {
+            call.fail("CREATE_DB_FAILED", e.message ?: "创建数据库失败")
+        }
+    }
+
+    // 删除数据库
+    delete("/{connectionId}/drop-database/{database}") {
+        val session = getSessionOrFail(call, connMgr) ?: return@delete
+        val database = call.parameters["database"]!!
+        try {
+            adapter.metadataAdapter().dropDatabase(session, database)
+            call.ok(true)
+        } catch (e: Exception) {
+            call.fail("DROP_DB_FAILED", e.message ?: "删除数据库失败")
+        }
+    }
+
+    // 编辑数据库（修改字符集/排序规则）
+    post("/{connectionId}/alter-database") {
+        val session = getSessionOrFail(call, connMgr) ?: return@post
+        try {
+            val body = call.receive<kotlinx.serialization.json.JsonObject>()
+            val name = (body["name"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+                ?: return@post call.fail("INVALID_REQUEST", "缺少 name 参数")
+            val charset = (body["charset"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+            val collation = (body["collation"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+            val dialect = adapter.dialectAdapter()
+            val sql = buildString {
+                append("ALTER DATABASE ${dialect.quoteIdentifier(name)}")
+                if (!charset.isNullOrBlank()) append(" CHARACTER SET $charset")
+                if (!collation.isNullOrBlank()) append(" COLLATE $collation")
+            }
+            val connField = session.javaClass.getDeclaredField("connection")
+            connField.isAccessible = true
+            val jdbcConn = connField.get(session) as java.sql.Connection
+            jdbcConn.createStatement().use { it.execute(sql) }
+            call.ok(true)
+        } catch (e: Exception) {
+            call.fail("ALTER_DB_FAILED", e.message ?: "修改数据库失败")
+        }
+    }
+
+    // 重命名表
+    post("/{connectionId}/{database}/rename-table") {
+        val session = getSessionOrFail(call, connMgr) ?: return@post
+        val database = call.parameters["database"]!!
+        try {
+            val body = call.receive<kotlinx.serialization.json.JsonObject>()
+            val oldName = (body["oldName"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+                ?: return@post call.fail("INVALID_REQUEST", "缺少 oldName 参数")
+            val newName = (body["newName"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+                ?: return@post call.fail("INVALID_REQUEST", "缺少 newName 参数")
+            val dialect = adapter.dialectAdapter()
+            val sql = "RENAME TABLE ${dialect.quoteIdentifier(database)}.${dialect.quoteIdentifier(oldName)} TO ${dialect.quoteIdentifier(database)}.${dialect.quoteIdentifier(newName)}"
+            val connField = session.javaClass.getDeclaredField("connection")
+            connField.isAccessible = true
+            val jdbcConn = connField.get(session) as java.sql.Connection
+            jdbcConn.createStatement().use { it.execute(sql) }
+            call.ok(true)
+        } catch (e: Exception) {
+            call.fail("RENAME_TABLE_FAILED", e.message ?: "重命名表失败")
+        }
     }
 
     get("/{connectionId}/{database}/objects") {
@@ -135,6 +262,83 @@ fun Route.metadataRoutes() {
         val database = call.parameters["database"]!!
         val table = call.parameters["table"]!!
         call.ok(adapter.metadataAdapter().getDdl(session, database, table))
+    }
+
+    // 预览建表 DDL（不执行）
+    post("/{connectionId}/{database}/preview-create-table") {
+        val session = getSessionOrFail(call, connMgr) ?: return@post
+        try {
+            val body = call.receive<kotlinx.serialization.json.JsonObject>()
+            val tableDef = parseTableDefinition(body)
+            val ddl = adapter.dialectAdapter().buildCreateTable(tableDef)
+            val escaped = ddl.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+            call.respondText("""{"success":true,"data":{"ddl":"$escaped"}}""", io.ktor.http.ContentType.Application.Json)
+        } catch (e: Exception) {
+            call.fail("PREVIEW_FAILED", e.message ?: "生成 DDL 预览失败")
+        }
+    }
+
+    // 新建表（执行 DDL）
+    post("/{connectionId}/{database}/create-table") {
+        val session = getSessionOrFail(call, connMgr) ?: return@post
+        val database = call.parameters["database"]!!
+        try {
+            val body = call.receive<kotlinx.serialization.json.JsonObject>()
+            val tableDef = parseTableDefinition(body)
+            val ddl = adapter.dialectAdapter().buildCreateTable(tableDef)
+
+            val connField = session.javaClass.getDeclaredField("connection")
+            connField.isAccessible = true
+            val jdbcConn = connField.get(session) as java.sql.Connection
+            jdbcConn.createStatement().use { stmt ->
+                stmt.execute("USE ${adapter.dialectAdapter().quoteIdentifier(database)}")
+                stmt.execute(ddl)
+            }
+            val escaped = ddl.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+            call.respondText("""{"success":true,"data":{"success":true,"ddl":"$escaped"}}""", io.ktor.http.ContentType.Application.Json)
+        } catch (e: Exception) {
+            call.fail("CREATE_TABLE_FAILED", e.message ?: "创建表失败")
+        }
+    }
+
+    // 删除表
+    delete("/{connectionId}/{database}/tables/{table}") {
+        val session = getSessionOrFail(call, connMgr) ?: return@delete
+        val database = call.parameters["database"]!!
+        val table = call.parameters["table"]!!
+        try {
+            val connField = session.javaClass.getDeclaredField("connection")
+            connField.isAccessible = true
+            val jdbcConn = connField.get(session) as java.sql.Connection
+            val dialect = adapter.dialectAdapter()
+            jdbcConn.createStatement().use { stmt ->
+                stmt.execute("USE ${dialect.quoteIdentifier(database)}")
+                stmt.execute("DROP TABLE ${dialect.quoteIdentifier(table)}")
+            }
+            call.ok(true)
+        } catch (e: Exception) {
+            call.fail("DROP_TABLE_FAILED", e.message ?: "删除表失败")
+        }
+    }
+
+    // 清空表
+    post("/{connectionId}/{database}/tables/{table}/truncate") {
+        val session = getSessionOrFail(call, connMgr) ?: return@post
+        val database = call.parameters["database"]!!
+        val table = call.parameters["table"]!!
+        try {
+            val connField = session.javaClass.getDeclaredField("connection")
+            connField.isAccessible = true
+            val jdbcConn = connField.get(session) as java.sql.Connection
+            val dialect = adapter.dialectAdapter()
+            jdbcConn.createStatement().use { stmt ->
+                stmt.execute("USE ${dialect.quoteIdentifier(database)}")
+                stmt.execute("TRUNCATE TABLE ${dialect.quoteIdentifier(table)}")
+            }
+            call.ok(true)
+        } catch (e: Exception) {
+            call.fail("TRUNCATE_TABLE_FAILED", e.message ?: "清空表失败")
+        }
     }
 
     // 数据编辑
@@ -262,8 +466,8 @@ fun Route.migrationRoutes() {
                 val duration = System.currentTimeMillis() - startTime
                 when {
                     reporter.isCancelled() -> taskMgr.markCancelled(task.id, duration)
-                    result.success -> taskMgr.markCompleted(task.id, duration)
-                    else -> taskMgr.markFailed(task.id, result.errorMessage ?: "迁移失败")
+                    result.success -> taskMgr.markCompleted(task.id, duration, result)
+                    else -> taskMgr.markFailed(task.id, result.errorMessage ?: "迁移失败", result)
                 }
             } catch (e: Exception) {
                 val duration = System.currentTimeMillis() - startTime
@@ -324,8 +528,8 @@ fun Route.syncRoutes() {
                 val duration = System.currentTimeMillis() - startTime
                 when {
                     reporter.isCancelled() -> taskMgr.markCancelled(task.id, duration)
-                    result.success -> taskMgr.markCompleted(task.id, duration)
-                    else -> taskMgr.markFailed(task.id, result.errorMessage ?: "同步失败")
+                    result.success -> taskMgr.markCompleted(task.id, duration, result)
+                    else -> taskMgr.markFailed(task.id, result.errorMessage ?: "同步失败", result)
                 }
             } catch (e: Exception) {
                 val duration = System.currentTimeMillis() - startTime
@@ -365,6 +569,15 @@ fun Route.taskRoutes() {
         val taskId = call.parameters["taskId"]!!
         taskMgr.cancel(taskId)
         call.ok(true)
+    }
+    delete("/{taskId}") {
+        val taskId = call.parameters["taskId"]!!
+        val deleted = taskMgr.delete(taskId)
+        if (deleted) call.ok(true) else call.fail("DELETE_FAILED", "任务正在运行或不存在，无法删除")
+    }
+    post("/clear-completed") {
+        val count = taskMgr.clearCompleted()
+        call.ok(mapOf("cleared" to count))
     }
 }
 

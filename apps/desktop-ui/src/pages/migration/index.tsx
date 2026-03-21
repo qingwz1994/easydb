@@ -114,15 +114,15 @@ export const MigrationPage: React.FC = () => {
   const handleStart = async () => {
     setSubmitting(true)
     try {
-      const result = await migrationApi.start({
+      await migrationApi.start({
         sourceConnectionId: sourceId,
         targetConnectionId: targetId,
         sourceDatabase: sourceDb,
         targetDatabase: targetDb,
         tables: [],
         mode,
-      }) as { taskId: string }
-      toast.success(`迁移任务已创建：${result.taskId}`)
+      })
+      toast.success('迁移任务已创建，可在任务中心查看进度')
       navigate('/task-center')
     } catch (e) {
       handleApiError(e, '创建迁移任务失败')

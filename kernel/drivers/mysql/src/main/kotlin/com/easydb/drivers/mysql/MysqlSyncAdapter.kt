@@ -74,6 +74,8 @@ class MysqlSyncAdapter : SyncAdapter {
         var successCount = 0
         var failureCount = 0
         val totalTables = tables.size
+        val tableRowCounts = mutableMapOf<String, Long>()  // 表名 → 实际写入行数
+        val tableErrors = mutableMapOf<String, String>()    // 表名 → 失败原因
 
         // 全限定前缀
         val sourcePrefix = "${dialect.quoteIdentifier(config.sourceDatabase)}."
@@ -117,10 +119,13 @@ class MysqlSyncAdapter : SyncAdapter {
                         tableName, useInsert, batchSize, reporter
                     )
 
+                    tableRowCounts[tableName] = rowCount
                     reporter.onStep(tableName, TaskStatus.COMPLETED, "同步 $rowCount 行")
                     reporter.onLog("INFO", "[$tableName] 同步完成，共 $rowCount 行${if (useInsert) "（INSERT）" else "（UPSERT）"}")
                     successCount++
                 } catch (e: Exception) {
+                    tableRowCounts[tableName] = 0L
+                    tableErrors[tableName] = e.message ?: "未知错误"
                     failureCount++
                     reporter.onStep(tableName, TaskStatus.FAILED, e.message)
                     reporter.onLog("ERROR", "[$tableName] 同步失败：${e.message}")
@@ -131,6 +136,16 @@ class MysqlSyncAdapter : SyncAdapter {
             restoreSessionSettings(targetConn, reporter)
         }
 
+        // ─── 数据验证（迁移后精确对比：COUNT(*) 查目标表实际行数）───
+        reporter.onLog("INFO", "开始数据验证，对比 ${tableRowCounts.size} 张表...")
+        val verification = buildVerification(
+            targetConn, config.targetDatabase, tableRowCounts, tableErrors, reporter
+        )
+        val matchCount = verification.count { it.status == "match" }
+        val mismatchCount = verification.count { it.status == "mismatch" }
+        val failedCount = verification.count { it.status == "failed" }
+        reporter.onLog("INFO", "数据验证完成：匹配 $matchCount，不匹配 $mismatchCount，失败 $failedCount")
+
         reporter.onProgress(100, "同步完成")
         reporter.onLog("INFO", "同步结束：成功 $successCount，失败 $failureCount")
 
@@ -138,7 +153,8 @@ class MysqlSyncAdapter : SyncAdapter {
             success = failureCount == 0,
             successCount = successCount,
             failureCount = failureCount,
-            errorMessage = if (failureCount > 0) "部分表同步失败" else null
+            errorMessage = if (failureCount > 0) "部分表同步失败" else null,
+            verification = verification
         )
     }
 
@@ -251,6 +267,11 @@ class MysqlSyncAdapter : SyncAdapter {
 
                 if (columns.isEmpty()) return 0L
 
+                // 识别 TIME 类型列，绕过 JDBC Time 解析（修复 24:00:00 等超范围值）
+                val timeColumns = (1..columnCount).filter {
+                    meta.getColumnType(it) == java.sql.Types.TIME
+                }.toSet()
+
                 val cols = columns.joinToString(", ") { dialect.quoteIdentifier(it) }
                 val placeholders = columns.joinToString(", ") { "?" }
 
@@ -271,7 +292,11 @@ class MysqlSyncAdapter : SyncAdapter {
                     targetConn.prepareStatement(sql).use { ps ->
                         while (rs.next()) {
                             for (i in 1..columnCount) {
-                                ps.setObject(i, rs.getObject(i))
+                                if (i in timeColumns) {
+                                    ps.setString(i, rs.getString(i))
+                                } else {
+                                    ps.setObject(i, rs.getObject(i))
+                                }
                             }
                             ps.addBatch()
                             totalRows++
@@ -296,5 +321,59 @@ class MysqlSyncAdapter : SyncAdapter {
         }
 
         return totalRows
+    }
+
+    /**
+     * 数据验证：对比源库实际读取行数与目标库精确行数
+     * sourceRows = 同步过程中从源表实际读取的行数（精确值）
+     * targetRows = 目标表 COUNT(*)（精确值，迁移后执行）
+     */
+    private fun buildVerification(
+        targetConn: java.sql.Connection,
+        targetDatabase: String,
+        tableRowCounts: Map<String, Long>,
+        tableErrors: Map<String, String>,
+        reporter: TaskReporter
+    ): List<TableVerifyResult> {
+        val targetPrefix = dialect.quoteIdentifier(targetDatabase)
+
+        return tableRowCounts.map { (tableName, sourceRows) ->
+            val error = tableErrors[tableName]
+
+            val targetRows = if (error != null) {
+                0L // 失败的表不需要 COUNT
+            } else {
+                try {
+                    targetConn.createStatement().use { stmt ->
+                        stmt.executeQuery(
+                            "SELECT COUNT(*) FROM $targetPrefix.${dialect.quoteIdentifier(tableName)}"
+                        ).use { rs ->
+                            if (rs.next()) rs.getLong(1) else 0L
+                        }
+                    }
+                } catch (e: Exception) {
+                    reporter.onLog("WARN", "[$tableName] COUNT(*) 查询失败：${e.message}")
+                    -1L
+                }
+            }
+
+            val status = when {
+                error != null -> "failed"
+                targetRows < 0L -> "failed" // COUNT 查询本身出错
+                sourceRows == targetRows -> "match"
+                else -> "mismatch"
+            }
+
+            TableVerifyResult(
+                tableName = tableName,
+                sourceRows = sourceRows,
+                targetRows = if (targetRows < 0L) 0L else targetRows,
+                status = status,
+                errorMessage = error ?: if (targetRows < 0L) "验证查询失败" else null
+            )
+        }.sortedWith(compareBy(
+            { if (it.status == "failed") 0 else if (it.status == "mismatch") 1 else 2 },
+            { it.tableName }
+        ))
     }
 }

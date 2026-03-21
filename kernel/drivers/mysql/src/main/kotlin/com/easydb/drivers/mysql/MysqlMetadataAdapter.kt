@@ -181,4 +181,49 @@ class MysqlMetadataAdapter : MetadataAdapter {
         }
         return ""
     }
+
+    override fun createDatabase(session: DatabaseSession, name: String, charset: String, collation: String) {
+        val conn = (session as MysqlDatabaseSession).connection
+        conn.createStatement().use { stmt ->
+            stmt.execute("CREATE DATABASE `$name` CHARACTER SET $charset COLLATE $collation")
+        }
+    }
+
+    override fun dropDatabase(session: DatabaseSession, name: String) {
+        val conn = (session as MysqlDatabaseSession).connection
+        conn.createStatement().use { stmt ->
+            stmt.execute("DROP DATABASE `$name`")
+        }
+    }
+
+    override fun listCharsets(session: DatabaseSession): List<CharsetInfo> {
+        val conn = (session as MysqlDatabaseSession).connection
+        val charsetMap = mutableMapOf<String, MutableList<String>>()
+        val defaultCollations = mutableMapOf<String, String>()
+
+        // 获取所有 collation 及其对应的 charset
+        conn.createStatement().use { stmt ->
+            stmt.executeQuery("""
+                SELECT CHARACTER_SET_NAME, COLLATION_NAME, IS_DEFAULT
+                FROM INFORMATION_SCHEMA.COLLATIONS
+                ORDER BY CHARACTER_SET_NAME, COLLATION_NAME
+            """.trimIndent()).use { rs ->
+                while (rs.next()) {
+                    val cs = rs.getString("CHARACTER_SET_NAME")
+                    val coll = rs.getString("COLLATION_NAME")
+                    val isDefault = rs.getString("IS_DEFAULT") == "Yes"
+                    charsetMap.getOrPut(cs) { mutableListOf() }.add(coll)
+                    if (isDefault) defaultCollations[cs] = coll
+                }
+            }
+        }
+
+        return charsetMap.map { (cs, colls) ->
+            CharsetInfo(
+                charset = cs,
+                defaultCollation = defaultCollations[cs] ?: colls.first(),
+                collations = colls
+            )
+        }.sortedBy { it.charset }
+    }
 }

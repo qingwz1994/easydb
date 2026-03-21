@@ -23,7 +23,15 @@ class MysqlDialectAdapter : DialectAdapter {
             val line = buildString {
                 append("  ${quoteIdentifier(col.name)} ${col.type}")
                 if (!col.nullable) append(" NOT NULL")
-                if (col.defaultValue != null) append(" DEFAULT '${col.defaultValue}'")
+                if (!col.defaultValue.isNullOrBlank() && !col.isAutoIncrement) {
+                    val dv = col.defaultValue!!.trim()
+                    // CURRENT_TIMESTAMP、NULL 等关键字不加引号
+                    if (dv.uppercase() in listOf("CURRENT_TIMESTAMP", "NULL", "NOW()") || dv.startsWith("'")) {
+                        append(" DEFAULT $dv")
+                    } else {
+                        append(" DEFAULT '$dv'")
+                    }
+                }
                 if (col.isAutoIncrement) append(" AUTO_INCREMENT")
                 if (!col.comment.isNullOrBlank()) append(" COMMENT '${col.comment}'")
             }

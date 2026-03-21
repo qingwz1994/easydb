@@ -1,12 +1,13 @@
-import React, { useEffect, useState, useCallback, useRef, useDeferredValue, useMemo } from 'react'
+import React, { useEffect, useState, useCallback, useRef, useDeferredValue, useMemo, type MouseEvent as ReactMouseEvent } from 'react'
 import {
-  Layout, Tree, Tabs, Table, Typography, Input, Space, Button, Tag, Tooltip, Select,
+  Layout, Tree, Tabs, Table, Typography, Input, Space, Button, Tag, Tooltip, Select, Modal,
   theme, Card, Statistic, Row, Col, Breadcrumb,
 } from 'antd'
 import {
   DatabaseOutlined, TableOutlined, EyeOutlined,
   SearchOutlined, CodeOutlined, ThunderboltOutlined, ReloadOutlined,
   ApiOutlined, CloseOutlined, PlusOutlined, LeftOutlined,
+  DeleteOutlined, EditOutlined,
 } from '@ant-design/icons'
 import type { DataNode } from 'antd/es/tree'
 import type { DatabaseInfo, TableInfo, ColumnInfo, IndexInfo, ConnectionConfig } from '@/types'
@@ -17,7 +18,11 @@ import { metadataApi, connectionApi } from '@/services/api'
 import { handleApiError, toast } from '@/utils/notification'
 import { EmptyState } from '@/components/EmptyState'
 import { EditableDataTable } from '@/components/EditableDataTable'
+import { CreateDatabaseModal } from '@/components/CreateDatabaseModal'
+import { EditDatabaseModal } from '@/components/EditDatabaseModal'
+import { TableDesigner } from '@/components/TableDesigner'
 import { useNavigate } from 'react-router-dom'
+import type { MenuProps } from 'antd'
 
 const { Sider, Content } = Layout
 const { Text } = Typography
@@ -147,8 +152,25 @@ export const WorkbenchPage: React.FC = () => {
   const [loadingConns, setLoadingConns] = useState<Set<string>>(new Set())
   const [searchText, setSearchText] = useState('')
   const deferredSearch = useDeferredValue(searchText)
+  const [detailTab, setDetailTab] = useState('preview')
+  const tabLoadedRef = useRef<{ table: string; loaded: Set<string> }>({ table: '', loaded: new Set() })
 
   const setPendingSql = useSqlEditorStore((s) => s.setPendingSql)
+
+  // --- 右键菜单状态（单个 Dropdown 代替 N 个）---
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; nodeKey: string } | null>(null)
+
+  // --- 请求竞态控制 ---
+  const loadSeqRef = useRef(0)
+
+  // --- 新建数据库弹窗状态 ---
+  const [createDbModal, setCreateDbModal] = useState<{ connectionId: string; connectionName: string } | null>(null)
+
+  // --- 编辑数据库弹窗状态 ---
+  const [editDbModal, setEditDbModal] = useState<{ connectionId: string; databaseName: string } | null>(null)
+
+  // --- 新建/编辑表状态 ---
+  const [createTableCtx, setCreateTableCtx] = useState<{ connectionId: string; connectionName: string; database: string; editTableName?: string } | null>(null)
 
   // --- 自动加载连接列表 ---
   useEffect(() => {
@@ -196,23 +218,71 @@ export const WorkbenchPage: React.FC = () => {
     }
   }, [setObjectsMap])
 
-  // --- 加载表详情 ---
-  const loadTableDetail = useCallback(async (connId: string, dbName: string, tableName: string) => {
+  // --- 懒加载表详情（按当前活动 Tab 加载）---
+  const loadTabData = useCallback(async (connId: string, dbName: string, tableName: string, tab: string) => {
+    const seq = ++loadSeqRef.current
+    const ref = tabLoadedRef.current
+    const needColumns = ref.table !== tableName || !ref.loaded.has('columns')
+    const needTab = ref.table !== tableName || !ref.loaded.has(tab)
+    if (!needColumns && !needTab) return
     try {
-      const [def, idxs, rows, ddlStr] = await Promise.all([
-        metadataApi.tableDefinition(connId, dbName, tableName) as Promise<{ columns: ColumnInfo[] }>,
-        metadataApi.indexes(connId, dbName, tableName) as Promise<IndexInfo[]>,
-        metadataApi.previewRows(connId, dbName, tableName) as Promise<Record<string, unknown>[]>,
-        metadataApi.ddl(connId, dbName, tableName) as Promise<string>,
-      ])
-      setColumns(def.columns || [])
-      setIndexes(idxs)
-      setPreviewRows(rows)
-      setDdl(ddlStr)
+      // columns 始终加载（列数据预览、面包屑都需要）
+      const promises: Promise<void>[] = []
+      if (needColumns) {
+        promises.push(
+          metadataApi.tableDefinition(connId, dbName, tableName).then((def: unknown) => {
+            if (seq !== loadSeqRef.current) return
+            setColumns((def as { columns: ColumnInfo[] }).columns || [])
+            if (tabLoadedRef.current.table === tableName) tabLoadedRef.current.loaded.add('columns')
+          })
+        )
+      }
+      if (needTab && tab !== 'columns') {
+        if (tab === 'preview') {
+          promises.push(
+            metadataApi.previewRows(connId, dbName, tableName).then((rows: unknown) => {
+              if (seq !== loadSeqRef.current) return
+              setPreviewRows(rows as Record<string, unknown>[])
+              if (tabLoadedRef.current.table === tableName) tabLoadedRef.current.loaded.add('preview')
+            })
+          )
+        } else if (tab === 'indexes') {
+          promises.push(
+            metadataApi.indexes(connId, dbName, tableName).then((idxs: unknown) => {
+              if (seq !== loadSeqRef.current) return
+              setIndexes(idxs as IndexInfo[])
+              if (tabLoadedRef.current.table === tableName) tabLoadedRef.current.loaded.add('indexes')
+            })
+          )
+        } else if (tab === 'ddl') {
+          promises.push(
+            metadataApi.ddl(connId, dbName, tableName).then((ddlStr: unknown) => {
+              if (seq !== loadSeqRef.current) return
+              setDdl(ddlStr as string)
+              if (tabLoadedRef.current.table === tableName) tabLoadedRef.current.loaded.add('ddl')
+            })
+          )
+        }
+      }
+      await Promise.all(promises)
     } catch (e) {
+      if (seq !== loadSeqRef.current) return
       handleApiError(e, '加载表详情失败')
     }
   }, [])
+
+  // 表节点选中时初始化加载（仅加载当前活动 Tab）
+  const loadTableDetail = useCallback((connId: string, dbName: string, tableName: string) => {
+    // 重置已加载记录
+    tabLoadedRef.current = { table: tableName, loaded: new Set() }
+    // 清空旧数据
+    setColumns([])
+    setIndexes([])
+    setDdl('')
+    setPreviewRows([])
+    // 仅加载当前 Tab 的数据
+    loadTabData(connId, dbName, tableName, detailTab)
+  }, [detailTab, loadTabData])
 
   // --- 添加连接到工作台 ---
   const handleAddConnection = useCallback(async (connId: string) => {
@@ -375,17 +445,11 @@ export const WorkbenchPage: React.FC = () => {
     const key = String(info.node.key)
 
     if (key.startsWith('conn:')) {
-      // 选中连接节点
       const connId = key.slice(5)
       const conn = openConnections.find((c) => c.id === connId)
       setSelectedCtx({ connectionId: connId })
       setActiveConnection(connId, conn?.name ?? null)
-      setColumns([])
-      setIndexes([])
-      setDdl('')
-      setPreviewRows([])
     } else if (key.startsWith('db:')) {
-      // 选中数据库节点: "db:{connId}:{dbName}"
       const parts = key.slice(3).split(':')
       const connId = parts[0]
       const dbName = parts.slice(1).join(':')
@@ -394,12 +458,7 @@ export const WorkbenchPage: React.FC = () => {
       setActiveConnection(connId, conn?.name ?? null)
       setActiveDatabase(dbName)
       loadTables(connId, dbName)
-      setColumns([])
-      setIndexes([])
-      setDdl('')
-      setPreviewRows([])
     } else if (key.startsWith('obj:')) {
-      // 选中对象节点: "obj:{connId}:{dbName}:{objName}"
       const parts = key.slice(4).split(':')
       const connId = parts[0]
       const dbName = parts[1]
@@ -411,7 +470,6 @@ export const WorkbenchPage: React.FC = () => {
       setActiveTable(objName)
       loadTableDetail(connId, dbName, objName)
     } else if (key.startsWith('cat:')) {
-      // 选中分类节点: "cat:{connId}:{dbName}:{catKey}"
       const parts = key.slice(4).split(':')
       const connId = parts[0]
       const dbName = parts[1]
@@ -420,10 +478,6 @@ export const WorkbenchPage: React.FC = () => {
       setSelectedCtx({ connectionId: connId, database: dbName, category: catKey })
       setActiveConnection(connId, conn?.name ?? null)
       setActiveDatabase(dbName)
-      setColumns([])
-      setIndexes([])
-      setDdl('')
-      setPreviewRows([])
     }
   }
 
@@ -450,6 +504,210 @@ export const WorkbenchPage: React.FC = () => {
       }
     }
   }
+
+  // --- 右键菜单 ---
+  const getContextMenuItems = useCallback((nodeKey: string): MenuProps['items'] => {
+    // 连接节点：新建数据库 / 刷新
+    if (nodeKey.startsWith('conn:')) {
+      const connId = nodeKey.slice(5)
+      const conn = openConnections.find((c) => c.id === connId)
+      return [
+        {
+          key: 'create-db',
+          icon: <PlusOutlined />,
+          label: '新建数据库',
+          onClick: () => setCreateDbModal({ connectionId: connId, connectionName: conn?.name ?? '' }),
+        },
+        {
+          key: 'refresh-conn',
+          icon: <ReloadOutlined />,
+          label: '刷新',
+          onClick: () => loadDatabases(connId),
+        },
+      ]
+    }
+    // 数据库节点：刷新 / 删除数据库
+    if (nodeKey.startsWith('db:')) {
+      const parts = nodeKey.slice(3).split(':')
+      const connId = parts[0]
+      const dbName = parts.slice(1).join(':')
+      return [
+        {
+          key: 'edit-db',
+          icon: <EditOutlined />,
+          label: '编辑数据库',
+          onClick: () => setEditDbModal({ connectionId: connId, databaseName: dbName }),
+        },
+        {
+          key: 'refresh-db',
+          icon: <ReloadOutlined />,
+          label: '刷新',
+          onClick: () => loadTables(connId, dbName),
+        },
+        { type: 'divider' },
+        {
+          key: 'drop-db',
+          icon: <DeleteOutlined />,
+          label: '删除数据库',
+          danger: true,
+          onClick: () => {
+            Modal.confirm({
+              title: `确认删除数据库「${dbName}」？`,
+              content: '此操作不可恢复，数据库中的所有数据将被永久删除。',
+              okText: '删除',
+              okType: 'danger',
+              cancelText: '取消',
+              onOk: async () => {
+                try {
+                  await metadataApi.dropDatabase(connId, dbName)
+                  toast.success(`数据库「${dbName}」已删除`)
+                  loadDatabases(connId)
+                  if (selectedCtx?.connectionId === connId && selectedCtx?.database === dbName) {
+                    setSelectedCtx({ connectionId: connId })
+                  }
+                } catch (e) {
+                  handleApiError(e, '删除数据库失败')
+                }
+              },
+            })
+          },
+        },
+      ]
+    }
+    // 分类节点（表/视图/触发器）
+    if (nodeKey.startsWith('cat:')) {
+      const parts = nodeKey.slice(4).split(':')
+      const connId = parts[0]
+      const dbName = parts[1]
+      const catKey = parts.slice(2).join(':')
+      const items: MenuProps['items'] = []
+      if (catKey === 'tables') {
+        items.push({
+          key: 'create-table',
+          icon: <PlusOutlined />,
+          label: '新建表',
+          onClick: () => {
+            const conn = openConnections.find((c) => c.id === connId)
+            setCreateTableCtx({ connectionId: connId, connectionName: conn?.name ?? '', database: dbName })
+          },
+        })
+      }
+      items.push({
+        key: 'refresh-cat',
+        icon: <ReloadOutlined />,
+        label: '刷新',
+        onClick: () => loadTables(connId, dbName),
+      })
+      return items
+    }
+    // 表/对象节点：删除表 / 清空表
+    if (nodeKey.startsWith('obj:')) {
+      const parts = nodeKey.slice(4).split(':')
+      const connId = parts[0]
+      const dbName = parts[1]
+      const objName = parts.slice(2).join(':')
+      return [
+        {
+          key: 'design-table',
+          icon: <EditOutlined />,
+          label: '设计表',
+          onClick: () => {
+            const conn = openConnections.find((c) => c.id === connId)
+            setCreateTableCtx({ connectionId: connId, connectionName: conn?.name ?? '', database: dbName, editTableName: objName })
+          },
+        },
+        {
+          key: 'rename-table',
+          icon: <EditOutlined />,
+          label: '重命名',
+          onClick: () => {
+            let newName = objName
+            Modal.confirm({
+              title: `重命名表「${objName}」`,
+              content: (
+                <Input
+                  defaultValue={objName}
+                  onChange={(e) => { newName = e.target.value }}
+                  style={{ marginTop: 8 }}
+                  autoFocus
+                />
+              ),
+              okText: '确定',
+              cancelText: '取消',
+              onOk: async () => {
+                if (!newName.trim() || newName === objName) return
+                try {
+                  await metadataApi.renameTable(connId, dbName, objName, newName)
+                  toast.success(`表已重命名为「${newName}」`)
+                  loadTables(connId, dbName)
+                  if (selectedCtx?.table === objName) {
+                    setSelectedCtx({ connectionId: connId, database: dbName, table: newName })
+                  }
+                } catch (e) {
+                  handleApiError(e, '重命名表失败')
+                }
+              },
+            })
+          },
+        },
+        {
+          key: 'truncate-table',
+          icon: <DeleteOutlined />,
+          label: '清空表',
+          onClick: () => {
+            Modal.confirm({
+              title: `确认清空表「${objName}」？`,
+              content: '此操作将删除表中所有数据，但保留表结构。操作不可恢复。',
+              okText: '清空',
+              okType: 'danger',
+              cancelText: '取消',
+              onOk: async () => {
+                try {
+                  await metadataApi.truncateTable(connId, dbName, objName)
+                  toast.success(`表「${objName}」已清空`)
+                } catch (e) {
+                  handleApiError(e, '清空表失败')
+                }
+              },
+            })
+          },
+        },
+        { type: 'divider' },
+        {
+          key: 'drop-table',
+          icon: <DeleteOutlined />,
+          label: '删除表',
+          danger: true,
+          onClick: () => {
+            Modal.confirm({
+              title: `确认删除表「${objName}」？`,
+              content: '此操作将永久删除该表及其所有数据，不可恢复。',
+              okText: '删除',
+              okType: 'danger',
+              cancelText: '取消',
+              onOk: async () => {
+                try {
+                  await metadataApi.dropTable(connId, dbName, objName)
+                  toast.success(`表「${objName}」已删除`)
+                  loadTables(connId, dbName)
+                  if (selectedCtx?.connectionId === connId && selectedCtx?.database === dbName && selectedCtx?.table === objName) {
+                    setSelectedCtx({ connectionId: connId, database: dbName })
+                  }
+                } catch (e) {
+                  handleApiError(e, '删除表失败')
+                }
+              },
+            })
+          },
+        },
+      ]
+    }
+    return []
+  }, [openConnections, loadDatabases, loadTables, selectedCtx, setSelectedCtx])
+
+  // ctxMenuItems 缓存（必须在 getContextMenuItems 之后）
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const ctxMenuItems = useMemo(() => ctxMenu ? getContextMenuItems(ctxMenu.nodeKey) : [], [ctxMenu, getContextMenuItems])
 
   // 可添加的连接列表（排除已在工作台中的）
   const availableConnections = connections.filter(
@@ -591,23 +849,78 @@ export const WorkbenchPage: React.FC = () => {
               </Text>
             </div>
           ) : (
-            <Tree
-              className="workbench-object-tree"
-              treeData={treeData}
-              showIcon
-              blockNode
-              onSelect={handleTreeSelect}
-              selectedKeys={selectedTreeKeys}
-              expandedKeys={expandedKeys}
-              onExpand={handleTreeExpand}
-            />
+            <>
+              <Tree
+                className="workbench-object-tree"
+                treeData={treeData}
+                showIcon
+                blockNode
+                onSelect={handleTreeSelect}
+                selectedKeys={selectedTreeKeys}
+                expandedKeys={expandedKeys}
+                onExpand={handleTreeExpand}
+                onRightClick={({ event, node }) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  const key = String(node.key)
+                  const nativeEvent = event as unknown as ReactMouseEvent
+                  setCtxMenu({ x: nativeEvent.clientX, y: nativeEvent.clientY, nodeKey: key })
+                }}
+              />
+              {ctxMenu && ctxMenuItems && ctxMenuItems.length > 0 && (
+                <>
+                  <div
+                    style={{ position: 'fixed', inset: 0, zIndex: 999 }}
+                    onClick={() => setCtxMenu(null)}
+                    onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null) }}
+                  />
+                  <div style={{
+                    position: 'fixed', left: ctxMenu.x, top: ctxMenu.y, zIndex: 1000,
+                    background: token.colorBgElevated, borderRadius: token.borderRadius,
+                    boxShadow: token.boxShadowSecondary, padding: '4px 0', minWidth: 160,
+                  }}>
+                    {ctxMenuItems.map((item: any, i: number) => {
+                      if (!item) return null
+                      if (item.type === 'divider') return <div key={`d${i}`} style={{ height: 1, background: token.colorBorderSecondary, margin: '4px 0' }} />
+                      return (
+                        <div
+                          key={item.key}
+                          style={{
+                            padding: '5px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
+                            color: item.danger ? token.colorError : token.colorText, fontSize: 13,
+                          }}
+                          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = token.colorBgTextHover }}
+                          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+                          onClick={() => { item.onClick?.(); setCtxMenu(null) }}
+                        >
+                          {item.icon}
+                          <span>{item.label}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </>
+              )}
+            </>
           )}
         </div>
       </Sider>
 
       {/* 右侧详情区 */}
       <Content style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', background: token.colorBgLayout }}>
-        {selectedCtx?.table && selectedCtx?.database ? (
+        {createTableCtx ? (
+          <TableDesigner
+            connectionId={createTableCtx.connectionId}
+            connectionName={createTableCtx.connectionName}
+            database={createTableCtx.database}
+            editTableName={createTableCtx.editTableName}
+            onSuccess={() => {
+              loadTables(createTableCtx.connectionId, createTableCtx.database)
+              setCreateTableCtx(null)
+            }}
+            onCancel={() => setCreateTableCtx(null)}
+          />
+        ) : selectedCtx?.table && selectedCtx?.database ? (
           <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
             <style>{`
               .workbench-detail-tabs.ant-tabs {
@@ -706,7 +1019,14 @@ export const WorkbenchPage: React.FC = () => {
             <Tabs
               className="workbench-detail-tabs"
               size="small"
-              defaultActiveKey="preview"
+              activeKey={detailTab}
+              onChange={(key) => {
+                setDetailTab(key)
+                // 切换 Tab 时懒加载
+                if (selectedCtx?.table && selectedCtx?.database) {
+                  loadTabData(selectedCtx.connectionId, selectedCtx.database, selectedCtx.table, key)
+                }
+              }}
               style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '0 16px' }}
               tabBarStyle={{ flexShrink: 0, marginBottom: 0 }}
               items={[
@@ -909,6 +1229,28 @@ export const WorkbenchPage: React.FC = () => {
           <EmptyState description={openConnections.length === 0 ? '从左侧添加连接开始浏览' : '选择左侧对象树中的数据库或表以查看详情'} />
         )}
       </Content>
+
+      {/* 新建数据库弹窗 */}
+      {createDbModal && (
+        <CreateDatabaseModal
+          open={!!createDbModal}
+          connectionId={createDbModal.connectionId}
+          connectionName={createDbModal.connectionName}
+          onClose={() => setCreateDbModal(null)}
+          onSuccess={() => loadDatabases(createDbModal.connectionId)}
+        />
+      )}
+
+      {/* 编辑数据库弹窗 */}
+      {editDbModal && (
+        <EditDatabaseModal
+          open={!!editDbModal}
+          connectionId={editDbModal.connectionId}
+          databaseName={editDbModal.databaseName}
+          onClose={() => setEditDbModal(null)}
+          onSuccess={() => loadDatabases(editDbModal.connectionId)}
+        />
+      )}
     </Layout>
   )
 }

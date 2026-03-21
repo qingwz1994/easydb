@@ -1,12 +1,13 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import {
   Layout, Table, Typography, Space, Select, Button, Progress, Input,
-  theme, Descriptions, Card, Tag,
+  theme, Descriptions, Card, Tag, Collapse,
 } from 'antd'
 import {
   UnorderedListOutlined, ReloadOutlined,
   ClockCircleOutlined, StopOutlined, SearchOutlined,
-  DownloadOutlined,
+  DownloadOutlined, CheckCircleOutlined, WarningOutlined, CloseCircleOutlined,
+  DeleteOutlined, ClearOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import type { TaskInfo, TaskLog } from '@/types'
@@ -36,6 +37,7 @@ export const TaskCenterPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>()
   const [typeFilter, setTypeFilter] = useState<string>()
   const [searchText, setSearchText] = useState('')
+  const [logExpanded, setLogExpanded] = useState(false)
   const [, setTick] = useState(0)
 
   const loadTasks = useCallback(async () => {
@@ -67,11 +69,11 @@ export const TaskCenterPage: React.FC = () => {
 
     const timer = setInterval(() => {
       loadTasks()
-      if (selectedTaskId) loadLogs(selectedTaskId)
+      if (selectedTaskId && logExpanded) loadLogs(selectedTaskId)
       setTick((t) => t + 1)
     }, 2000)
     return () => clearInterval(timer)
-  }, [tasks, loadTasks, selectedTaskId, loadLogs])
+  }, [tasks, loadTasks, selectedTaskId, loadLogs, logExpanded])
 
   // 搜索 + 类型过滤
   const filteredTasks = tasks.filter((t) => {
@@ -82,7 +84,15 @@ export const TaskCenterPage: React.FC = () => {
 
   const handleSelectTask = (task: TaskInfo) => {
     setSelectedTask(task.id)
-    loadLogs(task.id)
+    setLogExpanded(false) // 切换任务时折叠日志
+  }
+
+  const handleLogExpand = (keys: string | string[]) => {
+    const expanded = Array.isArray(keys) ? keys.includes('logs') : keys === 'logs'
+    setLogExpanded(expanded)
+    if (expanded && selectedTaskId) {
+      loadLogs(selectedTaskId)
+    }
   }
 
   const handleCancel = (task: TaskInfo) => {
@@ -93,6 +103,34 @@ export const TaskCenterPage: React.FC = () => {
       onOk: async () => {
         await taskApi.cancel(task.id)
         toast.success('任务已取消')
+        loadTasks()
+      },
+    })
+  }
+
+  const handleDelete = (task: TaskInfo) => {
+    confirmDanger({
+      title: '删除任务',
+      content: `确定要删除任务「${task.name}」吗？删除后不可恢复。`,
+      okText: '删除',
+      onOk: async () => {
+        await taskApi.delete(task.id)
+        toast.success('任务已删除')
+        if (selectedTaskId === task.id) setSelectedTask('')
+        loadTasks()
+      },
+    })
+  }
+
+  const handleClearCompleted = () => {
+    confirmDanger({
+      title: '清空已完成任务',
+      content: '确定要清空所有已完成、失败和已取消的任务吗？',
+      okText: '清空',
+      onOk: async () => {
+        const res = await taskApi.clearCompleted() as { cleared: number }
+        toast.success(`已清空 ${res.cleared} 条任务`)
+        setSelectedTask('')
         loadTasks()
       },
     })
@@ -156,9 +194,14 @@ export const TaskCenterPage: React.FC = () => {
     {
       title: '操作', key: 'actions', width: 80,
       render: (_, record) => (
-        record.status === 'running' ? (
-          <Button type="text" size="small" danger icon={<StopOutlined />} onClick={() => handleCancel(record)} />
-        ) : null
+        <Space size={0}>
+          {record.status === 'running' && (
+            <Button type="text" size="small" danger icon={<StopOutlined />} onClick={(e) => { e.stopPropagation(); handleCancel(record) }} />
+          )}
+          {record.status !== 'running' && record.status !== 'pending' && (
+            <Button type="text" size="small" icon={<DeleteOutlined />} onClick={(e) => { e.stopPropagation(); handleDelete(record) }} />
+          )}
+        </Space>
       ),
     },
   ]
@@ -200,6 +243,7 @@ export const TaskCenterPage: React.FC = () => {
               { value: 'cancelled', label: '已取消' },
             ]}
           />
+          <Button icon={<ClearOutlined />} onClick={handleClearCompleted} disabled={tasks.length === 0}>清空</Button>
           <Button icon={<ReloadOutlined />} onClick={loadTasks} />
         </Space>
       </div>
@@ -251,6 +295,14 @@ export const TaskCenterPage: React.FC = () => {
                 <Descriptions.Item label="类型">{selectedTask.type === 'migration' ? '迁移' : '同步'}</Descriptions.Item>
                 <Descriptions.Item label="状态"><TaskStatusTag status={selectedTask.status} /></Descriptions.Item>
                 <Descriptions.Item label="进度"><Progress percent={selectedTask.progress} size="small" style={{ marginBottom: 0 }} /></Descriptions.Item>
+                {(selectedTask.successCount != null || selectedTask.failureCount != null) && (
+                  <Descriptions.Item label="表统计">
+                    共 {(selectedTask.successCount ?? 0) + (selectedTask.failureCount ?? 0)} 张
+                    <Text type="secondary" style={{ marginLeft: 4, fontSize: 12 }}>
+                      （成功 {selectedTask.successCount ?? 0} · 失败 {selectedTask.failureCount ?? 0}）
+                    </Text>
+                  </Descriptions.Item>
+                )}
                 {selectedTask.createdAt && (
                   <Descriptions.Item label="创建时间">{formatDateTime(selectedTask.createdAt)}</Descriptions.Item>
                 )}
@@ -280,20 +332,87 @@ export const TaskCenterPage: React.FC = () => {
                 </Card>
               )}
 
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <Text strong style={{ fontSize: 13 }}>执行日志</Text>
-                  <Button
-                    size="small"
-                    icon={<DownloadOutlined />}
-                    onClick={handleExportLogs}
-                    disabled={selectedLogs.length === 0}
-                  >
-                    导出
-                  </Button>
-                </div>
-                <LogPanel logs={selectedLogs} height={240} />
-              </div>
+              {/* 数据验证报告 */}
+              {selectedTask.verification && selectedTask.verification.length > 0 && (() => {
+                const v = selectedTask.verification!
+                const matchCount = v.filter(i => i.status === 'match').length
+                const mismatchCount = v.filter(i => i.status === 'mismatch').length
+                const failedCount = v.filter(i => i.status === 'failed').length
+                const anomalies = v.filter(i => i.status !== 'match')
+                const matched = v.filter(i => i.status === 'match')
+
+                const renderItem = (item: typeof v[0]) => (
+                  <div key={item.tableName} style={{ marginBottom: 6 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Text style={{ fontSize: 12, fontFamily: 'monospace' }}>{item.tableName}</Text>
+                      <Space size={8}>
+                        <Text type="secondary" style={{ fontSize: 11 }}>
+                          {item.sourceRows.toLocaleString()} → {item.targetRows.toLocaleString()}
+                        </Text>
+                        {item.status === 'match' && <Tag color="success" style={{ margin: 0 }}>匹配</Tag>}
+                        {item.status === 'mismatch' && <Tag color="warning" style={{ margin: 0 }}>不匹配</Tag>}
+                        {item.status === 'failed' && <Tag color="error" style={{ margin: 0 }}>失败</Tag>}
+                      </Space>
+                    </div>
+                    {item.errorMessage && (
+                      <Text type="danger" style={{ fontSize: 11, paddingLeft: 12 }}>{item.errorMessage}</Text>
+                    )}
+                  </div>
+                )
+
+                return (
+                  <Card size="small" title={
+                    <Space>
+                      <span>📊 数据验证</span>
+                      <Space size={12} style={{ fontSize: 12, fontWeight: 'normal' }}>
+                        <span><CheckCircleOutlined style={{ color: token.colorSuccess }} /> {matchCount}</span>
+                        {mismatchCount > 0 && <span><WarningOutlined style={{ color: token.colorWarning }} /> {mismatchCount}</span>}
+                        {failedCount > 0 && <span><CloseCircleOutlined style={{ color: token.colorError }} /> {failedCount}</span>}
+                      </Space>
+                    </Space>
+                  }>
+                    <Collapse
+                      size="small"
+                      defaultActiveKey={anomalies.length > 0 ? ['anomalies'] : ['matched']}
+                      items={[
+                        ...(anomalies.length > 0 ? [{
+                          key: 'anomalies',
+                          label: <Text type="danger" style={{ fontSize: 12 }}>异常项（{anomalies.length}）</Text>,
+                          children: <div>{anomalies.map(renderItem)}</div>,
+                        }] : []),
+                        ...(matched.length > 0 ? [{
+                          key: 'matched',
+                          label: <Text type="secondary" style={{ fontSize: 12 }}>已匹配（{matched.length}）</Text>,
+                          children: <div style={{ maxHeight: 200, overflow: 'auto' }}>{matched.map(renderItem)}</div>,
+                        }] : []),
+                      ]}
+                    />
+                  </Card>
+                )
+              })()}
+
+              <Collapse
+                size="small"
+                activeKey={logExpanded ? ['logs'] : []}
+                onChange={handleLogExpand}
+                items={[{
+                  key: 'logs',
+                  label: (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                      <Text strong style={{ fontSize: 13 }}>执行日志</Text>
+                      <Button
+                        size="small"
+                        icon={<DownloadOutlined />}
+                        onClick={(e) => { e.stopPropagation(); handleExportLogs() }}
+                        disabled={selectedLogs.length === 0}
+                      >
+                        导出
+                      </Button>
+                    </div>
+                  ),
+                  children: <LogPanel logs={selectedLogs} height={240} />,
+                }]}
+              />
             </Space>
           </Sider>
         )}

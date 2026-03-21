@@ -109,6 +109,15 @@ export interface SqlHistory {
   connectionId: string
 }
 
+// 数据验证结果（逐表）
+export interface TableVerifyResult {
+  tableName: string
+  sourceRows: number
+  targetRows: number
+  status: 'match' | 'mismatch' | 'failed'
+  errorMessage?: string
+}
+
 // 任务信息
 export interface TaskInfo {
   id: string
@@ -125,6 +134,7 @@ export interface TaskInfo {
   skippedCount?: number
   errorMessage?: string
   progressMessage?: string
+  verification?: TableVerifyResult[]
 }
 
 // 任务步骤

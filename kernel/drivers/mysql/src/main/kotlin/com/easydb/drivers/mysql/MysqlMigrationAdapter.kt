@@ -70,6 +70,8 @@ class MysqlMigrationAdapter : MigrationAdapter {
         var successCount = 0
         var failureCount = 0
         val totalTables = tables.size
+        val tableRowCounts = mutableMapOf<String, Long>()  // 表名 → 实际写入行数
+        val tableErrors = mutableMapOf<String, String>()    // 表名 → 失败原因
 
         reporter.onLog("INFO", "开始迁移：${config.sourceDatabase} → ${config.targetDatabase}，共 $totalTables 张表")
 
@@ -109,12 +111,17 @@ class MysqlMigrationAdapter : MigrationAdapter {
                     }
                     reporter.onStep(tableName, TaskStatus.RUNNING, "迁移数据")
                     val rowCount = migrateData(sourceConn, targetConn, sourcePrefix, targetPrefix, tableName)
+                    tableRowCounts[tableName] = rowCount
                     reporter.onLog("INFO", "[$tableName] 数据迁移完成，共 $rowCount 行")
+                } else {
+                    tableRowCounts[tableName] = 0L
                 }
 
                 reporter.onStep(tableName, TaskStatus.COMPLETED)
                 successCount++
             } catch (e: Exception) {
+                tableRowCounts[tableName] = 0L
+                tableErrors[tableName] = e.message ?: "未知错误"
                 failureCount++
                 reporter.onStep(tableName, TaskStatus.FAILED, e.message)
                 reporter.onLog("ERROR", "[$tableName] 迁移失败：${e.message}")
@@ -129,6 +136,16 @@ class MysqlMigrationAdapter : MigrationAdapter {
             reporter.onLog("WARN", "恢复外键/唯一性检查设置失败")
         }
 
+        // ─── 数据验证（迁移后精确对比：COUNT(*) 查目标表实际行数）───
+        reporter.onLog("INFO", "开始数据验证，对比 ${tableRowCounts.size} 张表...")
+        val verification = buildVerification(
+            targetConn, config.targetDatabase, tableRowCounts, tableErrors, reporter
+        )
+        val matchCount = verification.count { it.status == "match" }
+        val mismatchCount = verification.count { it.status == "mismatch" }
+        val failedCount2 = verification.count { it.status == "failed" }
+        reporter.onLog("INFO", "数据验证完成：匹配 $matchCount，不匹配 $mismatchCount，失败 $failedCount2")
+
         reporter.onProgress(100, "迁移完成")
         reporter.onLog("INFO", "迁移结束：成功 $successCount，失败 $failureCount")
 
@@ -136,7 +153,8 @@ class MysqlMigrationAdapter : MigrationAdapter {
             success = failureCount == 0,
             successCount = successCount,
             failureCount = failureCount,
-            errorMessage = if (failureCount > 0) "部分表迁移失败" else null
+            errorMessage = if (failureCount > 0) "部分表迁移失败" else null,
+            verification = verification
         )
     }
 
@@ -202,6 +220,11 @@ class MysqlMigrationAdapter : MigrationAdapter {
 
                 if (columns.isEmpty()) return 0L
 
+                // 识别 TIME 类型列，绕过 JDBC Time 解析（修复 24:00:00 等超范围值）
+                val timeColumns = (1..columnCount).filter {
+                    meta.getColumnType(it) == java.sql.Types.TIME
+                }.toSet()
+
                 // 关键修复：使用全限定表名插入到目标库
                 val cols = columns.joinToString(", ") { dialect.quoteIdentifier(it) }
                 val placeholders = columns.joinToString(", ") { "?" }
@@ -213,7 +236,11 @@ class MysqlMigrationAdapter : MigrationAdapter {
                     targetConn.prepareStatement(insertSql).use { ps ->
                         while (rs.next()) {
                             for (i in 1..columnCount) {
-                                ps.setObject(i, rs.getObject(i))
+                                if (i in timeColumns) {
+                                    ps.setString(i, rs.getString(i))
+                                } else {
+                                    ps.setObject(i, rs.getObject(i))
+                                }
                             }
                             ps.addBatch()
                             totalRows++
@@ -234,5 +261,59 @@ class MysqlMigrationAdapter : MigrationAdapter {
         }
 
         return totalRows
+    }
+
+    /**
+     * 数据验证：对比源库实际读取行数与目标库精确行数
+     * sourceRows = 迁移过程中从源表实际读取的行数（精确值）
+     * targetRows = 目标表 COUNT(*)（精确值，迁移后执行）
+     */
+    private fun buildVerification(
+        targetConn: java.sql.Connection,
+        targetDatabase: String,
+        tableRowCounts: Map<String, Long>,
+        tableErrors: Map<String, String>,
+        reporter: TaskReporter
+    ): List<TableVerifyResult> {
+        val targetPrefix = dialect.quoteIdentifier(targetDatabase)
+
+        return tableRowCounts.map { (tableName, sourceRows) ->
+            val error = tableErrors[tableName]
+
+            val targetRows = if (error != null) {
+                0L // 失败的表不需要 COUNT
+            } else {
+                try {
+                    targetConn.createStatement().use { stmt ->
+                        stmt.executeQuery(
+                            "SELECT COUNT(*) FROM $targetPrefix.${dialect.quoteIdentifier(tableName)}"
+                        ).use { rs ->
+                            if (rs.next()) rs.getLong(1) else 0L
+                        }
+                    }
+                } catch (e: Exception) {
+                    reporter.onLog("WARN", "[$tableName] COUNT(*) 查询失败：${e.message}")
+                    -1L
+                }
+            }
+
+            val status = when {
+                error != null -> "failed"
+                targetRows < 0L -> "failed"
+                sourceRows == targetRows -> "match"
+                else -> "mismatch"
+            }
+
+            TableVerifyResult(
+                tableName = tableName,
+                sourceRows = sourceRows,
+                targetRows = if (targetRows < 0L) 0L else targetRows,
+                status = status,
+                errorMessage = error ?: if (targetRows < 0L) "验证查询失败" else null
+            )
+        }.sortedWith(compareBy(
+            { if (it.status == "failed") 0 else if (it.status == "mismatch") 1 else 2 },
+            { it.tableName }
+        ))
     }
 }

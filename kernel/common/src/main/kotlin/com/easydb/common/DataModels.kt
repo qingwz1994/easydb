@@ -11,6 +11,13 @@ data class DatabaseInfo(
 )
 
 @Serializable
+data class CharsetInfo(
+    val charset: String,
+    val defaultCollation: String,
+    val collations: List<String> = emptyList()
+)
+
+@Serializable
 data class TableInfo(
     val name: String,
     val schema: String? = null,

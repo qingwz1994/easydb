@@ -67,6 +67,39 @@ export const metadataApi = {
       method: 'POST',
       body: JSON.stringify({ connectionId, database, table, changes, dryRun }),
     }),
+  charsets: (connectionId: string) =>
+    request(`/api/metadata/${connectionId}/charsets`),
+  createDatabase: (connectionId: string, name: string, charset: string, collation: string) =>
+    request(`/api/metadata/${connectionId}/create-database`, {
+      method: 'POST',
+      body: JSON.stringify({ name, charset, collation }),
+    }),
+  dropDatabase: (connectionId: string, database: string) =>
+    request(`/api/metadata/${connectionId}/drop-database/${database}`, { method: 'DELETE' }),
+  previewCreateTable: (connectionId: string, database: string, tableDef: unknown) =>
+    request(`/api/metadata/${connectionId}/${database}/preview-create-table`, {
+      method: 'POST',
+      body: JSON.stringify(tableDef),
+    }),
+  createTable: (connectionId: string, database: string, tableDef: unknown) =>
+    request(`/api/metadata/${connectionId}/${database}/create-table`, {
+      method: 'POST',
+      body: JSON.stringify(tableDef),
+    }),
+  dropTable: (connectionId: string, database: string, table: string) =>
+    request(`/api/metadata/${connectionId}/${database}/tables/${table}`, { method: 'DELETE' }),
+  truncateTable: (connectionId: string, database: string, table: string) =>
+    request(`/api/metadata/${connectionId}/${database}/tables/${table}/truncate`, { method: 'POST' }),
+  alterDatabase: (connectionId: string, name: string, charset: string, collation: string) =>
+    request(`/api/metadata/${connectionId}/alter-database`, {
+      method: 'POST',
+      body: JSON.stringify({ name, charset, collation }),
+    }),
+  renameTable: (connectionId: string, database: string, oldName: string, newName: string) =>
+    request(`/api/metadata/${connectionId}/${database}/rename-table`, {
+      method: 'POST',
+      body: JSON.stringify({ oldName, newName }),
+    }),
 }
 
 // ─── SQL 执行 ────────────────────────────────────────────
@@ -112,6 +145,10 @@ export const taskApi = {
     request(`/api/task/${taskId}/steps`),
   cancel: (taskId: string) =>
     request(`/api/task/${taskId}/cancel`, { method: 'POST' }),
+  delete: (taskId: string) =>
+    request(`/api/task/${taskId}`, { method: 'DELETE' }),
+  clearCompleted: () =>
+    request('/api/task/clear-completed', { method: 'POST' }),
 }
 
 // ─── 结构对比 ────────────────────────────────────────────
