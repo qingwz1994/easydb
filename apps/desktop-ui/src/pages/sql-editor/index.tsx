@@ -1,10 +1,10 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react'
 import {
-  Layout, Button, Space, Typography, Tabs, Table, Tag, Select, Tooltip,
+  Layout, Button, Space, Typography, Tabs, Table, Tag, Select, Tooltip, Dropdown,
   theme,
 } from 'antd'
 import {
-  PlayCircleOutlined, ClearOutlined,
+  PlayCircleOutlined, ClearOutlined, DownloadOutlined,
   DatabaseOutlined, ApiOutlined, CodeOutlined, PlusOutlined, QuestionCircleOutlined,
 } from '@ant-design/icons'
 import Editor, { type OnMount } from '@monaco-editor/react'
@@ -16,6 +16,7 @@ import { useSqlEditorStore } from '@/stores/sqlEditorStore'
 import { sqlApi, metadataApi, connectionApi } from '@/services/api'
 import { EmptyState } from '@/components/EmptyState'
 import { handleApiError, toast } from '@/utils/notification'
+import { exportResultSet } from '@/utils/exportUtils'
 import { createSqlCompletionProvider, clearCompletionCache } from './sqlCompletionProvider'
 
 const { Content, Header } = Layout
@@ -467,13 +468,26 @@ export const SqlEditorPage: React.FC = () => {
                         label: displayLabel,
                         children: (
                           <div style={{ height: 'calc(100vh - 410px)', overflow: 'hidden' }}>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '4px 0', gap: 8 }}>
+                              <Text type="secondary" style={{ fontSize: 12, flex: 1, lineHeight: '32px' }}>
+                                {r.rows?.length ?? 0} 行 · {r.duration}ms
+                              </Text>
+                              <Dropdown menu={{
+                                items: [
+                                  { key: 'csv', label: '导出为 CSV', onClick: () => exportResultSet(r.columns ?? [], r.rows ?? [], 'csv', displayLabel) },
+                                  { key: 'json', label: '导出为 JSON', onClick: () => exportResultSet(r.columns ?? [], r.rows ?? [], 'json', displayLabel) },
+                                ],
+                              }}>
+                                <Button size="small" icon={<DownloadOutlined />}>导出</Button>
+                              </Dropdown>
+                            </div>
                             <Table
                               columns={cols}
                               dataSource={r.rows?.map((row, i) => ({ ...row, _key: i }))}
                               rowKey="_key"
                               pagination={{ defaultPageSize: 50, showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100], size: 'small' }}
                               size="small"
-                              scroll={{ x: 'max-content', y: 'calc(100vh - 530px)' }}
+                              scroll={{ x: 'max-content', y: 'calc(100vh - 570px)' }}
                             />
                           </div>
                         )

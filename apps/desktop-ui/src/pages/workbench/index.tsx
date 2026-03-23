@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useCallback, useRef, useDeferredValue, useMemo, type MouseEvent as ReactMouseEvent } from 'react'
 import {
-  Layout, Tree, Tabs, Table, Typography, Input, Space, Button, Tag, Tooltip, Select, Modal,
+  Layout, Tree, Tabs, Table, Typography, Input, Space, Button, Tag, Tooltip, Select, Modal, Dropdown,
   theme, Card, Statistic, Row, Col, Breadcrumb,
 } from 'antd'
 import {
-  DatabaseOutlined, TableOutlined, EyeOutlined,
+  DatabaseOutlined, TableOutlined, EyeOutlined, DownloadOutlined, UploadOutlined,
   SearchOutlined, CodeOutlined, ThunderboltOutlined, ReloadOutlined,
   ApiOutlined, CloseOutlined, PlusOutlined,
   DeleteOutlined, EditOutlined,
@@ -16,10 +16,12 @@ import { useConnectionStore } from '@/stores/connectionStore'
 import { useSqlEditorStore } from '@/stores/sqlEditorStore'
 import { metadataApi, connectionApi } from '@/services/api'
 import { handleApiError, toast } from '@/utils/notification'
+import { exportTableData } from '@/utils/exportUtils'
 import { EmptyState } from '@/components/EmptyState'
 import { EditableDataTable } from '@/components/EditableDataTable'
 import { CreateDatabaseModal } from '@/components/CreateDatabaseModal'
 import { EditDatabaseModal } from '@/components/EditDatabaseModal'
+import { ImportSqlDialog } from '@/components/ImportSqlDialog'
 import { TableDesigner } from '@/components/TableDesigner'
 import { useNavigate } from 'react-router-dom'
 import type { MenuProps } from 'antd'
@@ -173,6 +175,9 @@ export const WorkbenchPage: React.FC = () => {
 
   // --- 新建/编辑表状态 ---
   const [createTableCtx, setCreateTableCtx] = useState<{ connectionId: string; connectionName: string; database: string; editTableName?: string } | null>(null)
+
+  // --- SQL 文件导入弹窗状态 ---
+  const [importSqlModal, setImportSqlModal] = useState<{ connectionId: string; connectionName: string; database: string } | null>(null)
 
   // --- 自动加载连接列表 ---
   useEffect(() => {
@@ -630,6 +635,24 @@ export const WorkbenchPage: React.FC = () => {
     }
   }
 
+  // --- 右键导出表数据 ---
+  const handleTableExport = useCallback(async (
+    connId: string, dbName: string, tableName: string, format: 'csv' | 'json' | 'sql',
+  ) => {
+    try {
+      toast.info('正在获取数据...')
+      const [def, rows] = await Promise.all([
+        metadataApi.tableDefinition(connId, dbName, tableName) as Promise<{ columns: ColumnInfo[] }>,
+        metadataApi.previewRows(connId, dbName, tableName) as Promise<Record<string, unknown>[]>,
+      ])
+      const colNames = (def.columns || []).map(c => c.name)
+      exportTableData(tableName, colNames, rows, format)
+      toast.success('导出成功')
+    } catch (e) {
+      handleApiError(e, '导出数据失败')
+    }
+  }, [])
+
   // --- 右键菜单 ---
   const getContextMenuItems = useCallback((nodeKey: string): MenuProps['items'] => {
     // 连接节点：新建数据库 / 刷新
@@ -668,6 +691,16 @@ export const WorkbenchPage: React.FC = () => {
           icon: <ReloadOutlined />,
           label: '刷新',
           onClick: () => loadTables(connId, dbName),
+        },
+        { type: 'divider' },
+        {
+          key: 'import-sql',
+          icon: <UploadOutlined />,
+          label: '执行 SQL 文件',
+          onClick: () => {
+            const conn = openConnections.find((c) => c.id === connId)
+            setImportSqlModal({ connectionId: connId, connectionName: conn?.name ?? '', database: dbName })
+          },
         },
         { type: 'divider' },
         {
@@ -775,6 +808,25 @@ export const WorkbenchPage: React.FC = () => {
             })
           },
         },
+        {
+          key: 'export-csv',
+          icon: <DownloadOutlined />,
+          label: '导出为 CSV',
+          onClick: () => handleTableExport(connId, dbName, objName, 'csv'),
+        },
+        {
+          key: 'export-json',
+          icon: <DownloadOutlined />,
+          label: '导出为 JSON',
+          onClick: () => handleTableExport(connId, dbName, objName, 'json'),
+        },
+        {
+          key: 'export-sql',
+          icon: <DownloadOutlined />,
+          label: '导出为 SQL INSERT',
+          onClick: () => handleTableExport(connId, dbName, objName, 'sql'),
+        },
+        { type: 'divider' },
         {
           key: 'truncate-table',
           icon: <DeleteOutlined />,
@@ -1267,14 +1319,27 @@ export const WorkbenchPage: React.FC = () => {
                           children: (
                             <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8, padding: '0 2px', flexShrink: 0 }}>
-                                <Text type="secondary" style={{ fontSize: 12 }}>
+                                <Text type="secondary" style={{ fontSize: 12, flex: 1 }}>
                                   {t.columns.length > 0 && t.columns.some((c: ColumnInfo) => c.isPrimaryKey)
                                     ? `可编辑 · 主键：${t.columns.filter((c: ColumnInfo) => c.isPrimaryKey).map((c: ColumnInfo) => c.name).join(', ')}`
                                     : '当前表无主键，数据编辑功能不可用'}
                                 </Text>
-                                <Text type="secondary" style={{ fontSize: 12 }}>
-                                  {t.previewRows.length > 0 ? `共 ${t.previewRows.length} 行` : ''}
-                                </Text>
+                                <Space size={8}>
+                                  <Text type="secondary" style={{ fontSize: 12 }}>
+                                    {t.previewRows.length > 0 ? `共 ${t.previewRows.length} 行` : ''}
+                                  </Text>
+                                  {t.previewRows.length > 0 && (
+                                    <Dropdown menu={{
+                                      items: [
+                                        { key: 'csv', label: '导出为 CSV', onClick: () => exportTableData(t.tableName, t.columns.map((c: ColumnInfo) => c.name), t.previewRows, 'csv') },
+                                        { key: 'json', label: '导出为 JSON', onClick: () => exportTableData(t.tableName, t.columns.map((c: ColumnInfo) => c.name), t.previewRows, 'json') },
+                                        { key: 'sql', label: '导出为 SQL INSERT', onClick: () => exportTableData(t.tableName, t.columns.map((c: ColumnInfo) => c.name), t.previewRows, 'sql') },
+                                      ],
+                                    }}>
+                                      <Button size="small" icon={<DownloadOutlined />}>导出</Button>
+                                    </Dropdown>
+                                  )}
+                                </Space>
                               </div>
                               <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
                                 <EditableDataTable
@@ -1427,6 +1492,18 @@ export const WorkbenchPage: React.FC = () => {
           databaseName={editDbModal.databaseName}
           onClose={() => setEditDbModal(null)}
           onSuccess={() => loadDatabases(editDbModal.connectionId)}
+        />
+      )}
+
+      {/* SQL 文件导入弹窗 */}
+      {importSqlModal && (
+        <ImportSqlDialog
+          open={!!importSqlModal}
+          connectionId={importSqlModal.connectionId}
+          connectionName={importSqlModal.connectionName}
+          database={importSqlModal.database}
+          databases={(databasesMap[importSqlModal.connectionId] || []).map(d => d.name)}
+          onClose={() => setImportSqlModal(null)}
         />
       )}
     </Layout>
