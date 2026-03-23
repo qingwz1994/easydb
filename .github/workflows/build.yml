@@ -23,18 +23,26 @@ jobs:
             args: '--target aarch64-apple-darwin'
             rust_target: aarch64-apple-darwin
             label: macOS-ARM64
+            jre_url: 'https://api.adoptium.net/v3/binary/latest/21/ga/mac/aarch64/jre/hotspot/normal/eclipse'
+            jre_ext: tar.gz
           - platform: macos-latest
             args: '--target x86_64-apple-darwin'
             rust_target: x86_64-apple-darwin
             label: macOS-x64
+            jre_url: 'https://api.adoptium.net/v3/binary/latest/21/ga/mac/x64/jre/hotspot/normal/eclipse'
+            jre_ext: tar.gz
           - platform: windows-latest
             args: ''
             rust_target: ''
             label: Windows-x64
+            jre_url: 'https://api.adoptium.net/v3/binary/latest/21/ga/windows/x64/jre/hotspot/normal/eclipse'
+            jre_ext: zip
           - platform: ubuntu-22.04
             args: ''
             rust_target: ''
             label: Linux-x64
+            jre_url: 'https://api.adoptium.net/v3/binary/latest/21/ga/linux/x64/jre/hotspot/normal/eclipse'
+            jre_ext: tar.gz
 
     runs-on: ${{ matrix.platform }}
     name: Build (${{ matrix.label }})
@@ -54,7 +62,7 @@ jobs:
             librsvg2-dev \
             patchelf
 
-      # --- JDK ---
+      # --- JDK (用于编译 Kernel) ---
       - name: Setup JDK
         uses: actions/setup-java@v4
         with:
@@ -83,13 +91,44 @@ jobs:
           cp launcher/build/libs/*-all.jar ../apps/desktop-ui/src-tauri/resources/easydb-kernel.jar
           echo "✅ Kernel JAR size: $(du -h ../apps/desktop-ui/src-tauri/resources/easydb-kernel.jar | cut -f1)"
 
+      # --- 下载并内嵌 JRE ---
+      - name: Download and embed JRE (Unix)
+        if: matrix.jre_ext == 'tar.gz'
+        shell: bash
+        run: |
+          echo "Downloading JRE for ${{ matrix.label }}..."
+          curl -L -o jre.tar.gz "${{ matrix.jre_url }}"
+          mkdir -p jre-tmp
+          tar xzf jre.tar.gz -C jre-tmp --strip-components=1
+          # 移动到 resources/jre
+          mkdir -p apps/desktop-ui/src-tauri/resources/jre
+          cp -r jre-tmp/* apps/desktop-ui/src-tauri/resources/jre/
+          # 确保 java 可执行
+          chmod +x apps/desktop-ui/src-tauri/resources/jre/bin/java
+          echo "✅ JRE embedded: $(apps/desktop-ui/src-tauri/resources/jre/bin/java -version 2>&1 | head -1)"
+          rm -rf jre-tmp jre.tar.gz
+
+      - name: Download and embed JRE (Windows)
+        if: matrix.jre_ext == 'zip'
+        shell: pwsh
+        run: |
+          Write-Host "Downloading JRE for ${{ matrix.label }}..."
+          Invoke-WebRequest -Uri "${{ matrix.jre_url }}" -OutFile jre.zip
+          Expand-Archive -Path jre.zip -DestinationPath jre-tmp
+          # 获取解压后的顶层目录名
+          $jreDir = Get-ChildItem -Path jre-tmp -Directory | Select-Object -First 1
+          # 移动到 resources/jre
+          New-Item -ItemType Directory -Force -Path "apps/desktop-ui/src-tauri/resources/jre"
+          Copy-Item -Recurse -Force "$($jreDir.FullName)/*" "apps/desktop-ui/src-tauri/resources/jre/"
+          Write-Host "✅ JRE embedded"
+          Remove-Item -Recurse -Force jre-tmp, jre.zip
+
       # --- Node.js ---
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      # 在项目根目录安装依赖（package-lock.json 在根目录）
       - name: Install dependencies
         run: npm install
 
@@ -109,7 +148,7 @@ jobs:
         with:
           workspaces: 'apps/desktop-ui/src-tauri -> target'
 
-      # --- 直接用 npx tauri build（不依赖 tauri-action）---
+      # --- 构建 Tauri ---
       - name: Build Tauri app
         shell: bash
         working-directory: apps/desktop-ui

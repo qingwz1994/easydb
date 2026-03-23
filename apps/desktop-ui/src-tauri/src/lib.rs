@@ -1,4 +1,5 @@
 use std::net::TcpStream;
+use std::path::PathBuf;
 use std::process::{Command, Child, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -6,6 +7,30 @@ use tauri::Manager;
 
 /// 全局持有内核子进程，应用退出时自动杀掉
 static KERNEL_PROCESS: Mutex<Option<Child>> = Mutex::new(None);
+
+/// 查找 Java 可执行文件路径
+/// 优先使用内嵌的 JRE，其次尝试系统 java
+fn find_java(resource_dir: &std::path::Path) -> Option<PathBuf> {
+    // 1. 内嵌 JRE（resources/jre/bin/java）
+    let embedded = if cfg!(target_os = "windows") {
+        resource_dir.join("jre").join("bin").join("java.exe")
+    } else {
+        resource_dir.join("jre").join("bin").join("java")
+    };
+
+    if embedded.exists() {
+        log::info!("Using embedded JRE: {:?}", embedded);
+        return Some(embedded);
+    }
+
+    // 2. 系统 java（开发模式 fallback）
+    log::info!("Embedded JRE not found, trying system java...");
+    if Command::new("java").arg("-version").output().is_ok() {
+        return Some(PathBuf::from("java"));
+    }
+
+    None
+}
 
 /// 检查内核是否已启动（通过 TCP 端口连接）
 fn wait_for_kernel_ready(port: u16, timeout: Duration) -> bool {
@@ -52,8 +77,25 @@ pub fn run() {
             if jar_path.exists() {
                 log::info!("Starting kernel from: {:?}", jar_path);
 
+                // 查找 Java 可执行文件
+                let java_path = match find_java(&resource_dir) {
+                    Some(p) => p,
+                    None => {
+                        log::error!("No Java runtime found!");
+                        rfd::MessageDialog::new()
+                            .set_title("EasyDB - 启动错误")
+                            .set_description(
+                                "未找到 Java 运行环境。\n\n\
+                                请联系技术支持获取帮助。"
+                            )
+                            .set_level(rfd::MessageLevel::Error)
+                            .show();
+                        return Ok(());
+                    }
+                };
+
                 // 启动内核进程
-                match Command::new("java")
+                match Command::new(&java_path)
                     .arg("-jar")
                     .arg(&jar_path)
                     .stdout(Stdio::null())
@@ -74,18 +116,13 @@ pub fn run() {
                     }
                     Err(e) => {
                         log::error!("Failed to start kernel: {:?}", e);
-                        if e.kind() == std::io::ErrorKind::NotFound {
-                            rfd::MessageDialog::new()
-                                .set_title("EasyDB - 启动错误")
-                                .set_description(
-                                    "未找到 Java 运行环境。\n\n\
-                                    请安装 JDK 21 或更高版本：\n\
-                                    https://adoptium.net/\n\n\
-                                    安装后重启 EasyDB。"
-                                )
-                                .set_level(rfd::MessageLevel::Error)
-                                .show();
-                        }
+                        rfd::MessageDialog::new()
+                            .set_title("EasyDB - 启动错误")
+                            .set_description(&format!(
+                                "内核启动失败：{}\n\n请联系技术支持。", e
+                            ))
+                            .set_level(rfd::MessageLevel::Error)
+                            .show();
                     }
                 }
             } else {
