@@ -154,6 +154,8 @@ jobs:
       - name: Build Tauri app
         shell: bash
         working-directory: apps/desktop-ui
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
         run: npx tauri build ${{ matrix.args }}
 
       # --- 上传产物 ---
