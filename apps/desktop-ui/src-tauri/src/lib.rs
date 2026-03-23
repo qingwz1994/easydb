@@ -4,6 +4,9 @@ use std::process::{Command, Child, Stdio};
 use std::sync::Mutex;
 use tauri::Manager;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 /// 全局持有内核子进程，应用退出时自动杀掉
 static KERNEL_PROCESS: Mutex<Option<Child>> = Mutex::new(None);
 
@@ -104,12 +107,17 @@ pub fn run() {
 
                 eprintln!("Starting kernel: java={:?} jar={:?} log={:?}", java_path, jar_path, log_path);
 
-                match Command::new(&java_path)
-                    .arg("-jar")
+                let mut cmd = Command::new(&java_path);
+                cmd.arg("-jar")
                     .arg(&jar_path)
                     .stdout(stdout_cfg)
-                    .stderr(stderr_cfg)
-                    .spawn()
+                    .stderr(stderr_cfg);
+
+                // Windows: 隐藏控制台窗口
+                #[cfg(target_os = "windows")]
+                cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+
+                match cmd.spawn()
                 {
                     Ok(child) => {
                         eprintln!("Kernel started, PID: {}", child.id());
