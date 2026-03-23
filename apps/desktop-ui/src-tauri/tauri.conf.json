@@ -1,7 +1,7 @@
 {
   "$schema": "../../../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "EasyDB",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "identifier": "com.easydb.app",
   "build": {
     "frontendDist": "../dist",
