@@ -97,14 +97,39 @@ pub fn run() {
                 .expect("failed to get resource dir");
             log::info!("Resource dir: {:?}", resource_dir);
 
-            // 列出 resource_dir 下的内容（调试用）
+            // 收集 resource_dir 下的内容
+            let mut debug_info = format!("Resource dir:\n{}\n\nContents:\n", resource_dir.display());
             if let Ok(entries) = std::fs::read_dir(&resource_dir) {
-                log::info!("Resource dir contents:");
                 for entry in entries.flatten() {
-                    log::info!("  {:?} (dir={})", entry.file_name(),
-                        entry.file_type().map(|t| t.is_dir()).unwrap_or(false));
+                    let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                    debug_info.push_str(&format!("  {} {}\n",
+                        if is_dir { "[DIR]" } else { "[FILE]" },
+                        entry.file_name().to_string_lossy()));
+                }
+            } else {
+                debug_info.push_str("  (cannot read directory)\n");
+            }
+
+            // 检查 resources/ 子目录
+            let sub = resource_dir.join("resources");
+            if sub.exists() {
+                debug_info.push_str(&format!("\nresources/ subdir:\n"));
+                if let Ok(entries) = std::fs::read_dir(&sub) {
+                    for entry in entries.flatten() {
+                        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                        debug_info.push_str(&format!("  {} {}\n",
+                            if is_dir { "[DIR]" } else { "[FILE]" },
+                            entry.file_name().to_string_lossy()));
+                    }
                 }
             }
+
+            // 临时调试弹窗（确认路径后删除）
+            rfd::MessageDialog::new()
+                .set_title("EasyDB Debug - Resource Paths")
+                .set_description(&debug_info)
+                .set_level(rfd::MessageLevel::Info)
+                .show();
 
             // 查找 Kernel JAR
             let jar_path = match find_kernel_jar(&resource_dir) {
