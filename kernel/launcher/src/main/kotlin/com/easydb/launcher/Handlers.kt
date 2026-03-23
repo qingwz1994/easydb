@@ -3,6 +3,8 @@ package com.easydb.launcher
 import com.easydb.api.ok
 import com.easydb.api.fail
 import com.easydb.common.*
+import com.easydb.drivers.mysql.MysqlConnectionAdapter
+import com.easydb.drivers.mysql.MysqlDatabaseSession
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
@@ -455,13 +457,24 @@ fun Route.migrationRoutes() {
         )
         val reporter = taskMgr.createReporter(task.id)
 
-        // 异步执行迁移
+        // 异步执行迁移（为每个任务创建独立 JDBC 连接，避免并发任务共享连接导致 autoCommit 冲突）
         kotlinx.coroutines.GlobalScope.launch {
             reporter.onProgress(0, "准备中...")
             val startTime = System.currentTimeMillis()
+            // 创建任务专用的独立 JDBC 连接
+            var dedicatedSourceConn: java.sql.Connection? = null
+            var dedicatedTargetConn: java.sql.Connection? = null
             try {
+                val sourceConfig = (sourceSession as MysqlDatabaseSession).config
+                val targetConfig = (targetSession as MysqlDatabaseSession).config
+                dedicatedSourceConn = MysqlConnectionAdapter.createJdbcConnection(sourceConfig)
+                dedicatedTargetConn = MysqlConnectionAdapter.createJdbcConnection(targetConfig)
+                val taskSourceSession = MysqlDatabaseSession(sourceConfig.id, sourceConfig, dedicatedSourceConn)
+                val taskTargetSession = MysqlDatabaseSession(targetConfig.id, targetConfig, dedicatedTargetConn)
+                reporter.onLog("INFO", "已创建任务专用连接")
+
                 val result = adapter.migrationAdapter().execute(
-                    config, SessionPair(sourceSession, targetSession), reporter
+                    config, SessionPair(taskSourceSession, taskTargetSession), reporter
                 )
                 val duration = System.currentTimeMillis() - startTime
                 when {
@@ -476,6 +489,10 @@ fun Route.migrationRoutes() {
                 } else {
                     taskMgr.markFailed(task.id, e.message ?: "迁移异常")
                 }
+            } finally {
+                // 关闭任务专用连接
+                try { dedicatedSourceConn?.close() } catch (_: Exception) {}
+                try { dedicatedTargetConn?.close() } catch (_: Exception) {}
             }
         }
 
@@ -518,12 +535,24 @@ fun Route.syncRoutes() {
         )
         val reporter = taskMgr.createReporter(task.id)
 
+        // 异步执行同步（为每个任务创建独立 JDBC 连接，避免并发任务共享连接导致 autoCommit 冲突）
         kotlinx.coroutines.GlobalScope.launch {
             reporter.onProgress(0, "准备中...")
             val startTime = System.currentTimeMillis()
+            // 创建任务专用的独立 JDBC 连接
+            var dedicatedSourceConn: java.sql.Connection? = null
+            var dedicatedTargetConn: java.sql.Connection? = null
             try {
+                val sourceConfig = (sourceSession as MysqlDatabaseSession).config
+                val targetConfig = (targetSession as MysqlDatabaseSession).config
+                dedicatedSourceConn = MysqlConnectionAdapter.createJdbcConnection(sourceConfig)
+                dedicatedTargetConn = MysqlConnectionAdapter.createJdbcConnection(targetConfig)
+                val taskSourceSession = MysqlDatabaseSession(sourceConfig.id, sourceConfig, dedicatedSourceConn)
+                val taskTargetSession = MysqlDatabaseSession(targetConfig.id, targetConfig, dedicatedTargetConn)
+                reporter.onLog("INFO", "已创建任务专用连接")
+
                 val result = adapter.syncAdapter().execute(
-                    config, SessionPair(sourceSession, targetSession), reporter
+                    config, SessionPair(taskSourceSession, taskTargetSession), reporter
                 )
                 val duration = System.currentTimeMillis() - startTime
                 when {
@@ -538,6 +567,10 @@ fun Route.syncRoutes() {
                 } else {
                     taskMgr.markFailed(task.id, e.message ?: "同步异常")
                 }
+            } finally {
+                // 关闭任务专用连接
+                try { dedicatedSourceConn?.close() } catch (_: Exception) {}
+                try { dedicatedTargetConn?.close() } catch (_: Exception) {}
             }
         }
 
