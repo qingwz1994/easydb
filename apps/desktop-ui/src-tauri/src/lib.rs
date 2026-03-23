@@ -11,24 +11,47 @@ static KERNEL_PROCESS: Mutex<Option<Child>> = Mutex::new(None);
 /// 查找 Java 可执行文件路径
 /// 优先使用内嵌的 JRE，其次尝试系统 java
 fn find_java(resource_dir: &std::path::Path) -> Option<PathBuf> {
-    // 1. 内嵌 JRE（resources/jre/bin/java）
-    let embedded = if cfg!(target_os = "windows") {
-        resource_dir.join("jre").join("bin").join("java.exe")
-    } else {
-        resource_dir.join("jre").join("bin").join("java")
-    };
+    let java_name = if cfg!(target_os = "windows") { "java.exe" } else { "java" };
 
+    // 1. 内嵌 JRE：resources/jre/bin/java
+    let embedded = resource_dir.join("jre").join("bin").join(java_name);
+    log::info!("Checking embedded JRE at: {:?} (exists: {})", embedded, embedded.exists());
     if embedded.exists() {
-        log::info!("Using embedded JRE: {:?}", embedded);
         return Some(embedded);
     }
 
-    // 2. 系统 java（开发模式 fallback）
+    // 2. 可能在 resources/ 子目录下：resources/resources/jre/bin/java
+    let nested = resource_dir.join("resources").join("jre").join("bin").join(java_name);
+    log::info!("Checking nested JRE at: {:?} (exists: {})", nested, nested.exists());
+    if nested.exists() {
+        return Some(nested);
+    }
+
+    // 3. 系统 java（开发模式 fallback）
     log::info!("Embedded JRE not found, trying system java...");
-    if Command::new("java").arg("-version").output().is_ok() {
+    if Command::new("java").arg("-version")
+        .stdout(Stdio::null()).stderr(Stdio::null())
+        .status().is_ok()
+    {
         return Some(PathBuf::from("java"));
     }
 
+    None
+}
+
+/// 查找 Kernel JAR 路径
+fn find_kernel_jar(resource_dir: &std::path::Path) -> Option<PathBuf> {
+    // 可能的路径
+    let paths = [
+        resource_dir.join("easydb-kernel.jar"),
+        resource_dir.join("resources").join("easydb-kernel.jar"),
+    ];
+    for p in &paths {
+        log::info!("Checking kernel JAR at: {:?} (exists: {})", p, p.exists());
+        if p.exists() {
+            return Some(p.clone());
+        }
+    }
     None
 }
 
@@ -72,61 +95,76 @@ pub fn run() {
         .setup(|app| {
             let resource_dir = app.path().resource_dir()
                 .expect("failed to get resource dir");
-            let jar_path = resource_dir.join("easydb-kernel.jar");
+            log::info!("Resource dir: {:?}", resource_dir);
 
-            if jar_path.exists() {
-                log::info!("Starting kernel from: {:?}", jar_path);
+            // 列出 resource_dir 下的内容（调试用）
+            if let Ok(entries) = std::fs::read_dir(&resource_dir) {
+                log::info!("Resource dir contents:");
+                for entry in entries.flatten() {
+                    log::info!("  {:?} (dir={})", entry.file_name(),
+                        entry.file_type().map(|t| t.is_dir()).unwrap_or(false));
+                }
+            }
 
-                // 查找 Java 可执行文件
-                let java_path = match find_java(&resource_dir) {
-                    Some(p) => p,
-                    None => {
-                        log::error!("No Java runtime found!");
-                        rfd::MessageDialog::new()
-                            .set_title("EasyDB - 启动错误")
-                            .set_description(
-                                "未找到 Java 运行环境。\n\n\
-                                请联系技术支持获取帮助。"
-                            )
-                            .set_level(rfd::MessageLevel::Error)
-                            .show();
-                        return Ok(());
-                    }
-                };
+            // 查找 Kernel JAR
+            let jar_path = match find_kernel_jar(&resource_dir) {
+                Some(p) => p,
+                None => {
+                    log::warn!("Kernel JAR not found, assuming dev mode");
+                    return Ok(());
+                }
+            };
 
-                // 启动内核进程
-                match Command::new(&java_path)
-                    .arg("-jar")
-                    .arg(&jar_path)
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .spawn()
-                {
-                    Ok(child) => {
-                        log::info!("Kernel process started, PID: {}", child.id());
-                        *KERNEL_PROCESS.lock().unwrap() = Some(child);
+            log::info!("Starting kernel from: {:?}", jar_path);
 
-                        // 等待内核就绪（最多 30 秒）
-                        log::info!("Waiting for kernel to be ready on port 18080...");
-                        if wait_for_kernel_ready(18080, Duration::from_secs(30)) {
-                            log::info!("Kernel is ready!");
-                        } else {
-                            log::warn!("Kernel health check timed out after 30s");
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("Failed to start kernel: {:?}", e);
-                        rfd::MessageDialog::new()
-                            .set_title("EasyDB - 启动错误")
-                            .set_description(&format!(
-                                "内核启动失败：{}\n\n请联系技术支持。", e
-                            ))
-                            .set_level(rfd::MessageLevel::Error)
-                            .show();
+            // 查找 Java 可执行文件
+            let java_path = match find_java(&resource_dir) {
+                Some(p) => p,
+                None => {
+                    log::error!("No Java runtime found!");
+                    rfd::MessageDialog::new()
+                        .set_title("EasyDB - 启动错误")
+                        .set_description(
+                            "未找到 Java 运行环境，请联系技术支持。"
+                        )
+                        .set_level(rfd::MessageLevel::Error)
+                        .show();
+                    return Ok(());
+                }
+            };
+
+            log::info!("Using Java: {:?}", java_path);
+
+            // 启动内核进程
+            match Command::new(&java_path)
+                .arg("-jar")
+                .arg(&jar_path)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+            {
+                Ok(child) => {
+                    log::info!("Kernel process started, PID: {}", child.id());
+                    *KERNEL_PROCESS.lock().unwrap() = Some(child);
+
+                    // 等待内核就绪（最多 30 秒）
+                    log::info!("Waiting for kernel to be ready on port 18080...");
+                    if wait_for_kernel_ready(18080, Duration::from_secs(30)) {
+                        log::info!("Kernel is ready!");
+                    } else {
+                        log::warn!("Kernel health check timed out after 30s");
                     }
                 }
-            } else {
-                log::warn!("Kernel JAR not found at {:?}, assuming dev mode", jar_path);
+                Err(e) => {
+                    log::error!("Failed to start kernel: {:?}", e);
+                    rfd::MessageDialog::new()
+                        .set_title("EasyDB - 启动错误")
+                        .set_description(&format!(
+                            "内核启动失败：{}\n\n请联系技术支持。", e
+                        ))
+                        .set_level(rfd::MessageLevel::Error)
+                        .show();
+                }
             }
 
             Ok(())
