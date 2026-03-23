@@ -1,0 +1,150 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '版本号（如 v1.2.0）'
+        required: false
+
+permissions:
+  contents: write
+
+env:
+  JAVA_VERSION: '21'
+  NODE_VERSION: '20'
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: '--target aarch64-apple-darwin'
+            rust_target: aarch64-apple-darwin
+            label: macOS-ARM64
+          - platform: macos-latest
+            args: '--target x86_64-apple-darwin'
+            rust_target: x86_64-apple-darwin
+            label: macOS-x64
+          - platform: windows-latest
+            args: ''
+            rust_target: ''
+            label: Windows-x64
+          - platform: ubuntu-22.04
+            args: ''
+            rust_target: ''
+            label: Linux-x64
+
+    runs-on: ${{ matrix.platform }}
+    name: Build (${{ matrix.label }})
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # --- 系统依赖 ---
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      # --- JDK (构建 Kernel) ---
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      # --- 构建 Kernel JAR ---
+      - name: Build Kernel
+        shell: bash
+        run: |
+          cd kernel
+          chmod +x gradlew
+          ./gradlew shadowJar --no-daemon
+          mkdir -p ../apps/desktop-ui/src-tauri/resources
+          cp launcher/build/libs/*-all.jar ../apps/desktop-ui/src-tauri/resources/easydb-kernel.jar
+
+      # --- Node.js ---
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # --- Rust ---
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: 'apps/desktop-ui/src-tauri -> target'
+
+      # --- 构建 Tauri ---
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop-ui
+          tauriScript: npx tauri
+          args: ${{ matrix.args }}
+
+      # --- 上传产物 ---
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: EasyDB-${{ matrix.label }}
+          path: |
+            apps/desktop-ui/src-tauri/target/**/release/bundle/**/*.dmg
+            apps/desktop-ui/src-tauri/target/**/release/bundle/**/*.app
+            apps/desktop-ui/src-tauri/target/**/release/bundle/**/*.exe
+            apps/desktop-ui/src-tauri/target/**/release/bundle/**/*.msi
+            apps/desktop-ui/src-tauri/target/**/release/bundle/**/*.deb
+            apps/desktop-ui/src-tauri/target/**/release/bundle/**/*.AppImage
+          retention-days: 30
+
+  # --- 发布 Release ---
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f | head -50
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            artifacts/**/*.dmg
+            artifacts/**/*.exe
+            artifacts/**/*.msi
+            artifacts/**/*.deb
+            artifacts/**/*.AppImage
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
