@@ -5,30 +5,55 @@
 
 const KERNEL_BASE_URL = 'http://localhost:18080'
 
+/** 内核启动中最大重试次数 */
+const MAX_RETRIES = 10
+const RETRY_DELAY_MS = 2000
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${KERNEL_BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  })
+  let lastError: Error | null = null
 
-  if (!res.ok) {
-    let errorMsg = `HTTP ${res.status}: ${res.statusText}`
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const json = await res.json()
-      if (json.error?.message) {
-        errorMsg = json.error.message
+      const res = await fetch(`${KERNEL_BASE_URL}${path}`, {
+        headers: { 'Content-Type': 'application/json' },
+        ...options,
+      })
+
+      if (!res.ok) {
+        let errorMsg = `HTTP ${res.status}: ${res.statusText}`
+        try {
+          const json = await res.json()
+          if (json.error?.message) {
+            errorMsg = json.error.message
+          }
+        } catch {
+          // 无法解析 JSON，使用默认错误消息
+        }
+        throw new Error(errorMsg)
       }
-    } catch {
-      // 无法解析 JSON，使用默认错误消息
+
+      const json = await res.json()
+      if (!json.success) {
+        throw new Error(json.error?.message ?? 'Unknown error')
+      }
+      return json.data as T
+    } catch (e) {
+      lastError = e as Error
+      // 仅在网络错误（内核未启动）时重试，HTTP 业务错误不重试
+      const isNetworkError = lastError instanceof TypeError ||
+        lastError.message.includes('Failed to fetch') ||
+        lastError.message.includes('NetworkError') ||
+        lastError.message.includes('ERR_CONNECTION_REFUSED')
+
+      if (!isNetworkError || attempt === MAX_RETRIES) {
+        throw lastError
+      }
+      // 等待后重试
+      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS))
     }
-    throw new Error(errorMsg)
   }
 
-  const json = await res.json()
-  if (!json.success) {
-    throw new Error(json.error?.message ?? 'Unknown error')
-  }
-  return json.data as T
+  throw lastError!
 }
 
 // ─── 连接管理 ───────────────────────────────────────────
