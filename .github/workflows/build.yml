@@ -89,8 +89,14 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Install frontend dependencies
+      # 在根目录安装（monorepo workspace，package-lock.json 在根目录）
+      - name: Install dependencies
         run: npm ci
+
+      # 预先构建前端（这样 tauri build 时不需要再跑 beforeBuildCommand）
+      - name: Build frontend
+        run: npm run build
+        working-directory: apps/desktop-ui
 
       # --- Rust (有交叉编译目标时) ---
       - name: Setup Rust (with target)
@@ -108,7 +114,7 @@ jobs:
         with:
           workspaces: 'apps/desktop-ui/src-tauri -> target'
 
-      # --- 构建 Tauri ---
+      # --- 构建 Tauri（跳过前端构建，因为已经在上面完成了）---
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -116,7 +122,9 @@ jobs:
         with:
           projectPath: apps/desktop-ui
           tauriScript: npx tauri
-          args: ${{ matrix.args }}
+          args: ${{ matrix.args }} --no-bundle-updater
+          distPath: dist
+          configPath: src-tauri/tauri.conf.json
 
       # --- 上传产物 ---
       - name: Upload artifacts
