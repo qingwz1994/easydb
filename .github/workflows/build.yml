@@ -91,7 +91,6 @@ jobs:
           cp launcher/build/libs/*-all.jar ../apps/desktop-ui/src-tauri/resources/easydb-kernel.jar
           echo "✅ Kernel JAR size: $(du -h ../apps/desktop-ui/src-tauri/resources/easydb-kernel.jar | cut -f1)"
 
-      # --- 下载并内嵌 JRE ---
       - name: Download and embed JRE (Unix)
         if: matrix.jre_ext == 'tar.gz'
         shell: bash
@@ -99,11 +98,14 @@ jobs:
           echo "Downloading JRE for ${{ matrix.label }}..."
           curl -L -o jre.tar.gz "${{ matrix.jre_url }}"
           mkdir -p jre-tmp
-          tar xzf jre.tar.gz -C jre-tmp --strip-components=1
-          # 移动到 resources/jre
+          tar xzf jre.tar.gz -C jre-tmp
+          # 动态查找 bin/java 所在的目录（macOS: .../Contents/Home/, Linux: .../）
+          JAVA_BIN=$(find jre-tmp -name "java" -path "*/bin/java" -type f | head -1)
+          JRE_HOME=$(dirname $(dirname "$JAVA_BIN"))
+          echo "Found JRE at: $JRE_HOME"
+          # 复制到 resources/jre
           mkdir -p apps/desktop-ui/src-tauri/resources/jre
-          cp -r jre-tmp/* apps/desktop-ui/src-tauri/resources/jre/
-          # 确保 java 可执行
+          cp -r "$JRE_HOME"/* apps/desktop-ui/src-tauri/resources/jre/
           chmod +x apps/desktop-ui/src-tauri/resources/jre/bin/java
           echo "✅ JRE embedded: $(apps/desktop-ui/src-tauri/resources/jre/bin/java -version 2>&1 | head -1)"
           rm -rf jre-tmp jre.tar.gz
