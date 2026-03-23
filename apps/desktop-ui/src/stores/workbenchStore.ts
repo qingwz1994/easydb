@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { DatabaseInfo, TableInfo } from '@/types'
+import type { DatabaseInfo, TableInfo, ColumnInfo, IndexInfo } from '@/types'
 
 /**
  * 工作台上下文 Store
@@ -13,6 +13,41 @@ interface OpenConnection {
   id: string
   name: string
 }
+
+/** 表详情 Tab 状态 */
+export interface TableTabState {
+  type: 'table'
+  connectionId: string
+  connectionName: string
+  database: string
+  tableName: string
+  columns: ColumnInfo[]
+  indexes: IndexInfo[]
+  ddl: string
+  previewRows: Record<string, unknown>[]
+  detailTab: string
+  loadedTabs: string[]
+}
+
+/** 数据库概览 Tab 状态 */
+export interface DbOverviewTabState {
+  type: 'db-overview'
+  connectionId: string
+  connectionName: string
+  database: string
+}
+
+/** 分类列表 Tab 状态 */
+export interface CategoryListTabState {
+  type: 'category-list'
+  connectionId: string
+  connectionName: string
+  database: string
+  category: string // 'tables' | 'views' | 'triggers'
+}
+
+/** 工作台 Tab 联合类型 */
+export type WorkbenchTab = TableTabState | DbOverviewTabState | CategoryListTabState
 
 /** 当前选中的上下文 */
 export interface SelectedContext {
@@ -34,6 +69,10 @@ interface WorkbenchState {
   activeDatabase: string | null
   /** 当前选中表 */
   activeTable: string | null
+  /** 已打开的 Tab（表详情 / 数据库概览 / 分类列表） */
+  openTableTabs: Record<string, WorkbenchTab>
+  /** 当前活跃的 Tab key */
+  activeTableTabKey: string | null
   /** 侧栏是否折叠 */
   siderCollapsed: boolean
 
@@ -55,6 +94,13 @@ interface WorkbenchState {
   setActiveTable: (table: string | null) => void
   setSiderCollapsed: (collapsed: boolean) => void
   clearContext: () => void
+  setOpenTableTabs: (updater: Record<string, WorkbenchTab> | ((prev: Record<string, WorkbenchTab>) => Record<string, WorkbenchTab>)) => void
+  setActiveTableTabKey: (key: string | null) => void
+  /** 原子批量更新 — 一次 set 合并多个字段变更，减少重渲染 */
+  batchUpdate: (partial: Partial<Pick<WorkbenchState,
+    'activeConnectionId' | 'activeConnectionName' | 'activeDatabase' | 'activeTable' |
+    'selectedCtx' | 'activeTableTabKey' | 'openTableTabs'
+  >>) => void
 
   // --- 对象树操作 ---
   setTreeExpandedKeys: (keys: React.Key[]) => void
@@ -69,6 +115,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set) => ({
   activeConnectionName: null,
   activeDatabase: null,
   activeTable: null,
+  openTableTabs: {},
+  activeTableTabKey: null,
   siderCollapsed: false,
 
   // 对象树持久化状态初始值
@@ -98,6 +146,12 @@ export const useWorkbenchStore = create<WorkbenchState>((set) => ({
       for (const k of Object.keys(newObjMap)) {
         if (k.startsWith(`${id}::`)) delete newObjMap[k]
       }
+      // 清理该连接下的 Tab
+      const newTabs = { ...state.openTableTabs }
+      for (const k of Object.keys(newTabs)) {
+        if (k.includes(id)) delete newTabs[k]
+      }
+      const activeTabCleared = state.activeTableTabKey?.includes(id)
       const newExpandedKeys = state.treeExpandedKeys.filter(
         (k) => !String(k).includes(id)
       )
@@ -106,8 +160,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set) => ({
         openConnections: newList,
         databasesMap: newDbMap,
         objectsMap: newObjMap,
+        openTableTabs: newTabs,
         treeExpandedKeys: newExpandedKeys,
         ...(clearSelected ? { selectedCtx: null } : {}),
+        ...(activeTabCleared ? { activeTableTabKey: null } : {}),
         ...(wasActive
           ? {
               activeConnectionId: newList.length > 0 ? newList[newList.length - 1].id : null,
@@ -157,6 +213,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set) => ({
       activeConnectionName: null,
       activeDatabase: null,
       activeTable: null,
+      openTableTabs: {},
+      activeTableTabKey: null,
       treeExpandedKeys: [],
       databasesMap: {},
       objectsMap: {},
@@ -179,4 +237,15 @@ export const useWorkbenchStore = create<WorkbenchState>((set) => ({
 
   setSelectedCtx: (ctx) =>
     set({ selectedCtx: ctx }),
+
+  setOpenTableTabs: (updater) =>
+    set((state) => ({
+      openTableTabs: typeof updater === 'function' ? updater(state.openTableTabs) : updater,
+    })),
+
+  setActiveTableTabKey: (key) =>
+    set({ activeTableTabKey: key }),
+
+  batchUpdate: (partial) =>
+    set(partial),
 }))

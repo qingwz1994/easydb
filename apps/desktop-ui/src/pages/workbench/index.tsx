@@ -6,12 +6,12 @@ import {
 import {
   DatabaseOutlined, TableOutlined, EyeOutlined,
   SearchOutlined, CodeOutlined, ThunderboltOutlined, ReloadOutlined,
-  ApiOutlined, CloseOutlined, PlusOutlined, LeftOutlined,
+  ApiOutlined, CloseOutlined, PlusOutlined,
   DeleteOutlined, EditOutlined,
 } from '@ant-design/icons'
 import type { DataNode } from 'antd/es/tree'
 import type { DatabaseInfo, TableInfo, ColumnInfo, IndexInfo, ConnectionConfig } from '@/types'
-import { useWorkbenchStore } from '@/stores/workbenchStore'
+import { useWorkbenchStore, type TableTabState } from '@/stores/workbenchStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useSqlEditorStore } from '@/stores/sqlEditorStore'
 import { metadataApi, connectionApi } from '@/services/api'
@@ -128,9 +128,7 @@ export const WorkbenchPage: React.FC = () => {
   const openConnections = useWorkbenchStore((s) => s.openConnections)
   const addOpenConnection = useWorkbenchStore((s) => s.addOpenConnection)
   const removeOpenConnection = useWorkbenchStore((s) => s.removeOpenConnection)
-  const setActiveConnection = useWorkbenchStore((s) => s.setActiveConnection)
-  const setActiveDatabase = useWorkbenchStore((s) => s.setActiveDatabase)
-  const setActiveTable = useWorkbenchStore((s) => s.setActiveTable)
+
   const databasesMap = useWorkbenchStore((s) => s.databasesMap)
   const setDatabasesMap = useWorkbenchStore((s) => s.setDatabasesMap)
   const objectsMap = useWorkbenchStore((s) => s.objectsMap)
@@ -145,20 +143,24 @@ export const WorkbenchPage: React.FC = () => {
   const updateConnection = useConnectionStore((s) => s.updateConnection)
 
   // --- Local state（页面级临时状态）---
-  const [columns, setColumns] = useState<ColumnInfo[]>([])
-  const [indexes, setIndexes] = useState<IndexInfo[]>([])
-  const [ddl, setDdl] = useState('')
-  const [previewRows, setPreviewRows] = useState<Record<string, unknown>[]>([])
   const [loadingConns, setLoadingConns] = useState<Set<string>>(new Set())
   const [searchText, setSearchText] = useState('')
   const deferredSearch = useDeferredValue(searchText)
-  const [detailTab, setDetailTab] = useState('preview')
-  const tabLoadedRef = useRef<{ table: string; loaded: Set<string> }>({ table: '', loaded: new Set() })
+
+  // --- 多 Tab 状态（持久化到 Store，路由切换不丢失）---
+  const openTableTabs = useWorkbenchStore((s) => s.openTableTabs)
+  const setOpenTableTabs = useWorkbenchStore((s) => s.setOpenTableTabs)
+  const activeTableTabKey = useWorkbenchStore((s) => s.activeTableTabKey)
+  const setActiveTableTabKey = useWorkbenchStore((s) => s.setActiveTableTabKey)
+  const batchUpdate = useWorkbenchStore((s) => s.batchUpdate)
+  const activeTab = activeTableTabKey ? openTableTabs[activeTableTabKey] ?? null : null
 
   const setPendingSql = useSqlEditorStore((s) => s.setPendingSql)
 
   // --- 右键菜单状态（单个 Dropdown 代替 N 个）---
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; nodeKey: string } | null>(null)
+  // --- Tab 右键菜单 ---
+  const [tabCtxMenu, setTabCtxMenu] = useState<{ x: number; y: number; tabKey: string } | null>(null)
 
   // --- 请求竞态控制 ---
   const loadSeqRef = useRef(0)
@@ -218,48 +220,67 @@ export const WorkbenchPage: React.FC = () => {
     }
   }, [setObjectsMap])
 
-  // --- 懒加载表详情（按当前活动 Tab 加载）---
-  const loadTabData = useCallback(async (connId: string, dbName: string, tableName: string, tab: string) => {
+  // --- 多 Tab 数据加载（懒加载 + Tab 内独立缓存）---
+  const updateTabState = useCallback((tabKey: string, updater: (prev: TableTabState) => Partial<TableTabState>) => {
+    setOpenTableTabs(prev => {
+      const tab = prev[tabKey]
+      if (!tab || tab.type !== 'table') return prev
+      return { ...prev, [tabKey]: { ...tab, ...updater(tab) } as TableTabState }
+    })
+  }, [setOpenTableTabs])
+
+  const loadTabDataForTab = useCallback(async (tabKey: string, connId: string, dbName: string, tableName: string, tab: string) => {
     const seq = ++loadSeqRef.current
-    const ref = tabLoadedRef.current
-    const needColumns = ref.table !== tableName || !ref.loaded.has('columns')
-    const needTab = ref.table !== tableName || !ref.loaded.has(tab)
-    if (!needColumns && !needTab) return
     try {
-      // columns 始终加载（列数据预览、面包屑都需要）
+      // columns 始终加载
       const promises: Promise<void>[] = []
+      // currentTab 可能为 undefined（新 Tab 刚创建，state 还未 commit）
+      const currentTab = openTableTabs[tabKey]
+      if (currentTab && currentTab.type !== 'table') return
+      const tableTab = currentTab as TableTabState | undefined
+      const needColumns = !tableTab?.loadedTabs.includes('columns')
+      const needTab = tab !== 'columns' && !tableTab?.loadedTabs.includes(tab)
+      if (!needColumns && !needTab) return
       if (needColumns) {
         promises.push(
           metadataApi.tableDefinition(connId, dbName, tableName).then((def: unknown) => {
             if (seq !== loadSeqRef.current) return
-            setColumns((def as { columns: ColumnInfo[] }).columns || [])
-            if (tabLoadedRef.current.table === tableName) tabLoadedRef.current.loaded.add('columns')
+            updateTabState(tabKey, (prev) => ({
+              columns: (def as { columns: ColumnInfo[] }).columns || [],
+              loadedTabs: [...prev.loadedTabs, 'columns'],
+            }))
           })
         )
       }
-      if (needTab && tab !== 'columns') {
+      if (needTab) {
         if (tab === 'preview') {
           promises.push(
             metadataApi.previewRows(connId, dbName, tableName).then((rows: unknown) => {
               if (seq !== loadSeqRef.current) return
-              setPreviewRows(rows as Record<string, unknown>[])
-              if (tabLoadedRef.current.table === tableName) tabLoadedRef.current.loaded.add('preview')
+              updateTabState(tabKey, (prev) => ({
+                previewRows: rows as Record<string, unknown>[],
+                loadedTabs: [...prev.loadedTabs, 'preview'],
+              }))
             })
           )
         } else if (tab === 'indexes') {
           promises.push(
             metadataApi.indexes(connId, dbName, tableName).then((idxs: unknown) => {
               if (seq !== loadSeqRef.current) return
-              setIndexes(idxs as IndexInfo[])
-              if (tabLoadedRef.current.table === tableName) tabLoadedRef.current.loaded.add('indexes')
+              updateTabState(tabKey, (prev) => ({
+                indexes: idxs as IndexInfo[],
+                loadedTabs: [...prev.loadedTabs, 'indexes'],
+              }))
             })
           )
         } else if (tab === 'ddl') {
           promises.push(
             metadataApi.ddl(connId, dbName, tableName).then((ddlStr: unknown) => {
               if (seq !== loadSeqRef.current) return
-              setDdl(ddlStr as string)
-              if (tabLoadedRef.current.table === tableName) tabLoadedRef.current.loaded.add('ddl')
+              updateTabState(tabKey, (prev) => ({
+                ddl: ddlStr as string,
+                loadedTabs: [...prev.loadedTabs, 'ddl'],
+              }))
             })
           )
         }
@@ -269,20 +290,117 @@ export const WorkbenchPage: React.FC = () => {
       if (seq !== loadSeqRef.current) return
       handleApiError(e, '加载表详情失败')
     }
-  }, [])
+  }, [openTableTabs, updateTabState])
 
-  // 表节点选中时初始化加载（仅加载当前活动 Tab）
-  const loadTableDetail = useCallback((connId: string, dbName: string, tableName: string) => {
-    // 重置已加载记录
-    tabLoadedRef.current = { table: tableName, loaded: new Set() }
-    // 清空旧数据
-    setColumns([])
-    setIndexes([])
-    setDdl('')
-    setPreviewRows([])
-    // 仅加载当前 Tab 的数据
-    loadTabData(connId, dbName, tableName, detailTab)
-  }, [detailTab, loadTabData])
+  // 打开或激活一个表 Tab
+  const openOrActivateTab = useCallback((connId: string, connName: string, dbName: string, tableName: string) => {
+    const tabKey = `table:${connId}::${dbName}::${tableName}`
+    const existing = openTableTabs[tabKey]
+    if (!existing) {
+      const newTab: TableTabState = {
+        type: 'table',
+        connectionId: connId,
+        connectionName: connName,
+        database: dbName,
+        tableName,
+        columns: [],
+        indexes: [],
+        ddl: '',
+        previewRows: [],
+        detailTab: 'preview',
+        loadedTabs: [],
+      }
+      batchUpdate({
+        openTableTabs: { ...openTableTabs, [tabKey]: newTab },
+        activeTableTabKey: tabKey,
+        selectedCtx: { connectionId: connId, database: dbName, table: tableName },
+        activeConnectionId: connId,
+        activeConnectionName: connName,
+        activeDatabase: dbName,
+        activeTable: tableName,
+      })
+      loadTabDataForTab(tabKey, connId, dbName, tableName, 'preview')
+    } else {
+      batchUpdate({
+        activeTableTabKey: tabKey,
+        selectedCtx: { connectionId: connId, database: dbName, table: tableName },
+        activeConnectionId: connId,
+        activeConnectionName: connName,
+        activeDatabase: dbName,
+        activeTable: tableName,
+      })
+    }
+  }, [openTableTabs, batchUpdate, loadTabDataForTab])
+
+  // 打开或激活数据库概览 Tab
+  const openOrActivateDbOverview = useCallback((connId: string, connName: string, dbName: string) => {
+    const tabKey = `db:${connId}::${dbName}`
+    const existing = openTableTabs[tabKey]
+    if (!existing) {
+      batchUpdate({
+        openTableTabs: {
+          ...openTableTabs,
+          [tabKey]: { type: 'db-overview' as const, connectionId: connId, connectionName: connName, database: dbName },
+        },
+        activeTableTabKey: tabKey,
+        selectedCtx: { connectionId: connId, database: dbName },
+        activeConnectionId: connId,
+        activeConnectionName: connName,
+        activeDatabase: dbName,
+      })
+    } else {
+      batchUpdate({
+        activeTableTabKey: tabKey,
+        selectedCtx: { connectionId: connId, database: dbName },
+        activeConnectionId: connId,
+        activeConnectionName: connName,
+        activeDatabase: dbName,
+      })
+    }
+    loadTables(connId, dbName)
+  }, [openTableTabs, batchUpdate, loadTables])
+
+  // 打开或激活分类列表 Tab
+  const openOrActivateCategoryTab = useCallback((connId: string, connName: string, dbName: string, catKey: string) => {
+    const tabKey = `cat:${connId}::${dbName}::${catKey}`
+    const existing = openTableTabs[tabKey]
+    if (!existing) {
+      batchUpdate({
+        openTableTabs: {
+          ...openTableTabs,
+          [tabKey]: { type: 'category-list' as const, connectionId: connId, connectionName: connName, database: dbName, category: catKey },
+        },
+        activeTableTabKey: tabKey,
+        selectedCtx: { connectionId: connId, database: dbName, category: catKey },
+        activeConnectionId: connId,
+        activeConnectionName: connName,
+        activeDatabase: dbName,
+      })
+    } else {
+      batchUpdate({
+        activeTableTabKey: tabKey,
+        selectedCtx: { connectionId: connId, database: dbName, category: catKey },
+        activeConnectionId: connId,
+        activeConnectionName: connName,
+        activeDatabase: dbName,
+      })
+    }
+    loadTables(connId, dbName)
+  }, [openTableTabs, batchUpdate, loadTables])
+
+  // 关闭一个表 Tab
+  const closeTableTab = useCallback((tabKey: string) => {
+    setOpenTableTabs(prev => {
+      const next = { ...prev }
+      delete next[tabKey]
+      // 如果关闭的是当前活动 Tab，切换到另一个
+      if (activeTableTabKey === tabKey) {
+        const remaining = Object.keys(next)
+        setActiveTableTabKey(remaining.length > 0 ? remaining[remaining.length - 1] : null)
+      }
+      return next
+    })
+  }, [activeTableTabKey, setOpenTableTabs, setActiveTableTabKey])
 
   // --- 添加连接到工作台 ---
   const handleAddConnection = useCallback(async (connId: string) => {
@@ -305,14 +423,18 @@ export const WorkbenchPage: React.FC = () => {
 
   // --- 从工作台移除连接 ---
   const handleRemoveConnection = useCallback((connId: string) => {
-    // store 的 removeOpenConnection 会自动清理 databasesMap、objectsMap、expandedKeys、selectedCtx
     const wasCurrent = selectedCtx?.connectionId === connId
     removeOpenConnection(connId)
+    // 清理该连接下的所有已打开 Tab
+    setOpenTableTabs(prev => {
+      const next = { ...prev }
+      for (const key of Object.keys(next)) {
+        if (key.startsWith(`${connId}::`)) delete next[key]
+      }
+      return next
+    })
     if (wasCurrent) {
-      setColumns([])
-      setIndexes([])
-      setDdl('')
-      setPreviewRows([])
+      setActiveTableTabKey(null)
     }
   }, [removeOpenConnection, selectedCtx])
 
@@ -447,37 +569,40 @@ export const WorkbenchPage: React.FC = () => {
     if (key.startsWith('conn:')) {
       const connId = key.slice(5)
       const conn = openConnections.find((c) => c.id === connId)
-      setSelectedCtx({ connectionId: connId })
-      setActiveConnection(connId, conn?.name ?? null)
+      batchUpdate({
+        selectedCtx: { connectionId: connId },
+        activeConnectionId: connId,
+        activeConnectionName: conn?.name ?? null,
+      })
     } else if (key.startsWith('db:')) {
       const parts = key.slice(3).split(':')
       const connId = parts[0]
       const dbName = parts.slice(1).join(':')
       const conn = openConnections.find((c) => c.id === connId)
-      setSelectedCtx({ connectionId: connId, database: dbName })
-      setActiveConnection(connId, conn?.name ?? null)
-      setActiveDatabase(dbName)
-      loadTables(connId, dbName)
+      openOrActivateDbOverview(connId, conn?.name ?? '', dbName)
     } else if (key.startsWith('obj:')) {
       const parts = key.slice(4).split(':')
       const connId = parts[0]
       const dbName = parts[1]
       const objName = parts.slice(2).join(':')
       const conn = openConnections.find((c) => c.id === connId)
-      setSelectedCtx({ connectionId: connId, database: dbName, table: objName })
-      setActiveConnection(connId, conn?.name ?? null)
-      setActiveDatabase(dbName)
-      setActiveTable(objName)
-      loadTableDetail(connId, dbName, objName)
+      const tabKey = `table:${connId}::${dbName}::${objName}`
+      const hasTab = !!openTableTabs[tabKey]
+      batchUpdate({
+        selectedCtx: { connectionId: connId, database: dbName, table: objName },
+        activeConnectionId: connId,
+        activeConnectionName: conn?.name ?? null,
+        activeDatabase: dbName,
+        activeTable: objName,
+        ...(hasTab ? { activeTableTabKey: tabKey } : {}),
+      })
     } else if (key.startsWith('cat:')) {
       const parts = key.slice(4).split(':')
       const connId = parts[0]
       const dbName = parts[1]
       const catKey = parts.slice(2).join(':')
       const conn = openConnections.find((c) => c.id === connId)
-      setSelectedCtx({ connectionId: connId, database: dbName, category: catKey })
-      setActiveConnection(connId, conn?.name ?? null)
-      setActiveDatabase(dbName)
+      openOrActivateCategoryTab(connId, conn?.name ?? '', dbName, catKey)
     }
   }
 
@@ -859,6 +984,17 @@ export const WorkbenchPage: React.FC = () => {
                 selectedKeys={selectedTreeKeys}
                 expandedKeys={expandedKeys}
                 onExpand={handleTreeExpand}
+                onDoubleClick={(_e, node) => {
+                  const key = String(node.key)
+                  if (key.startsWith('obj:')) {
+                    const parts = key.slice(4).split(':')
+                    const connId = parts[0]
+                    const dbName = parts[1]
+                    const objName = parts.slice(2).join(':')
+                    const conn = openConnections.find((c) => c.id === connId)
+                    openOrActivateTab(connId, conn?.name ?? '', dbName, objName)
+                  }
+                }}
                 onRightClick={({ event, node }) => {
                   event.preventDefault()
                   event.stopPropagation()
@@ -920,7 +1056,7 @@ export const WorkbenchPage: React.FC = () => {
             }}
             onCancel={() => setCreateTableCtx(null)}
           />
-        ) : selectedCtx?.table && selectedCtx?.database ? (
+        ) : activeTableTabKey && openTableTabs[activeTableTabKey] ? (
           <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
             <style>{`
               .workbench-detail-tabs.ant-tabs {
@@ -943,287 +1079,329 @@ export const WorkbenchPage: React.FC = () => {
                 overflow: hidden;
               }
             `}</style>
-            {/* 固定头部：面包屑导航 + 按钮 */}
-            <div style={{ padding: '12px 16px 0 16px', flexShrink: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <Space>
-                  <LeftOutlined
-                    style={{ fontSize: 12, color: token.colorTextSecondary, cursor: 'pointer' }}
-                    onClick={() => {
-                      // 回到分类列表：根据当前表类型确定分类
-                      const objKey = `${selectedCtx.connectionId}::${selectedCtx.database}`
-                      const obj = (objectsMap[objKey] || []).find((t) => t.name === selectedCtx.table)
-                      const catKey = obj?.type === 'view' ? 'views' : obj?.type === 'trigger' ? 'triggers' : 'tables'
-                      setSelectedCtx({ connectionId: selectedCtx.connectionId, database: selectedCtx.database, category: catKey })
+            {/* 表 Tab 栏 */}
+            {(() => {
+              const tabKeys = Object.keys(openTableTabs)
+              return (
+                <>
+                  <Tabs
+                    type="editable-card"
+                    size="small"
+                    hideAdd
+                    activeKey={activeTableTabKey ?? undefined}
+                    onChange={(key) => {
+                      const tab = openTableTabs[key]
+                      if (tab) {
+                        batchUpdate({
+                          activeTableTabKey: key,
+                          selectedCtx: tab.type === 'table'
+                            ? { connectionId: tab.connectionId, database: tab.database, table: tab.tableName }
+                            : tab.type === 'category-list'
+                              ? { connectionId: tab.connectionId, database: tab.database, category: tab.category }
+                              : { connectionId: tab.connectionId, database: tab.database },
+                          activeConnectionId: tab.connectionId,
+                          activeConnectionName: tab.connectionName,
+                          activeDatabase: tab.database,
+                          activeTable: tab.type === 'table' ? tab.tableName : null,
+                        })
+                      } else {
+                        setActiveTableTabKey(key)
+                      }
                     }}
-                  />
-                  <Breadcrumb
-                    separator="/"
-                    items={[
-                      {
-                        title: (
+                    onEdit={(targetKey, action) => {
+                      if (action === 'remove' && typeof targetKey === 'string') {
+                        closeTableTab(targetKey)
+                      }
+                    }}
+                    style={{ flexShrink: 0, padding: '0 16px' }}
+                    tabBarStyle={{ marginBottom: 0 }}
+                    items={tabKeys.map((key) => {
+                      const tab = openTableTabs[key]
+                      const tabLabel = tab.type === 'table'
+                        ? tab.tableName
+                        : tab.type === 'db-overview'
+                          ? tab.database
+                          : tab.type === 'category-list'
+                            ? `${tab.database} / ${tab.category === 'tables' ? '表' : tab.category === 'views' ? '视图' : tab.category === 'triggers' ? '触发器' : tab.category}`
+                            : ''
+                      const tabIcon = tab.type === 'table'
+                        ? <TableOutlined style={{ marginRight: 4 }} />
+                        : tab.type === 'db-overview'
+                          ? <DatabaseOutlined style={{ marginRight: 4 }} />
+                          : <TableOutlined style={{ marginRight: 4 }} />
+                      const tabTitle = tab.type === 'table'
+                        ? `${tab.database}.${tab.tableName}`
+                        : tab.database
+                      return {
+                        key,
+                        label: (
                           <span
-                            style={{ cursor: 'pointer', color: token.colorTextSecondary }}
-                            onClick={() => setSelectedCtx({ connectionId: selectedCtx.connectionId, database: selectedCtx.database })}
+                            title={tabTitle}
+                            onContextMenu={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              setTabCtxMenu({ x: e.clientX, y: e.clientY, tabKey: key })
+                            }}
                           >
-                            <DatabaseOutlined style={{ marginRight: 4 }} />
-                            {selectedCtx.database}
+                            {tabIcon}{tabLabel}
                           </span>
                         ),
-                      },
-                      {
-                        title: (() => {
-                          const objKey = `${selectedCtx.connectionId}::${selectedCtx.database}`
-                          const objs = objectsMap[objKey] || []
-                          const obj = objs.find((t) => t.name === selectedCtx.table)
-                          const catKey = obj?.type === 'view' ? 'views' : obj?.type === 'trigger' ? 'triggers' : 'tables'
-                          const catDef = objectCategories.find((c) => c.key === catKey)
-                          const count = objs.filter((t) => catDef?.types.includes(t.type)).length
-                          return (
-                            <span
-                              style={{ cursor: 'pointer', color: token.colorTextSecondary }}
-                              onClick={() => setSelectedCtx({ connectionId: selectedCtx.connectionId, database: selectedCtx.database, category: catKey })}
-                            >
-                              {catDef?.icon}
-                              <span style={{ marginLeft: 4 }}>{catDef?.label} ({count})</span>
-                            </span>
-                          )
-                        })(),
-                      },
-                      {
-                        title: (
-                          <Text strong style={{ fontSize: 13 }}>
-                            {selectedCtx.table}
-                          </Text>
-                        ),
-                      },
-                    ]}
+                        closable: true,
+                      }
+                    })}
                   />
-                </Space>
-                <Space size={8}>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    ({openConnections.find((c) => c.id === selectedCtx.connectionId)?.name})
-                  </Text>
-                  <Button
-                    size="small"
-                    icon={<CodeOutlined />}
-                    onClick={() => openSqlEditor()}
-                  >
-                    打开 SQL 编辑器
-                  </Button>
-                </Space>
-              </div>
-            </div>
-
-            {/* Tabs */}
-            <Tabs
-              className="workbench-detail-tabs"
-              size="small"
-              activeKey={detailTab}
-              onChange={(key) => {
-                setDetailTab(key)
-                // 切换 Tab 时懒加载
-                if (selectedCtx?.table && selectedCtx?.database) {
-                  loadTabData(selectedCtx.connectionId, selectedCtx.database, selectedCtx.table, key)
-                }
-              }}
-              style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '0 16px' }}
-              tabBarStyle={{ flexShrink: 0, marginBottom: 0 }}
-              items={[
-                {
-                  key: 'preview',
-                  label: `数据预览${previewRows.length > 0 ? ` (${previewRows.length})` : ''}`,
-                  children: (
-                    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
+                  {/* Tab 右键菜单 */}
+                  {tabCtxMenu && (
+                    <>
                       <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          gap: 12,
-                          marginBottom: 8,
-                          padding: '0 2px',
-                          flexShrink: 0,
-                        }}
-                      >
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          {columns.length > 0 && columns.some((c) => c.isPrimaryKey)
-                            ? `可编辑 · 主键：${columns.filter((c) => c.isPrimaryKey).map((c) => c.name).join(', ')}`
-                            : '当前表无主键，数据编辑功能不可用'}
-                        </Text>
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          {previewRows.length > 0 ? `共 ${previewRows.length} 行` : ''}
-                        </Text>
+                        style={{ position: 'fixed', inset: 0, zIndex: 999 }}
+                        onClick={() => setTabCtxMenu(null)}
+                        onContextMenu={(e) => { e.preventDefault(); setTabCtxMenu(null) }}
+                      />
+                      <div style={{
+                        position: 'fixed', left: tabCtxMenu.x, top: tabCtxMenu.y, zIndex: 1000,
+                        background: token.colorBgElevated, borderRadius: token.borderRadius,
+                        boxShadow: token.boxShadowSecondary, padding: '4px 0', minWidth: 140,
+                      }}>
+                        {[
+                          { label: '关闭', onClick: () => closeTableTab(tabCtxMenu.tabKey) },
+                          { label: '关闭其他', onClick: () => {
+                            setOpenTableTabs(prev => {
+                              const keep = prev[tabCtxMenu.tabKey]
+                              return keep ? { [tabCtxMenu.tabKey]: keep } : {}
+                            })
+                            setActiveTableTabKey(tabCtxMenu.tabKey)
+                          }},
+                          { label: '关闭左侧', onClick: () => {
+                            const idx = tabKeys.indexOf(tabCtxMenu.tabKey)
+                            const toRemove = new Set(tabKeys.slice(0, idx))
+                            setOpenTableTabs(prev => {
+                              const next = { ...prev }
+                              for (const k of toRemove) delete next[k]
+                              return next
+                            })
+                            if (activeTableTabKey && toRemove.has(activeTableTabKey)) setActiveTableTabKey(tabCtxMenu.tabKey)
+                          }},
+                          { label: '关闭右侧', onClick: () => {
+                            const idx = tabKeys.indexOf(tabCtxMenu.tabKey)
+                            const toRemove = new Set(tabKeys.slice(idx + 1))
+                            setOpenTableTabs(prev => {
+                              const next = { ...prev }
+                              for (const k of toRemove) delete next[k]
+                              return next
+                            })
+                            if (activeTableTabKey && toRemove.has(activeTableTabKey)) setActiveTableTabKey(tabCtxMenu.tabKey)
+                          }},
+                          { label: '关闭全部', onClick: () => {
+                            setOpenTableTabs({})
+                            setActiveTableTabKey(null)
+                          }},
+                        ].map((item) => (
+                          <div
+                            key={item.label}
+                            style={{ padding: '5px 12px', cursor: 'pointer', fontSize: 13, color: token.colorText }}
+                            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = token.colorBgTextHover }}
+                            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+                            onClick={() => { item.onClick(); setTabCtxMenu(null) }}
+                          >
+                            {item.label}
+                          </div>
+                        ))}
                       </div>
-                      {selectedCtx.connectionId && selectedCtx.database && selectedCtx.table ? (
-                        <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-                          <EditableDataTable
-                            connectionId={selectedCtx.connectionId}
-                            database={selectedCtx.database}
-                            tableName={selectedCtx.table}
-                            columns={columns}
-                            dataSource={previewRows}
-                            onRefresh={() => loadTableDetail(selectedCtx.connectionId, selectedCtx.database!, selectedCtx.table!)}
-                          />
-                        </div>
-                      ) : (
-                        <EmptyState description="选择一个表以查看数据" />
-                      )}
-                    </div>
-                  ),
-                },
-                {
-                  key: 'columns',
-                  label: '字段结构',
-                  children: (
-                    <div style={{ overflow: 'auto', height: '100%', minHeight: 0 }}>
-                      <Table
-                        columns={columnTableColumns}
-                        dataSource={columns}
-                        rowKey="name"
-                        pagination={false}
-                        size="small"
-                      />
-                    </div>
-                  ),
-                },
-                {
-                  key: 'indexes',
-                  label: '索引',
-                  children: (
-                    <div style={{ overflow: 'auto', height: '100%', minHeight: 0 }}>
-                      <Table
-                        columns={indexTableColumns}
-                        dataSource={indexes}
-                        rowKey="name"
-                        pagination={false}
-                        size="small"
-                      />
-                    </div>
-                  ),
-                },
-                {
-                  key: 'ddl',
-                  label: 'DDL',
-                  children: (
-                    <pre style={{
-                      background: '#1e1e1e',
-                      color: '#d4d4d4',
-                      padding: 16,
-                      borderRadius: token.borderRadius,
-                      fontSize: 12,
-                      fontFamily: 'Menlo, Monaco, monospace',
-                      overflow: 'auto',
-                      height: '100%',
-                    }}>
-                      {ddl || '无 DDL 数据'}
-                    </pre>
-                  ),
-                },
-              ]}
-            />
-          </div>
-        ) : selectedCtx?.category && selectedCtx?.database ? (
-          <CategoryListView
-            connectionId={selectedCtx.connectionId}
-            database={selectedCtx.database!}
-            category={selectedCtx.category!}
-            objects={objectsMap[`${selectedCtx.connectionId}::${selectedCtx.database}`] || []}
-            objectCategories={objectCategories}
-            onSelectObject={(name) => {
-              setSelectedCtx({ connectionId: selectedCtx.connectionId, database: selectedCtx.database, table: name })
-              setActiveTable(name)
-              loadTableDetail(selectedCtx.connectionId, selectedCtx.database!, name)
-            }}
-          />
-        ) : selectedCtx?.database ? (
-          /* 数据库级概览 */
-          <div style={{ padding: 24 }}>
-            <Space direction="vertical" size={16} style={{ width: '100%' }}>
-              <Space>
-                <Text strong style={{ fontSize: 16 }}>
-                  <DatabaseOutlined style={{ marginRight: 6 }} />
-                  {selectedCtx.database}
-                </Text>
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  ({openConnections.find((c) => c.id === selectedCtx.connectionId)?.name})
-                </Text>
-                <Button
-                  size="small"
-                  icon={<CodeOutlined />}
-                  onClick={() => openSqlEditor()}
-                >
-                  打开 SQL 编辑器
-                </Button>
-              </Space>
+                    </>
+                  )}
+                </>
+              )
+            })()}
+            {/* 当前活动 Tab 的详情内容 */}
+            {/* Tab 内容区域 — 根据 Tab 类型渲染 */}
+            {activeTab && (() => {
+              const tabKey = activeTableTabKey!
 
-              {(() => {
-                const objKey = `${selectedCtx.connectionId}::${selectedCtx.database}`
+              // ===== 表详情 Tab =====
+              if (activeTab.type === 'table') {
+                const t = activeTab
+                return (
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                    {/* 面包屑 */}
+                    <div style={{ padding: '8px 16px 0 16px', flexShrink: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                        <Space>
+                          <Breadcrumb
+                            separator="/"
+                            items={[
+                              {
+                                title: (
+                                  <span style={{ cursor: 'pointer', color: token.colorTextSecondary }} onClick={() => openOrActivateDbOverview(t.connectionId, t.connectionName, t.database)}>
+                                    <DatabaseOutlined style={{ marginRight: 4 }} />{t.database}
+                                  </span>
+                                ),
+                              },
+                              {
+                                title: <Text strong style={{ fontSize: 13 }}>{t.tableName}</Text>,
+                              },
+                            ]}
+                          />
+                        </Space>
+                        <Space size={8}>
+                          <Text type="secondary" style={{ fontSize: 12 }}>({t.connectionName})</Text>
+                          <Button size="small" icon={<CodeOutlined />} onClick={() => openSqlEditor()}>打开 SQL 编辑器</Button>
+                        </Space>
+                      </div>
+                    </div>
+                    {/* 详情 Tabs */}
+                    <Tabs
+                      className="workbench-detail-tabs"
+                      size="small"
+                      activeKey={t.detailTab}
+                      onChange={(key) => {
+                        updateTabState(tabKey, () => ({ detailTab: key }))
+                        loadTabDataForTab(tabKey, t.connectionId, t.database, t.tableName, key)
+                      }}
+                      style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '0 16px' }}
+                      tabBarStyle={{ flexShrink: 0, marginBottom: 0 }}
+                      items={[
+                        {
+                          key: 'preview',
+                          label: `数据预览${t.previewRows.length > 0 ? ` (${t.previewRows.length})` : ''}`,
+                          children: (
+                            <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8, padding: '0 2px', flexShrink: 0 }}>
+                                <Text type="secondary" style={{ fontSize: 12 }}>
+                                  {t.columns.length > 0 && t.columns.some((c: ColumnInfo) => c.isPrimaryKey)
+                                    ? `可编辑 · 主键：${t.columns.filter((c: ColumnInfo) => c.isPrimaryKey).map((c: ColumnInfo) => c.name).join(', ')}`
+                                    : '当前表无主键，数据编辑功能不可用'}
+                                </Text>
+                                <Text type="secondary" style={{ fontSize: 12 }}>
+                                  {t.previewRows.length > 0 ? `共 ${t.previewRows.length} 行` : ''}
+                                </Text>
+                              </div>
+                              <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+                                <EditableDataTable
+                                  connectionId={t.connectionId}
+                                  database={t.database}
+                                  tableName={t.tableName}
+                                  columns={t.columns}
+                                  dataSource={t.previewRows}
+                                  onRefresh={() => {
+                                    updateTabState(tabKey, (prev) => ({
+                                      loadedTabs: prev.loadedTabs.filter(k => k !== 'preview' && k !== 'columns'),
+                                    }))
+                                    loadTabDataForTab(tabKey, t.connectionId, t.database, t.tableName, 'preview')
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          ),
+                        },
+                        {
+                          key: 'columns',
+                          label: '字段结构',
+                          children: (
+                            <div style={{ overflow: 'auto', height: '100%', minHeight: 0 }}>
+                              <Table columns={columnTableColumns} dataSource={t.columns} rowKey="name" pagination={false} size="small" />
+                            </div>
+                          ),
+                        },
+                        {
+                          key: 'indexes',
+                          label: '索引',
+                          children: (
+                            <div style={{ overflow: 'auto', height: '100%', minHeight: 0 }}>
+                              <Table columns={indexTableColumns} dataSource={t.indexes} rowKey="name" pagination={false} size="small" />
+                            </div>
+                          ),
+                        },
+                        {
+                          key: 'ddl',
+                          label: 'DDL',
+                          children: (
+                            <pre style={{
+                              background: '#1e1e1e', color: '#d4d4d4', padding: 16, borderRadius: token.borderRadius,
+                              fontSize: 12, fontFamily: 'Menlo, Monaco, monospace', overflow: 'auto', height: '100%',
+                            }}>
+                              {t.ddl || '无 DDL 数据'}
+                            </pre>
+                          ),
+                        },
+                      ]}
+                    />
+                  </div>
+                )
+              }
+
+              // ===== 数据库概览 Tab =====
+              if (activeTab.type === 'db-overview') {
+                const objKey = `${activeTab.connectionId}::${activeTab.database}`
                 const dbObjects = objectsMap[objKey] || []
                 return (
-                  <>
-                    <Row gutter={16}>
-                      <Col span={6}>
-                        <Card size="small">
-                          <Statistic
-                            title="表"
-                            value={dbObjects.filter((t) => t.type === 'table').length}
-                            valueStyle={{ color: token.colorPrimary }}
-                            prefix={<TableOutlined />}
-                          />
+                  <div style={{ flex: 1, padding: 24, overflow: 'auto' }}>
+                    <Space direction="vertical" size={16} style={{ width: '100%' }}>
+                      <Space>
+                        <Text strong style={{ fontSize: 16 }}>
+                          <DatabaseOutlined style={{ marginRight: 6 }} />
+                          {activeTab.database}
+                        </Text>
+                        <Text type="secondary" style={{ fontSize: 12 }}>({activeTab.connectionName})</Text>
+                        <Button size="small" icon={<CodeOutlined />} onClick={() => openSqlEditor()}>打开 SQL 编辑器</Button>
+                      </Space>
+                      <Row gutter={16}>
+                        <Col span={6}>
+                          <Card size="small">
+                            <Statistic title="表" value={dbObjects.filter((t) => t.type === 'table').length} valueStyle={{ color: token.colorPrimary }} prefix={<TableOutlined />} />
+                          </Card>
+                        </Col>
+                        <Col span={6}>
+                          <Card size="small">
+                            <Statistic title="视图" value={dbObjects.filter((t) => t.type === 'view').length} valueStyle={{ color: token.colorInfo }} prefix={<EyeOutlined />} />
+                          </Card>
+                        </Col>
+                        <Col span={6}>
+                          <Card size="small">
+                            <Statistic title="触发器" value={dbObjects.filter((t) => t.type === 'trigger').length} valueStyle={{ color: token.colorWarning }} prefix={<ThunderboltOutlined />} />
+                          </Card>
+                        </Col>
+                        <Col span={6}>
+                          <Card size="small">
+                            <Statistic title="对象总数" value={dbObjects.length} />
+                          </Card>
+                        </Col>
+                      </Row>
+                      {dbObjects.length === 0 ? (
+                        <EmptyState description="当前数据库下无对象" />
+                      ) : (
+                        <Card size="small" title="快捷操作">
+                          <Space>
+                            <Button icon={<CodeOutlined />} onClick={() => openSqlEditor()}>打开 SQL 编辑器</Button>
+                            <Button icon={<ReloadOutlined />} onClick={() => loadTables(activeTab.connectionId, activeTab.database)}>刷新对象列表</Button>
+                          </Space>
                         </Card>
-                      </Col>
-                      <Col span={6}>
-                        <Card size="small">
-                          <Statistic
-                            title="视图"
-                            value={dbObjects.filter((t) => t.type === 'view').length}
-                            valueStyle={{ color: token.colorInfo }}
-                            prefix={<EyeOutlined />}
-                          />
-                        </Card>
-                      </Col>
-                      <Col span={6}>
-                        <Card size="small">
-                          <Statistic
-                            title="触发器"
-                            value={dbObjects.filter((t) => t.type === 'trigger').length}
-                            valueStyle={{ color: token.colorWarning }}
-                            prefix={<ThunderboltOutlined />}
-                          />
-                        </Card>
-                      </Col>
-                      <Col span={6}>
-                        <Card size="small">
-                          <Statistic
-                            title="对象总数"
-                            value={dbObjects.length}
-                          />
-                        </Card>
-                      </Col>
-                    </Row>
-
-                    {dbObjects.length === 0 ? (
-                      <EmptyState description="当前数据库下无对象" />
-                    ) : (
-                      <Card size="small" title="快捷操作">
-                        <Space>
-                          <Button
-                            icon={<CodeOutlined />}
-                            onClick={() => openSqlEditor()}
-                          >
-                            打开 SQL 编辑器
-                          </Button>
-                          <Button icon={<ReloadOutlined />} onClick={() => loadTables(selectedCtx.connectionId, selectedCtx.database!)}>
-                            刷新对象列表
-                          </Button>
-                        </Space>
-                      </Card>
-                    )}
-                  </>
+                      )}
+                    </Space>
+                  </div>
                 )
-              })()}
-            </Space>
+              }
+
+              // ===== 分类列表 Tab =====
+              if (activeTab.type === 'category-list') {
+                return (
+                  <div style={{ flex: 1, overflow: 'hidden' }}>
+                    <CategoryListView
+                      connectionId={activeTab.connectionId}
+                      database={activeTab.database}
+                      category={activeTab.category}
+                      objects={objectsMap[`${activeTab.connectionId}::${activeTab.database}`] || []}
+                      objectCategories={objectCategories}
+                      onSelectObject={(name) => {
+                        openOrActivateTab(activeTab.connectionId, activeTab.connectionName, activeTab.database, name)
+                      }}
+                    />
+                  </div>
+                )
+              }
+
+              return null
+            })()}
           </div>
         ) : (
           <EmptyState description={openConnections.length === 0 ? '从左侧添加连接开始浏览' : '选择左侧对象树中的数据库或表以查看详情'} />
