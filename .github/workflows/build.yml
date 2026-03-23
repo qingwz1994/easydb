@@ -19,13 +19,30 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # 临时只构建 Windows（调试完恢复其他平台）
+          - platform: macos-latest
+            args: '--target aarch64-apple-darwin'
+            rust_target: aarch64-apple-darwin
+            label: macOS-ARM64
+            jre_url: 'https://api.adoptium.net/v3/binary/latest/21/ga/mac/aarch64/jre/hotspot/normal/eclipse'
+            jre_ext: tar.gz
+          - platform: macos-latest
+            args: '--target x86_64-apple-darwin'
+            rust_target: x86_64-apple-darwin
+            label: macOS-x64
+            jre_url: 'https://api.adoptium.net/v3/binary/latest/21/ga/mac/x64/jre/hotspot/normal/eclipse'
+            jre_ext: tar.gz
           - platform: windows-latest
             args: ''
             rust_target: ''
             label: Windows-x64
             jre_url: 'https://api.adoptium.net/v3/binary/latest/21/ga/windows/x64/jre/hotspot/normal/eclipse'
             jre_ext: zip
+          - platform: ubuntu-22.04
+            args: ''
+            rust_target: ''
+            label: Linux-x64
+            jre_url: 'https://api.adoptium.net/v3/binary/latest/21/ga/linux/x64/jre/hotspot/normal/eclipse'
+            jre_ext: tar.gz
 
     runs-on: ${{ matrix.platform }}
     name: Build (${{ matrix.label }})
