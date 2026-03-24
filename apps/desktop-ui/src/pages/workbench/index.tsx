@@ -408,19 +408,26 @@ export const WorkbenchPage: React.FC = () => {
   }, [activeTableTabKey, setOpenTableTabs, setActiveTableTabKey])
 
   // --- 添加连接到工作台 ---
+  const [connectingId, setConnectingId] = useState<string | null>(null)
   const handleAddConnection = useCallback(async (connId: string) => {
     const conn = connections.find((c) => c.id === connId)
     if (!conn) return
 
     // 未连接的自动连接
     if (conn.status !== 'connected') {
+      setConnectingId(connId)
+      const hide = toast.loading(`正在连接「${conn.name}」...`)
       try {
         await connectionApi.open(conn.id)
         updateConnection(conn.id, { status: 'connected' })
+        hide()
         toast.success(`已连接到「${conn.name}」`)
       } catch (e) {
+        hide()
         handleApiError(e, '连接失败')
         return
+      } finally {
+        setConnectingId(null)
       }
     }
     addOpenConnection(conn.id, conn.name)
@@ -992,6 +999,8 @@ export const WorkbenchPage: React.FC = () => {
                 placeholder="添加连接..."
                 value={undefined}
                 onChange={handleAddConnection}
+                disabled={!!connectingId}
+                loading={!!connectingId}
                 options={availableConnections.map((c) => ({
                   label: (
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -1004,7 +1013,7 @@ export const WorkbenchPage: React.FC = () => {
                   value: c.id,
                 }))}
                 listHeight={320}
-                suffixIcon={<PlusOutlined />}
+                suffixIcon={connectingId ? undefined : <PlusOutlined />}
                 notFoundContent={<Text type="secondary" style={{ fontSize: 12 }}>所有连接已添加</Text>}
               />
             </div>
