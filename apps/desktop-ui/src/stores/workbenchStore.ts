@@ -44,6 +44,7 @@ export interface CategoryListTabState {
   connectionName: string
   database: string
   category: string // 'tables' | 'views' | 'triggers'
+  categorySearch?: string
 }
 
 /** 工作台 Tab 联合类型 */

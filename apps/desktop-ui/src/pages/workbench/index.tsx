@@ -11,7 +11,7 @@ import {
 } from '@ant-design/icons'
 import type { DataNode } from 'antd/es/tree'
 import type { DatabaseInfo, TableInfo, ColumnInfo, IndexInfo, ConnectionConfig } from '@/types'
-import { useWorkbenchStore, type TableTabState } from '@/stores/workbenchStore'
+import { useWorkbenchStore, type TableTabState, type WorkbenchTab } from '@/stores/workbenchStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useSqlEditorStore } from '@/stores/sqlEditorStore'
 import { metadataApi, connectionApi } from '@/services/api'
@@ -29,7 +29,7 @@ import type { MenuProps } from 'antd'
 const { Sider, Content } = Layout
 const { Text } = Typography
 
-/** 分类列表视图 — 独立组件，搜索状态局部化避免父组件重渲染 */
+/** 分类列表视图 — 独立组件，搜索状态通过 props 持久化 */
 const CategoryListView: React.FC<{
   connectionId: string
   database: string
@@ -37,8 +37,9 @@ const CategoryListView: React.FC<{
   objects: TableInfo[]
   objectCategories: { key: string; label: string; types: string[]; icon: React.ReactNode }[]
   onSelectObject: (name: string) => void
-}> = ({ database, category, objects, objectCategories, onSelectObject }) => {
-  const [search, setSearch] = useState('')
+  search: string
+  onSearchChange: (value: string) => void
+}> = ({ database, category, objects, objectCategories, onSelectObject, search, onSearchChange }) => {
   const deferredSearch = useDeferredValue(search)
 
   const catDef = objectCategories.find((c) => c.key === category)
@@ -100,7 +101,7 @@ const CategoryListView: React.FC<{
           size="small"
           style={{ width: 240 }}
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => onSearchChange(e.target.value)}
           allowClear
         />
       </div>
@@ -189,7 +190,26 @@ export const WorkbenchPage: React.FC = () => {
   }, [connections.length, setConnections])
 
   // --- 加载某个连接的数据库列表 ---
+  // 确保连接已打开（自动重连）
+  const ensureConnected = useCallback(async (connId: string): Promise<boolean> => {
+    const conn = connections.find((c) => c.id === connId)
+    if (!conn) return false
+    if (conn.status === 'connected') return true
+    try {
+      const hide = toast.loading(`正在连接「${conn.name}」...`)
+      await connectionApi.open(conn.id)
+      updateConnection(conn.id, { status: 'connected' })
+      hide()
+      toast.success(`已连接到「${conn.name}」`)
+      return true
+    } catch (e) {
+      handleApiError(e, '自动连接失败')
+      return false
+    }
+  }, [connections, updateConnection])
+
   const loadDatabases = useCallback(async (connId: string) => {
+    if (!(await ensureConnected(connId))) return
     setLoadingConns((prev) => new Set(prev).add(connId))
     try {
       const dbs = await metadataApi.databases(connId) as DatabaseInfo[]
@@ -203,7 +223,7 @@ export const WorkbenchPage: React.FC = () => {
         return next
       })
     }
-  }, [setDatabasesMap])
+  }, [ensureConnected, setDatabasesMap])
 
   // 当 openConnections 变化时，自动加载新增连接的数据库列表
   useEffect(() => {
@@ -216,6 +236,7 @@ export const WorkbenchPage: React.FC = () => {
 
   // --- 加载某库下的对象列表 ---
   const loadTables = useCallback(async (connId: string, dbName: string) => {
+    if (!(await ensureConnected(connId))) return
     const key = `${connId}::${dbName}`
     try {
       const tbls = await metadataApi.objects(connId, dbName) as TableInfo[]
@@ -223,7 +244,7 @@ export const WorkbenchPage: React.FC = () => {
     } catch (e) {
       handleApiError(e, '加载对象列表失败')
     }
-  }, [setObjectsMap])
+  }, [ensureConnected, setObjectsMap])
 
   // --- 多 Tab 数据加载（懒加载 + Tab 内独立缓存）---
   const updateTabState = useCallback((tabKey: string, updater: (prev: TableTabState) => Partial<TableTabState>) => {
@@ -994,10 +1015,11 @@ export const WorkbenchPage: React.FC = () => {
           <Space style={{ marginBottom: 8, width: '100%' }} direction="vertical" size={8}>
             <div style={{ display: 'flex', gap: 6 }}>
               <Select
+                key={`conn-select-${availableConnections.length}`}
                 size="small"
                 style={{ flex: 1 }}
                 placeholder="添加连接..."
-                value={undefined}
+                value={null}
                 onChange={handleAddConnection}
                 disabled={!!connectingId}
                 loading={!!connectingId}
@@ -1466,6 +1488,14 @@ export const WorkbenchPage: React.FC = () => {
                       category={activeTab.category}
                       objects={objectsMap[`${activeTab.connectionId}::${activeTab.database}`] || []}
                       objectCategories={objectCategories}
+                      search={activeTab.categorySearch || ''}
+                      onSearchChange={(value) => {
+                        const key = activeTableTabKey!
+                        setOpenTableTabs((prev) => ({
+                          ...prev,
+                          [key]: { ...prev[key], categorySearch: value } as WorkbenchTab,
+                        }))
+                      }}
                       onSelectObject={(name) => {
                         openOrActivateTab(activeTab.connectionId, activeTab.connectionName, activeTab.database, name)
                       }}

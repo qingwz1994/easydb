@@ -523,7 +523,7 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
             </span>
           )
         }
-        return <span data-cell-display>{String(displayValue)}</span>
+        return <span data-cell-display style={{ display: 'block', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(displayValue)}</span>
       },
     }))
 
