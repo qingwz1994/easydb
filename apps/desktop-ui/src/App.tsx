@@ -1,6 +1,6 @@
-import React from 'react'
+import React, { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { ConfigProvider, theme } from 'antd'
+import { ConfigProvider, theme, Modal, Button, Space } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import { MainLayout } from '@/layouts/MainLayout'
 import { ConnectionPage } from '@/pages/connection'
@@ -11,8 +11,43 @@ import { SyncPage } from '@/pages/sync'
 import { TaskCenterPage } from '@/pages/task-center'
 import { SettingsPage } from '@/pages/settings'
 import { StructureComparePage } from '@/pages/structure-compare'
+import { checkForUpdate, getAutoCheckEnabled } from '@/utils/updater'
 
 const App: React.FC = () => {
+  // 启动时自动检查更新
+  useEffect(() => {
+    if (!getAutoCheckEnabled()) return
+    // 延迟 3 秒检查，避免阻塞启动
+    const timer = setTimeout(async () => {
+      try {
+        const info = await checkForUpdate()
+        if (info.hasUpdate) {
+          Modal.confirm({
+            title: `发现新版本 v${info.latestVersion}`,
+            content: (
+              <div>
+                <p>当前版本：v{info.currentVersion}</p>
+                {info.releaseNotes && (
+                  <p style={{ fontSize: 12, color: '#666', maxHeight: 120, overflow: 'auto' }}>
+                    {info.releaseNotes.slice(0, 300)}
+                  </p>
+                )}
+              </div>
+            ),
+            okText: '前往下载',
+            cancelText: '稍后再说',
+            onOk: () => {
+              window.open(info.downloadUrl, '_blank')
+            },
+          })
+        }
+      } catch {
+        // 静默失败，不打扰用户
+      }
+    }, 3000)
+    return () => clearTimeout(timer)
+  }, [])
+
   return (
     <ConfigProvider
       locale={zhCN}

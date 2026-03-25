@@ -672,3 +672,49 @@ private suspend fun getSessionOrFail(
         }
 }
 
+// ─── 系统路由 ──────────────────────────────────────────────
+fun Route.systemRoutes() {
+    get("/check-update") {
+        try {
+            val currentVersion = System.getProperty("app.version") ?: "1.2.0"
+            // 通过 git ls-remote 获取远程 tags
+            val process = ProcessBuilder("git", "ls-remote", "--tags", "origin")
+                .redirectErrorStream(true)
+                .start()
+            val output = process.inputStream.bufferedReader().readText()
+            process.waitFor()
+
+            // 解析 tag 名称，找最大版本号
+            val tagRegex = Regex("""refs/tags/(v?\d+\.\d+\.\d+)$""", RegexOption.MULTILINE)
+            val versions = tagRegex.findAll(output).map { it.groupValues[1].removePrefix("v") }.toList()
+
+            val latestVersion = versions
+                .sortedWith(compareBy(
+                    { it.split(".").getOrElse(0) { "0" }.toIntOrNull() ?: 0 },
+                    { it.split(".").getOrElse(1) { "0" }.toIntOrNull() ?: 0 },
+                    { it.split(".").getOrElse(2) { "0" }.toIntOrNull() ?: 0 }
+                ))
+                .lastOrNull() ?: currentVersion
+
+            val currentParts = currentVersion.removePrefix("v").split(".").map { it.toIntOrNull() ?: 0 }
+            val latestParts = latestVersion.split(".").map { it.toIntOrNull() ?: 0 }
+            val hasUpdate = (0 until maxOf(currentParts.size, latestParts.size)).any { i ->
+                val c = currentParts.getOrElse(i) { 0 }
+                val l = latestParts.getOrElse(i) { 0 }
+                if (l != c) l > c else false
+            }
+
+            call.ok(mapOf(
+                "hasUpdate" to hasUpdate,
+                "latestVersion" to latestVersion,
+                "currentVersion" to currentVersion,
+                "downloadUrl" to "https://github.com/qingwz1994/easydb/releases"
+            ))
+        } catch (e: Exception) {
+            call.ok(mapOf(
+                "hasUpdate" to false,
+                "error" to (e.message ?: "检查更新失败")
+            ))
+        }
+    }
+}

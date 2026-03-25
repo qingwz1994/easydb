@@ -1,10 +1,46 @@
-import React from 'react'
-import { Typography, Card, Space, Switch } from 'antd'
-import { SettingOutlined, InfoCircleOutlined } from '@ant-design/icons'
+import React, { useState, useEffect, useCallback } from 'react'
+import { Typography, Card, Space, Switch, Button, Tag, Modal, Spin } from 'antd'
+import {
+  SettingOutlined, InfoCircleOutlined, SyncOutlined, CheckCircleOutlined,
+  CloudDownloadOutlined,
+} from '@ant-design/icons'
+import {
+  checkForUpdate, getAutoCheckEnabled, setAutoCheckEnabled, APP_VERSION,
+  type UpdateInfo,
+} from '@/utils/updater'
 
 const { Title, Text, Paragraph } = Typography
 
 export const SettingsPage: React.FC = () => {
+  const [autoCheck, setAutoCheck] = useState(getAutoCheckEnabled)
+  const [checking, setChecking] = useState(false)
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
+
+  const handleToggleAutoCheck = useCallback((checked: boolean) => {
+    setAutoCheck(checked)
+    setAutoCheckEnabled(checked)
+  }, [])
+
+  const handleCheckUpdate = useCallback(async () => {
+    setChecking(true)
+    try {
+      const info = await checkForUpdate()
+      setUpdateInfo(info)
+      if (!info.hasUpdate) {
+        Modal.info({
+          title: '已是最新版本',
+          content: `当前版本 v${info.currentVersion} 已经是最新的。`,
+        })
+      }
+    } catch {
+      Modal.error({
+        title: '检查更新失败',
+        content: '无法连接到更新服务器，请检查网络后重试。',
+      })
+    } finally {
+      setChecking(false)
+    }
+  }, [])
 
   return (
     <div style={{ padding: 24, maxWidth: 640 }}>
@@ -18,7 +54,7 @@ export const SettingsPage: React.FC = () => {
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text>启动时自动检查更新</Text>
-            <Switch defaultChecked />
+            <Switch checked={autoCheck} onChange={handleToggleAutoCheck} />
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text>退出时确认</Text>
@@ -43,13 +79,56 @@ export const SettingsPage: React.FC = () => {
 
       <Card size="small">
         <Title level={5}>关于</Title>
-        <Paragraph type="secondary">
-          <InfoCircleOutlined style={{ marginRight: 4 }} />
-          EasyDB v1.0.0 — 跨平台数据库管理工具
-        </Paragraph>
-        <Paragraph type="secondary">
-          技术栈：Tauri + React + TypeScript + Kotlin/JVM
-        </Paragraph>
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <InfoCircleOutlined style={{ marginRight: 4 }} />
+              <Text>EasyDB</Text>
+              <Tag color="blue" style={{ marginLeft: 8 }}>v{APP_VERSION}</Tag>
+            </div>
+            <Button
+              size="small"
+              icon={checking ? <SyncOutlined spin /> : <CloudDownloadOutlined />}
+              onClick={handleCheckUpdate}
+              loading={checking}
+            >
+              检查更新
+            </Button>
+          </div>
+
+          {updateInfo?.hasUpdate && (
+            <div style={{
+              padding: '8px 12px',
+              background: '#e6f4ff',
+              borderRadius: 6,
+              border: '1px solid #91caff',
+            }}>
+              <Space direction="vertical" size={4}>
+                <Text strong>
+                  <CheckCircleOutlined style={{ color: '#52c41a', marginRight: 4 }} />
+                  发现新版本 v{updateInfo.latestVersion}
+                </Text>
+                {updateInfo.releaseNotes && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {updateInfo.releaseNotes.slice(0, 200)}
+                    {updateInfo.releaseNotes.length > 200 ? '...' : ''}
+                  </Text>
+                )}
+                <Button
+                  type="primary"
+                  size="small"
+                  onClick={() => window.open(updateInfo.downloadUrl, '_blank')}
+                >
+                  前往下载
+                </Button>
+              </Space>
+            </div>
+          )}
+
+          <Paragraph type="secondary" style={{ margin: 0 }}>
+            技术栈：Tauri + React + TypeScript + Kotlin/JVM
+          </Paragraph>
+        </Space>
       </Card>
     </div>
   )
