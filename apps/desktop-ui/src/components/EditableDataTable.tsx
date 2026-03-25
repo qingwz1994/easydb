@@ -1,11 +1,11 @@
 import React, { useState, useMemo, useCallback, useRef, useEffect, useLayoutEffect } from 'react'
 import {
-  Table, Input, Button, Space, Tag, Popconfirm, Typography, theme, Modal, Pagination,
+  Table, Input, Button, Space, Tag, Popconfirm, Typography, theme, Modal, Pagination, AutoComplete,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
   PlusOutlined, DeleteOutlined, SaveOutlined, UndoOutlined,
-  ExclamationCircleOutlined,
+  ExclamationCircleOutlined, FilterOutlined, CaretUpOutlined, CaretDownOutlined,
 } from '@ant-design/icons'
 import type { ColumnInfo, RowChange, DataEditResult } from '@/types'
 import { metadataApi } from '@/services/api'
@@ -20,6 +20,7 @@ interface EditableDataTableProps {
   columns: ColumnInfo[]
   dataSource: Record<string, unknown>[]
   onRefresh: () => void
+  onFilter?: (params: { where?: string; orderBy?: string }) => void
 }
 
 type CellChange = {
@@ -101,6 +102,7 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
   columns,
   dataSource,
   onRefresh,
+  onFilter,
 }) => {
   const { token } = theme.useToken()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -108,6 +110,12 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
   const pagerRef = useRef<HTMLDivElement>(null)
   const selectedRowRef = useRef<number>(-1)
   const cellChangesRef = useRef<CellChange[]>([])
+
+  // 筛选状态
+  const [whereClause, setWhereClause] = useState('')
+  const [appliedWhere, setAppliedWhere] = useState('')
+  const [sortColumn, setSortColumn] = useState<string | null>(null)
+  const [sortDirection, setSortDirection] = useState<'ASC' | 'DESC' | null>(null)
 
   // 编辑状态用 ref 追踪，只在确认编辑时触发渲染
   const [editorState, setEditorState] = useState<{
@@ -158,7 +166,38 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
     setCurrentPage(1)
     setPageSize(20)
     setGridVersion((v) => v + 1)
+    setWhereClause('')
+    setAppliedWhere('')
+    setSortColumn(null)
+    setSortDirection(null)
   }, [connectionId, database, tableName])
+
+  const applyFilter = useCallback(() => {
+    setAppliedWhere(whereClause)
+    const orderBy = sortColumn && sortDirection ? `\`${sortColumn}\` ${sortDirection}` : undefined
+    onFilter?.({
+      where: whereClause || undefined,
+      orderBy,
+    })
+  }, [whereClause, sortColumn, sortDirection, onFilter])
+
+  const handleSort = useCallback((colName: string) => {
+    let newDir: 'ASC' | 'DESC' | null
+    if (sortColumn !== colName) {
+      newDir = 'ASC'
+    } else if (sortDirection === 'ASC') {
+      newDir = 'DESC'
+    } else {
+      newDir = null
+    }
+    setSortColumn(newDir ? colName : null)
+    setSortDirection(newDir)
+    const orderBy = newDir ? `\`${colName}\` ${newDir}` : undefined
+    onFilter?.({
+      where: appliedWhere || undefined,
+      orderBy,
+    })
+  }, [sortColumn, sortDirection, appliedWhere, onFilter])
 
   useEffect(() => {
     const totalPages = Math.max(1, Math.ceil(effectiveData.length / pageSize))
@@ -494,10 +533,17 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
   const tableColumns = useMemo<ColumnsType<TableRow>>(() => {
     const cols: ColumnsType<TableRow> = columns.map((col) => ({
       title: (
-        <Space size={2}>
-          {col.name}
-          {col.isPrimaryKey && <Tag color="gold" style={{ fontSize: 10, lineHeight: '14px', padding: '0 3px' }}>PK</Tag>}
-        </Space>
+        <div
+          style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', userSelect: 'none' }}
+          onClick={() => handleSort(col.name)}
+        >
+          <Space size={2}>
+            {col.name}
+            {col.isPrimaryKey && <Tag color="gold" style={{ fontSize: 10, lineHeight: '14px', padding: '0 3px' }}>PK</Tag>}
+          </Space>
+          {sortColumn === col.name && sortDirection === 'ASC' && <CaretUpOutlined style={{ fontSize: 10, color: token.colorPrimary }} />}
+          {sortColumn === col.name && sortDirection === 'DESC' && <CaretDownOutlined style={{ fontSize: 10, color: token.colorPrimary }} />}
+        </div>
       ),
       dataIndex: col.name,
       key: col.name,
@@ -547,7 +593,7 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
       })
     }
     return cols
-  }, [columns, isEditable, token, deleteRow, hasCellChange, getCellValue])
+  }, [columns, isEditable, token, deleteRow, hasCellChange, getCellValue, handleSort, sortColumn, sortDirection])
 
   const tableData = useMemo<TableRow[]>(
     () => effectiveData.map((r, i) => ({ ...r, _key: i, _rowIndex: i })),
@@ -634,6 +680,68 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
           background: ${token.colorWarningBg} !important;
         }
       `}</style>
+      {/* WHERE 筛选栏 */}
+      {onFilter && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexShrink: 0 }}>
+          <FilterOutlined style={{ color: token.colorTextSecondary, fontSize: 13 }} />
+          <AutoComplete
+            size="small"
+            style={{ flex: 1 }}
+            value={whereClause}
+            onChange={(val) => setWhereClause(val)}
+            options={(() => {
+              // 提取光标位置前的最后一个单词
+              const input = document.activeElement as HTMLInputElement | null
+              const cursorPos = input?.selectionStart ?? whereClause.length
+              const textBeforeCursor = whereClause.slice(0, cursorPos)
+              const match = textBeforeCursor.match(/([a-zA-Z_][a-zA-Z0-9_]*)$/)
+              const partial = match ? match[1].toLowerCase() : ''
+              if (!partial || partial.length < 1) return []
+              const colSuggestions = columns
+                .filter(c => c.name.toLowerCase().startsWith(partial))
+                .map(c => ({
+                  value: whereClause.slice(0, cursorPos - partial.length) + c.name + whereClause.slice(cursorPos),
+                  label: (
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ fontWeight: 500 }}>{c.name}</span>
+                      <span style={{ fontSize: 11, color: token.colorTextTertiary }}>{c.type}</span>
+                    </div>
+                  ),
+                }))
+              const sqlKeywords = ['AND', 'OR', 'NOT', 'LIKE', 'IN', 'IS NULL', 'IS NOT NULL', 'BETWEEN', 'EXISTS']
+              const kwSuggestions = sqlKeywords
+                .filter(kw => kw.toLowerCase().startsWith(partial))
+                .map(kw => ({
+                  value: whereClause.slice(0, cursorPos - partial.length) + kw + ' ' + whereClause.slice(cursorPos),
+                  label: <span style={{ color: token.colorPrimary, fontSize: 12 }}>{kw}</span>,
+                }))
+              return [...colSuggestions, ...kwSuggestions]
+            })()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.defaultPrevented) {
+                // 如果没有选中补全项，则触发筛选
+                setTimeout(() => applyFilter(), 0)
+              }
+            }}
+          >
+            <Input
+              size="small"
+              placeholder="输入 WHERE 条件，字段名自动补全"
+              allowClear
+            />
+          </AutoComplete>
+          <Button size="small" type="primary" onClick={applyFilter}>筛选</Button>
+          {appliedWhere && (
+            <Button size="small" onClick={() => {
+              setWhereClause('')
+              setAppliedWhere('')
+              setSortColumn(null)
+              setSortDirection(null)
+              onFilter?.({})
+            }}>重置</Button>
+          )}
+        </div>
+      )}
       {/* 操作栏 */}
       {isEditable && (
         <div

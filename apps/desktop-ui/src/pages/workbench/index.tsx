@@ -1385,6 +1385,18 @@ export const WorkbenchPage: React.FC = () => {
                                     }))
                                     loadTabDataForTab(tabKey, t.connectionId, t.database, t.tableName, 'preview')
                                   }}
+                                  onFilter={async (params) => {
+                                    try {
+                                      const rows = await metadataApi.previewRows(
+                                        t.connectionId, t.database, t.tableName, params
+                                      ) as Record<string, unknown>[]
+                                      updateTabState(tabKey, () => ({
+                                        previewRows: rows,
+                                      }))
+                                    } catch (e) {
+                                      handleApiError(e, '筛选数据失败')
+                                    }
+                                  }}
                                 />
                               </div>
                             </div>

@@ -83,8 +83,11 @@ export const metadataApi = {
     request(`/api/metadata/${connectionId}/${database}/tables/${table}/definition`),
   indexes: (connectionId: string, database: string, table: string) =>
     request(`/api/metadata/${connectionId}/${database}/tables/${table}/indexes`),
-  previewRows: (connectionId: string, database: string, table: string) =>
-    request(`/api/metadata/${connectionId}/${database}/tables/${table}/preview`),
+  previewRows: (connectionId: string, database: string, table: string, params?: { where?: string; orderBy?: string; limit?: number; offset?: number }) =>
+    request(`/api/metadata/${connectionId}/${database}/tables/${table}/preview`, {
+      method: 'POST',
+      body: JSON.stringify(params || {}),
+    }),
   ddl: (connectionId: string, database: string, table: string) =>
     request(`/api/metadata/${connectionId}/${database}/tables/${table}/ddl`),
   editData: (connectionId: string, database: string, table: string, changes: unknown[], dryRun = false) =>

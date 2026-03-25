@@ -251,12 +251,16 @@ fun Route.metadataRoutes() {
         call.ok(adapter.metadataAdapter().getIndexes(session, database, table))
     }
 
-    get("/{connectionId}/{database}/tables/{table}/preview") {
-        val session = getSessionOrFail(call, connMgr) ?: return@get
+    post("/{connectionId}/{database}/tables/{table}/preview") {
+        val session = getSessionOrFail(call, connMgr) ?: return@post
         val database = call.parameters["database"]!!
         val table = call.parameters["table"]!!
-        val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 1000
-        call.ok(adapter.metadataAdapter().previewRows(session, database, table, limit))
+        val body = try { call.receiveText().let { if (it.isBlank()) emptyMap() else kotlinx.serialization.json.Json.decodeFromString<Map<String, kotlinx.serialization.json.JsonElement>>(it) } } catch (_: Exception) { emptyMap<String, kotlinx.serialization.json.JsonElement>() }
+        val limit = (body["limit"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: 1000
+        val where = (body["where"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+        val orderBy = (body["orderBy"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+        val offset = (body["offset"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: 0
+        call.ok(adapter.metadataAdapter().previewRows(session, database, table, limit, where, orderBy, offset))
     }
 
     get("/{connectionId}/{database}/tables/{table}/ddl") {

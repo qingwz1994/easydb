@@ -44,7 +44,7 @@ interface MetadataAdapter {
     fun listTriggers(session: DatabaseSession, database: String): List<TriggerInfo> = emptyList()
     fun getTableDefinition(session: DatabaseSession, database: String, table: String): TableDefinition
     fun getIndexes(session: DatabaseSession, database: String, table: String): List<IndexInfo>
-    fun previewRows(session: DatabaseSession, database: String, table: String, limit: Int = 100): List<Map<String, String?>>
+    fun previewRows(session: DatabaseSession, database: String, table: String, limit: Int = 100, where: String? = null, orderBy: String? = null, offset: Int = 0): List<Map<String, String?>>
     fun getDdl(session: DatabaseSession, database: String, table: String): String
     fun createDatabase(session: DatabaseSession, name: String, charset: String = "utf8mb4", collation: String = "utf8mb4_general_ci")
     fun listCharsets(session: DatabaseSession): List<CharsetInfo> = emptyList()

@@ -151,11 +151,35 @@ class MysqlMetadataAdapter : MetadataAdapter {
         }
     }
 
-    override fun previewRows(session: DatabaseSession, database: String, table: String, limit: Int): List<Map<String, String?>> {
+    override fun previewRows(session: DatabaseSession, database: String, table: String, limit: Int, where: String?, orderBy: String?, offset: Int): List<Map<String, String?>> {
         val conn = (session as MysqlDatabaseSession).connection
         val result = mutableListOf<Map<String, String?>>()
+
+        // 构建 SQL
+        val sql = buildString {
+            append("SELECT * FROM `$database`.`$table`")
+            if (!where.isNullOrBlank()) {
+                // 基本 SQL 注入防护：禁止危险关键字
+                val sanitized = where.trim().replace(Regex(";.*$"), "") // 去掉分号后的内容
+                val forbidden = listOf("DROP ", "DELETE ", "ALTER ", "TRUNCATE ", "INSERT ", "UPDATE ", "CREATE ", "GRANT ", "REVOKE ")
+                val upper = sanitized.uppercase()
+                if (forbidden.none { upper.contains(it) }) {
+                    append(" WHERE $sanitized")
+                }
+            }
+            if (!orderBy.isNullOrBlank()) {
+                // orderBy 格式：columnName ASC 或 columnName DESC
+                val sanitized = orderBy.trim().replace(Regex("[;'\"]"), "")
+                append(" ORDER BY $sanitized")
+            }
+            append(" LIMIT $limit")
+            if (offset > 0) {
+                append(" OFFSET $offset")
+            }
+        }
+
         conn.createStatement().use { stmt ->
-            stmt.executeQuery("SELECT * FROM `$database`.`$table` LIMIT $limit").use { rs ->
+            stmt.executeQuery(sql).use { rs ->
                 val meta = rs.metaData
                 val columnCount = meta.columnCount
                 while (rs.next()) {

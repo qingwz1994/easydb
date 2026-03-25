@@ -34,6 +34,48 @@ do_build() {
     fi
 }
 
+# ─── 打包发布 ─────────────────────────────────────────────
+do_package() {
+    log "📦 开始打包 EasyDB..."
+
+    # 1. 构建内核 JAR
+    do_build
+
+    # 2. 复制 JAR 到 Tauri resources
+    local jar_file="$KERNEL_DIR/launcher/build/libs/launcher-all.jar"
+    if [ ! -f "$jar_file" ]; then
+        # 尝试带版本号的文件名
+        jar_file=$(ls $KERNEL_DIR/launcher/build/libs/*-all.jar 2>/dev/null | head -1)
+    fi
+    if [ -z "$jar_file" ] || [ ! -f "$jar_file" ]; then
+        err "❌ 找不到 shadowJar 产出物"
+        exit 1
+    fi
+
+    local resources_dir="$UI_DIR/src-tauri/resources"
+    mkdir -p "$resources_dir"
+    cp "$jar_file" "$resources_dir/easydb-kernel.jar"
+    log "✅ 内核 JAR 已复制到 resources/ ($(du -h "$resources_dir/easydb-kernel.jar" | cut -f1))"
+
+    # 3. 构建 Tauri 应用
+    log "🏗️  构建 Tauri 应用（首次可能需要 5-10 分钟）..."
+    cd "$UI_DIR" && npm run tauri build
+    if [ $? -eq 0 ]; then
+        log "✅ 打包完成！"
+        log "📁 产出物位置："
+        local bundle_dir="$UI_DIR/src-tauri/target/release/bundle"
+        if [ -d "$bundle_dir/dmg" ]; then
+            ls -lh "$bundle_dir/dmg/"*.dmg 2>/dev/null | awk '{print "   💿 " $NF " (" $5 ")"}'
+        fi
+        if [ -d "$bundle_dir/macos" ]; then
+            log "   📱 $bundle_dir/macos/EasyDB.app"
+        fi
+    else
+        err "❌ Tauri 打包失败"
+        exit 1
+    fi
+}
+
 # ─── 启动内核 ────────────────────────────────────────────
 start_kernel() {
     # 检查是否已在运行
@@ -170,6 +212,9 @@ case "${1:-help}" in
         start_ui
         do_status
         ;;
+    package)
+        do_package
+        ;;
     status)
         do_status
         ;;
@@ -202,6 +247,7 @@ case "${1:-help}" in
         echo "    restart    重启全部"
         echo "    build      仅构建内核 (clean shadowJar)"
         echo "    rebuild    构建 + 重启全部"
+        echo "    package    打包成安装包 (.app/.dmg)"
         echo "    status     查看运行状态"
         echo "    logs       查看日志 (默认 kernel，可选 ui)"
         echo ""
