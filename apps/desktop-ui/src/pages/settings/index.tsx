@@ -14,8 +14,8 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-import React, { useState, useEffect, useCallback } from 'react'
-import { Typography, Card, Space, Switch, Button, Tag, Modal, Spin } from 'antd'
+import React, { useState, useCallback } from 'react'
+import { Typography, Card, Space, Switch, Button, Tag, Modal } from 'antd'
 import {
   SettingOutlined, InfoCircleOutlined, SyncOutlined, CheckCircleOutlined,
   CloudDownloadOutlined,

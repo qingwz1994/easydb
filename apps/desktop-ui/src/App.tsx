@@ -16,7 +16,7 @@
  */
 import React, { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { ConfigProvider, theme, Modal, Button, Space } from 'antd'
+import { ConfigProvider, theme, Modal } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import { MainLayout } from '@/layouts/MainLayout'
 import { ConnectionPage } from '@/pages/connection'
