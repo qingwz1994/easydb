@@ -15,15 +15,16 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 import React, { useState, useCallback } from 'react'
-import { Typography, Card, Space, Switch, Button, Tag, Modal } from 'antd'
+import { Typography, Card, Space, Switch, Button, Tag, Modal, Radio } from 'antd'
 import {
   SettingOutlined, InfoCircleOutlined, SyncOutlined, CheckCircleOutlined,
-  CloudDownloadOutlined,
+  CloudDownloadOutlined, BulbOutlined,
 } from '@ant-design/icons'
 import {
   checkForUpdate, getAutoCheckEnabled, setAutoCheckEnabled, APP_VERSION,
   type UpdateInfo,
 } from '@/utils/updater'
+import { useThemeStore, type ThemeMode } from '@/stores/themeStore'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -31,6 +32,9 @@ export const SettingsPage: React.FC = () => {
   const [autoCheck, setAutoCheck] = useState(getAutoCheckEnabled)
   const [checking, setChecking] = useState(false)
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
+
+  const themeMode = useThemeStore((s) => s.themeMode)
+  const setThemeMode = useThemeStore((s) => s.setThemeMode)
 
   const handleToggleAutoCheck = useCallback((checked: boolean) => {
     setAutoCheck(checked)
@@ -68,6 +72,23 @@ export const SettingsPage: React.FC = () => {
       <Card size="small" style={{ marginBottom: 16 }}>
         <Title level={5}>通用</Title>
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <BulbOutlined style={{ marginRight: 4 }} />
+              <Text>外观主题</Text>
+            </div>
+            <Radio.Group
+              value={themeMode}
+              onChange={(e) => setThemeMode(e.target.value as ThemeMode)}
+              optionType="button"
+              buttonStyle="solid"
+              size="small"
+            >
+              <Radio.Button value="light">浅色</Radio.Button>
+              <Radio.Button value="dark">深色</Radio.Button>
+              <Radio.Button value="system">跟随系统</Radio.Button>
+            </Radio.Group>
+          </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text>启动时自动检查更新</Text>
             <Switch checked={autoCheck} onChange={handleToggleAutoCheck} />

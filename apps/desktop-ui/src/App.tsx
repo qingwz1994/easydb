@@ -28,8 +28,15 @@ import { TaskCenterPage } from '@/pages/task-center'
 import { SettingsPage } from '@/pages/settings'
 import { StructureComparePage } from '@/pages/structure-compare'
 import { checkForUpdate, getAutoCheckEnabled } from '@/utils/updater'
+import { useThemeStore } from '@/stores/themeStore'
+
+const fontFamily = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+const fontFamilyCode = "'Fira Code', 'JetBrains Mono', 'SF Mono', monospace"
 
 const App: React.FC = () => {
+  const effectiveTheme = useThemeStore((s) => s.effectiveTheme)
+  const isDark = effectiveTheme === 'dark'
+
   // 启动时自动检查更新
   useEffect(() => {
     if (!getAutoCheckEnabled()) return
@@ -68,13 +75,20 @@ const App: React.FC = () => {
     <ConfigProvider
       locale={zhCN}
       theme={{
-        algorithm: theme.defaultAlgorithm,
+        algorithm: isDark ? theme.darkAlgorithm : theme.defaultAlgorithm,
         token: {
-          colorPrimary: '#1677ff',
+          colorPrimary: isDark ? '#3B82F6' : '#2563EB',
+          colorBgBase: isDark ? '#0F172A' : '#FFFFFF',
+          colorBgContainer: isDark ? '#1E293B' : '#FFFFFF',
+          colorBgElevated: isDark ? '#334155' : '#FFFFFF',
+          colorBorder: isDark ? '#475569' : '#E2E8F0',
+          colorBorderSecondary: isDark ? '#334155' : '#F1F5F9',
           borderRadius: 6,
+          fontSize: 13,
+          fontFamily,
+          fontFamilyCode,
         },
-      }}
-    >
+      }}>
       <BrowserRouter>
         <MainLayout>
           <Routes>

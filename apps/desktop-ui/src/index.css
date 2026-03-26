@@ -1,3 +1,46 @@
+/* ===== EasyDB Design Tokens ===== */
+
+/* Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
+
+/* ---------- Light Theme (default) ---------- */
+:root {
+  --color-bg-base: #FFFFFF;
+  --color-bg-elevated: #F8FAFC;
+  --color-bg-surface: #F1F5F9;
+  --color-border: #E2E8F0;
+  --color-text-primary: #0F172A;
+  --color-text-secondary: #475569;
+  --color-text-muted: #94A3B8;
+  --color-accent: #2563EB;
+  --color-accent-hover: #1D4ED8;
+  --color-success: #22C55E;
+  --color-warning: #F59E0B;
+  --color-error: #EF4444;
+
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-family-code: 'Fira Code', 'JetBrains Mono', 'SF Mono', monospace;
+  --font-size-base: 13px;
+  --border-radius: 6px;
+}
+
+/* ---------- Dark Theme ---------- */
+[data-theme="dark"] {
+  --color-bg-base: #0F172A;
+  --color-bg-elevated: #1E293B;
+  --color-bg-surface: #334155;
+  --color-border: #475569;
+  --color-text-primary: #F8FAFC;
+  --color-text-secondary: #94A3B8;
+  --color-text-muted: #64748B;
+  --color-accent: #3B82F6;
+  --color-accent-hover: #2563EB;
+  --color-success: #22C55E;
+  --color-warning: #F59E0B;
+  --color-error: #EF4444;
+}
+
+/* ===== Base Resets ===== */
 * {
   margin: 0;
   padding: 0;
@@ -11,8 +54,62 @@ html, body, #root {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
-    'Helvetica Neue', Arial, sans-serif;
+  font-family: var(--font-family);
+  font-size: var(--font-size-base);
+  color: var(--color-text-primary);
+  background: var(--color-bg-base);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* ===== Scrollbar (dark mode adaptive) ===== */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-text-muted);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-secondary);
+}
+
+/* ===== Monaco Editor dark mode sync ===== */
+[data-theme="dark"] .monaco-editor {
+  --vscode-editor-background: var(--color-bg-elevated);
+}
+
+/* ===== Ant Design overrides for dark mode ===== */
+[data-theme="dark"] .ant-card {
+  background: var(--color-bg-elevated);
+  border-color: var(--color-border);
+}
+
+[data-theme="dark"] .ant-table {
+  background: var(--color-bg-elevated);
+}
+
+[data-theme="dark"] .ant-table-thead > tr > th {
+  background: var(--color-bg-surface) !important;
+}
+
+[data-theme="dark"] .ant-modal-content {
+  background: var(--color-bg-elevated);
+}
+
+[data-theme="dark"] .ant-input,
+[data-theme="dark"] .ant-select-selector,
+[data-theme="dark"] .ant-input-number {
+  background: var(--color-bg-surface) !important;
+  border-color: var(--color-border) !important;
+}
+
+/* Code font for SQL/DDL displays */
+.code-font {
+  font-family: var(--font-family-code);
 }

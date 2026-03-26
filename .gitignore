@@ -57,3 +57,4 @@ Thumbs.db
 docs/*.csv
 icon-new.png
 icon-squircle.png
+.agent/
