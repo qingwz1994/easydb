@@ -89,6 +89,17 @@ export const connectionApi = {
     request(`/api/connection/${id}/close`, { method: 'POST' }),
 }
 
+// ─── 连接分组 ───────────────────────────────────────────
+export const groupApi = {
+  list: () => request('/api/groups/list'),
+  create: (data: unknown) =>
+    request('/api/groups/create', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: unknown) =>
+    request(`/api/groups/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id: string) =>
+    request(`/api/groups/${id}`, { method: 'DELETE' }),
+}
+
 // ─── 元数据 ─────────────────────────────────────────────
 export const metadataApi = {
   databases: (connectionId: string) =>

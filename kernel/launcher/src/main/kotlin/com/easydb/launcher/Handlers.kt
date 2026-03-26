@@ -100,6 +100,43 @@ fun Route.connectionRoutes() {
     }
 }
 
+// ─── 连接分组路由 ──────────────────────────────────────────
+fun Route.groupRoutes() {
+    val store = ServiceRegistry.groupStore
+
+    // 获取分组列表
+    get("/list") {
+        call.ok(store.getAll())
+    }
+
+    // 新建分组
+    post("/create") {
+        val group = call.receive<ConnectionGroup>()
+        val newGroup = group.copy(id = UUID.randomUUID().toString())
+        store.save(newGroup)
+        call.ok(newGroup)
+    }
+
+    // 更新分组
+    put("/{id}") {
+        val id = call.parameters["id"] ?: return@put call.fail("INVALID_ID", "缺少分组 ID")
+        val group = call.receive<ConnectionGroup>()
+        if (store.getById(id) == null) {
+            call.fail("NOT_FOUND", "分组不存在")
+            return@put
+        }
+        val updated = store.save(group.copy(id = id))
+        call.ok(updated)
+    }
+
+    // 删除分组
+    delete("/{id}") {
+        val id = call.parameters["id"] ?: return@delete call.fail("INVALID_ID", "缺少分组 ID")
+        store.delete(id)
+        call.ok(true)
+    }
+}
+
 /** 从 JSON body 解析 TableDefinition */
 private fun parseTableDefinition(body: kotlinx.serialization.json.JsonObject): TableDefinition {
     fun kotlinx.serialization.json.JsonElement?.str(): String =

@@ -29,6 +29,14 @@ export interface ConnectionConfig {
   lastUsedAt?: string
   ssh?: SshConfig
   ssl?: SslConfig
+  groupId?: string
+}
+
+// 连接分组
+export interface ConnectionGroup {
+  id: string
+  name: string
+  sortOrder: number
 }
 
 // SSH 隧道配置
@@ -65,6 +73,10 @@ export interface TableInfo {
   type: 'table' | 'view' | 'trigger'
   rowCount?: number
   comment?: string
+  dataLength?: number
+  indexLength?: number
+  updateTime?: string
+  engine?: string
 }
 
 // 字段信息

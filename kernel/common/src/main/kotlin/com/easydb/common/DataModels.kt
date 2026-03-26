@@ -23,7 +23,11 @@ data class TableInfo(
     val schema: String? = null,
     val type: String = "table", // table | view | trigger
     val rowCount: Long? = null,
-    val comment: String? = null
+    val comment: String? = null,
+    val dataLength: Long? = null,
+    val indexLength: Long? = null,
+    val updateTime: String? = null,
+    val engine: String? = null
 )
 
 @Serializable

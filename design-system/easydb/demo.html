@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EasyDB - Modern Dark UI Demo</title>
+    <!-- Tailwind CSS for rapid styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Plus Jakarta Sans"', 'sans-serif'],
+                        mono: ['"JetBrains Mono"', 'monospace'],
+                    },
+                    colors: {
+                        easydark: {
+                            bg: '#0F172A',
+                            panel: '#1E293B',
+                            border: '#334155',
+                            text: '#F8FAFC',
+                            muted: '#94A3B8'
+                        },
+                        run: '#22C55E'
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #0F172A; color: #F8FAFC; }
+        .code-font { font-family: 'JetBrains Mono', monospace; }
+        
+        /* Custom sleek scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    </style>
+</head>
+<body class="h-screen flex overflow-hidden antialiased">
+    
+    <!-- Sidebar -->
+    <aside class="w-64 bg-easydark-panel border-r border-easydark-border flex flex-col z-10">
+        <!-- Logo Area -->
+        <div class="h-16 flex items-center px-4 border-b border-easydark-border">
+            <div class="w-8 h-8 rounded-lg bg-easydark-bg border border-easydark-border flex items-center justify-center mr-3 shadow-sm">
+                <i data-lucide="database" class="text-run w-4 h-4"></i>
+            </div>
+            <span class="font-bold text-lg tracking-tight">EasyDB</span>
+        </div>
+        
+        <!-- Navigation/Tree -->
+        <div class="p-4 flex-1 overflow-y-auto">
+            <div class="text-[11px] font-bold text-easydark-muted uppercase tracking-wider mb-3">Connections</div>
+            <ul class="space-y-1.5">
+                <li>
+                    <a href="#" class="flex items-center px-2 py-2 rounded-md bg-easydark-border/40 text-easydark-text border border-easydark-border/50 shadow-sm">
+                        <i data-lucide="server" class="w-4 h-4 mr-2.5 text-easydark-muted"></i>
+                        <span class="text-sm font-medium">Production DB</span>
+                        <i data-lucide="chevron-down" class="w-4 h-4 ml-auto text-easydark-muted"></i>
+                    </a>
+                    <!-- Sub-items -->
+                    <ul class="pl-7 mt-1.5 space-y-0.5">
+                        <li>
+                            <a href="#" class="flex items-center px-2 py-1.5 rounded-md hover:bg-easydark-border/30 text-easydark-muted hover:text-easydark-text transition-colors duration-200">
+                                <i data-lucide="table-2" class="w-3.5 h-3.5 mr-2"></i>
+                                <span class="text-[13px]">users_table</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#" class="flex items-center px-2 py-1.5 rounded-md bg-run/10 text-run font-medium transition-colors duration-200 border-l-2 border-run -ml-px">
+                                <i data-lucide="table-2" class="w-3.5 h-3.5 mr-2"></i>
+                                <span class="text-[13px]">orders_history</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#" class="flex items-center px-2 py-1.5 rounded-md hover:bg-easydark-border/30 text-easydark-muted hover:text-easydark-text transition-colors duration-200">
+                                <i data-lucide="table-2" class="w-3.5 h-3.5 mr-2"></i>
+                                <span class="text-[13px]">products</span>
+                            </a>
+                        </li>
+                    </ul>
+                </li>
+                <li class="pt-2">
+                    <a href="#" class="flex items-center px-2 py-2 rounded-md hover:bg-easydark-border/30 text-easydark-muted hover:text-easydark-text transition-colors duration-200">
+                        <i data-lucide="database-backup" class="w-4 h-4 mr-2.5 opacity-70"></i>
+                        <span class="text-sm font-medium">Staging Env</span>
+                    </a>
+                </li>
+            </ul>
+        </div>
+        
+        <!-- Bottom Action -->
+        <div class="p-4 border-t border-easydark-border bg-easydark-panel/50">
+            <button class="flex items-center justify-center w-full py-2 px-4 rounded-md bg-easydark-border/50 hover:bg-easydark-border transition-colors duration-200 text-sm font-medium text-easydark-text border border-easydark-border shadow-sm">
+                <i data-lucide="plus" class="w-4 h-4 mr-2 opacity-70"></i> New Connection
+            </button>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col min-w-0 bg-easydark-bg relative">
+        
+        <!-- Top App Bar -->
+        <header class="h-16 flex items-center justify-between px-6 border-b border-easydark-border bg-easydark-bg/90 backdrop-blur-sm z-10 sticky top-0">
+            <!-- Breadcrumbs -->
+            <div class="flex items-center text-sm font-medium">
+                <span class="text-easydark-muted cursor-pointer hover:text-easydark-text transition-colors flex items-center">
+                    <i data-lucide="server" class="w-4 h-4 mr-1.5 opacity-70"></i> Production DB
+                </span>
+                <i data-lucide="chevron-right" class="w-4 h-4 mx-2 text-easydark-border"></i>
+                <span class="text-easydark-text flex items-center">
+                    <i data-lucide="table-2" class="w-4 h-4 mr-1.5 text-easydark-muted"></i> orders_history
+                </span>
+            </div>
+            
+            <!-- Global Actions -->
+            <div class="flex items-center space-x-3">
+                <button class="p-2 rounded-md hover:bg-easydark-panel border border-transparent hover:border-easydark-border text-easydark-muted hover:text-easydark-text transition-all">
+                    <i data-lucide="bell" class="w-4 h-4"></i>
+                </button>
+                <button class="p-2 rounded-md hover:bg-easydark-panel border border-transparent hover:border-easydark-border text-easydark-muted hover:text-easydark-text transition-all">
+                    <i data-lucide="settings" class="w-4 h-4"></i>
+                </button>
+                <div class="w-px h-5 bg-easydark-border mx-1"></div>
+                <img src="https://ui-avatars.com/api/?name=Admin&background=1E293B&color=F8FAFC&rounded=true" alt="User" class="w-7 h-7 rounded-full border border-easydark-border cursor-pointer hover:ring-2 hover:ring-easydark-border transition-all">
+            </div>
+        </header>
+
+        <!-- Query Editor Area -->
+        <div class="p-6 flex-shrink-0 border-b border-easydark-border bg-gradient-to-b from-easydark-bg to-easydark-bg/50">
+            <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center">
+                    <h2 class="text-[11px] font-bold tracking-widest text-easydark-muted">SQL EDITOR</h2>
+                    <span class="ml-3 px-2 py-0.5 rounded text-[10px] font-medium bg-easydark-panel text-easydark-muted border border-easydark-border">PostgreSQL 14.2</span>
+                </div>
+                <!-- Action Buttons -->
+                <div class="flex space-x-2">
+                    <button class="flex items-center px-3 py-1.5 rounded-md bg-easydark-panel hover:bg-easydark-border transition-colors text-xs font-medium border border-easydark-border text-easydark-text">
+                        <i data-lucide="save" class="w-3.5 h-3.5 mr-1.5 opacity-70"></i> Save Snippet
+                    </button>
+                    <!-- Highlighted primary CTA -->
+                    <button class="flex items-center px-4 py-1.5 rounded-md bg-run hover:bg-green-500 text-white transition-all text-xs font-semibold shadow-[0_0_15px_rgba(34,197,94,0.3)] hover:shadow-[0_0_20px_rgba(34,197,94,0.4)]">
+                        <i data-lucide="play" class="w-3.5 h-3.5 mr-1.5 fill-current"></i> Run Select
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Code Block (Simulated Monaco/Editor) -->
+            <div class="bg-[#0b1120] border border-easydark-border rounded-lg p-5 font-mono text-[13px] leading-relaxed relative group shadow-inner">
+                <div class="flex">
+                    <!-- Line numbers -->
+                    <div class="text-easydark-border text-right select-none pr-4 border-r border-easydark-border/50 mr-4 flex flex-col items-end">
+                        <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span>
+                    </div>
+                    <!-- Code content -->
+                    <div class="code-font overflow-x-auto">
+                        <div><span class="text-pink-400 font-medium">SELECT</span> <span class="text-easydark-text">id, user_id, total_amount, status, created_at</span></div>
+                        <div><span class="text-pink-400 font-medium">FROM</span> <span class="text-cyan-300">orders_history</span></div>
+                        <div><span class="text-pink-400 font-medium">WHERE</span> <span class="text-easydark-text">status =</span> <span class="text-yellow-300">'COMPLETED'</span></div>
+                        <div><span class="text-pink-400 font-medium">ORDER BY</span> <span class="text-easydark-text">created_at</span> <span class="text-purple-400 font-medium">DESC</span></div>
+                        <div><span class="text-pink-400 font-medium">LIMIT</span> <span class="text-purple-400">100</span>;</div>
+                    </div>
+                </div>
+                
+                <!-- Floating copy button -->
+                <button class="absolute top-3 right-3 p-1.5 rounded-md text-easydark-muted hover:text-easydark-text hover:bg-easydark-border opacity-0 group-hover:opacity-100 transition-all duration-200 border border-transparent hover:border-easydark-border/50 bg-[#0b1120]">
+                    <i data-lucide="copy" class="w-4 h-4"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Data Results Area -->
+        <div class="flex-1 flex flex-col min-h-0 p-6 bg-easydark-bg">
+            <!-- Results Header -->
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center space-x-3">
+                    <h2 class="text-[11px] font-bold tracking-widest text-easydark-text">RESULTS</h2>
+                    <div class="flex items-center px-2 py-0.5 rounded-full bg-easydark-panel border border-easydark-border">
+                        <div class="w-1.5 h-1.5 rounded-full bg-run mr-1.5 shadow-[0_0_5px_rgba(34,197,94,0.5)]"></div>
+                        <span class="text-xs text-easydark-muted code-font">100 rows fetched</span>
+                    </div>
+                    <span class="text-[11px] px-2 py-0.5 rounded text-easydark-muted border border-easydark-border border-dashed code-font">45ms</span>
+                </div>
+                
+                <div class="flex space-x-2">
+                    <button class="text-[13px] flex items-center px-3 py-1.5 rounded hover:bg-easydark-panel text-easydark-muted hover:text-easydark-text transition-colors border border-transparent hover:border-easydark-border">
+                        <i data-lucide="filter" class="w-3.5 h-3.5 mr-1.5"></i> Filter
+                    </button>
+                    <button class="text-[13px] flex items-center px-3 py-1.5 rounded hover:bg-easydark-panel text-easydark-muted hover:text-easydark-text transition-colors border border-transparent hover:border-easydark-border">
+                        <i data-lucide="download" class="w-3.5 h-3.5 mr-1.5"></i> Export CSV
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Data Table -->
+            <div class="flex-1 bg-easydark-panel border border-easydark-border rounded-lg overflow-hidden flex flex-col shadow-sm relative">
+                <div class="overflow-auto flex-1">
+                    <table class="w-full text-left text-sm whitespace-nowrap">
+                        <thead class="bg-easydark-border/30 border-b border-easydark-border text-easydark-muted text-[13px] sticky top-0 backdrop-blur-md z-10">
+                            <tr>
+                                <th class="px-5 py-3 font-semibold tracking-wide">
+                                    <div class="flex items-center cursor-pointer hover:text-easydark-text transition-colors">
+                                        id <i data-lucide="key" class="w-3 h-3 ml-1.5 text-yellow-500/70"></i>
+                                    </div>
+                                </th>
+                                <th class="px-5 py-3 font-semibold tracking-wide cursor-pointer hover:text-easydark-text transition-colors">user_id</th>
+                                <th class="px-5 py-3 font-semibold tracking-wide cursor-pointer hover:text-easydark-text transition-colors text-right">total_amount</th>
+                                <th class="px-5 py-3 font-semibold tracking-wide cursor-pointer hover:text-easydark-text transition-colors">status</th>
+                                <th class="px-5 py-3 font-semibold tracking-wide">
+                                    <div class="flex items-center cursor-pointer text-easydark-text transition-colors">
+                                        created_at <i data-lucide="arrow-down" class="w-3.5 h-3.5 ml-1.5"></i>
+                                    </div>
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-easydark-border/40 text-easydark-text code-font text-[13px]">
+                            <tr class="hover:bg-easydark-border/30 transition-colors group">
+                                <td class="px-5 py-3 group-hover:text-cyan-300 transition-colors">ORD-9921</td>
+                                <td class="px-5 py-3 text-blue-400">usr_881xaz</td>
+                                <td class="px-5 py-3 text-right">129.50</td>
+                                <td class="px-5 py-3">
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold tracking-wide bg-run/10 text-run border border-run/20 uppercase">
+                                        Completed
+                                    </span>
+                                </td>
+                                <td class="px-5 py-3 text-easydark-muted">2026-03-26 14:02:11</td>
+                            </tr>
+                            <tr class="hover:bg-easydark-border/30 transition-colors group">
+                                <td class="px-5 py-3 group-hover:text-cyan-300 transition-colors">ORD-9920</td>
+                                <td class="px-5 py-3 text-blue-400">usr_332tyu</td>
+                                <td class="px-5 py-3 text-right">45.00</td>
+                                <td class="px-5 py-3">
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold tracking-wide bg-run/10 text-run border border-run/20 uppercase">
+                                        Completed
+                                    </span>
+                                </td>
+                                <td class="px-5 py-3 text-easydark-muted">2026-03-26 13:45:00</td>
+                            </tr>
+                            <tr class="hover:bg-easydark-border/30 transition-colors group">
+                                <td class="px-5 py-3 group-hover:text-cyan-300 transition-colors">ORD-9919</td>
+                                <td class="px-5 py-3 text-blue-400">usr_192pqa</td>
+                                <td class="px-5 py-3 text-right">899.99</td>
+                                <td class="px-5 py-3">
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold tracking-wide bg-run/10 text-run border border-run/20 uppercase">
+                                        Completed
+                                    </span>
+                                </td>
+                                <td class="px-5 py-3 text-easydark-muted">2026-03-26 11:20:45</td>
+                            </tr>
+                            <tr class="bg-easydark-border/10 hover:bg-easydark-border/30 transition-colors group relative">
+                                <td class="px-5 py-3 group-hover:text-cyan-300 transition-colors">
+                                    <!-- Selection Indicator for a focused row -->
+                                    <div class="absolute left-0 top-0 bottom-0 w-0.5 bg-run transform scale-y-100 transition-transform"></div>
+                                    ORD-9918
+                                </td>
+                                <td class="px-5 py-3 text-blue-400">usr_556mno</td>
+                                <td class="px-5 py-3 text-right">15.20</td>
+                                <td class="px-5 py-3">
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold tracking-wide bg-yellow-500/10 text-yellow-500 border border-yellow-500/20 uppercase">
+                                        Pending
+                                    </span>
+                                </td>
+                                <td class="px-5 py-3 text-easydark-muted">2026-03-26 09:12:05</td>
+                            </tr>
+                            <tr class="hover:bg-easydark-border/30 transition-colors group">
+                                <td class="px-5 py-3 group-hover:text-cyan-300 transition-colors">ORD-9917</td>
+                                <td class="px-5 py-3 text-blue-400">usr_771bvc</td>
+                                <td class="px-5 py-3 text-right">210.00</td>
+                                <td class="px-5 py-3">
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold tracking-wide bg-run/10 text-run border border-run/20 uppercase">
+                                        Completed
+                                    </span>
+                                </td>
+                                <td class="px-5 py-3 text-easydark-muted">2026-03-25 22:30:19</td>
+                            </tr>
+                            <tr class="hover:bg-easydark-border/30 transition-colors group">
+                                <td class="px-5 py-3 group-hover:text-cyan-300 transition-colors">ORD-9916</td>
+                                <td class="px-5 py-3 text-blue-400">usr_992hxw</td>
+                                <td class="px-5 py-3 text-right">5,900.00</td>
+                                <td class="px-5 py-3">
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold tracking-wide bg-red-500/10 text-red-400 border border-red-500/20 uppercase">
+                                        Failed
+                                    </span>
+                                </td>
+                                <td class="px-5 py-3 text-easydark-muted">2026-03-25 21:15:00</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+        </div>
+    </main>
+
+    <script>
+        // Initialize Lucide icons on load
+        lucide.createIcons();
+    </script>
+</body>
+</html>

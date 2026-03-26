@@ -60,6 +60,11 @@ fun Application.configureRoutes() {
             route("/compare") {
                 compareRoutes()
             }
+
+            // 连接分组
+            route("/groups") {
+                groupRoutes()
+            }
         }
     }
 }

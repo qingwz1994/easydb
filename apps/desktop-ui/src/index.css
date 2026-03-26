@@ -113,3 +113,37 @@ body {
 .code-font {
   font-family: var(--font-family-code);
 }
+
+/* ===== SQL Editor Pro-Max Overrides ===== */
+.sql-spreadsheet-grid .ant-table-cell {
+  border-right: 1px solid var(--color-border) !important;
+  border-bottom: 1px solid var(--color-border) !important;
+}
+
+.sql-spreadsheet-grid .table-row-light > td {
+  background-color: transparent;
+}
+
+.sql-spreadsheet-grid .table-row-dark > td {
+  background-color: rgba(0, 0, 0, 0.02);
+}
+
+[data-theme="dark"] .sql-spreadsheet-grid .table-row-dark > td {
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* Modern Tab Strip */
+.sql-editor-tabs .ant-tabs-nav {
+  margin-bottom: 0 !important;
+}
+.sql-editor-tabs .ant-tabs-tab {
+  border: none !important;
+  background: transparent !important;
+  border-top: 2px solid transparent !important;
+  border-radius: 0 !important;
+  transition: all 0.2s;
+}
+.sql-editor-tabs .ant-tabs-tab-active {
+  background: var(--color-bg-base) !important;
+  border-top: 2px solid var(--color-accent) !important;
+}

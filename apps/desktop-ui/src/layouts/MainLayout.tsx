@@ -72,12 +72,13 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   const setSiderCollapsed = useWorkbenchStore((s) => s.setSiderCollapsed)
 
   const currentTitle = pageTitle[location.pathname] ?? ''
+  const isSqlEditor = location.pathname === '/sql-editor'
 
-  // 面包屑项
+  // 面包屑项（SQL 编辑器内部有自己的上下文，不显示全局上下文）
   const breadcrumbItems = [
     { title: currentTitle },
-    ...(activeConnectionName ? [{ title: activeConnectionName }] : []),
-    ...(activeDatabase ? [{ title: activeDatabase }] : []),
+    ...(!isSqlEditor && activeConnectionName ? [{ title: activeConnectionName }] : []),
+    ...(!isSqlEditor && activeDatabase ? [{ title: activeDatabase }] : []),
   ]
 
   return (
@@ -157,7 +158,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
 
           {/* 右侧：当前连接状态 */}
           <Space size={12}>
-            {activeConnectionName ? (
+            {!isSqlEditor && activeConnectionName ? (
               <>
                 <Text type="secondary" style={{ fontSize: 13 }}>
                   <DatabaseOutlined style={{ marginRight: 4 }} />
@@ -166,11 +167,11 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                 </Text>
                 <ConnectionStatusTag status="connected" />
               </>
-            ) : (
+            ) : !isSqlEditor ? (
               <Text type="secondary" style={{ fontSize: 13 }}>
                 未连接
               </Text>
-            )}
+            ) : null}
           </Space>
         </Header>
 

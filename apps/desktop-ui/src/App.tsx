@@ -30,8 +30,8 @@ import { StructureComparePage } from '@/pages/structure-compare'
 import { checkForUpdate, getAutoCheckEnabled } from '@/utils/updater'
 import { useThemeStore } from '@/stores/themeStore'
 
-const fontFamily = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
-const fontFamilyCode = "'Fira Code', 'JetBrains Mono', 'SF Mono', monospace"
+const fontFamily = "'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+const fontFamilyCode = "'JetBrains Mono', 'Fira Code', 'SF Mono', monospace"
 
 const App: React.FC = () => {
   const effectiveTheme = useThemeStore((s) => s.effectiveTheme)
@@ -77,7 +77,7 @@ const App: React.FC = () => {
       theme={{
         algorithm: isDark ? theme.darkAlgorithm : theme.defaultAlgorithm,
         token: {
-          colorPrimary: isDark ? '#3B82F6' : '#2563EB',
+          colorPrimary: isDark ? '#22C55E' : '#22C55E',
           colorBgBase: isDark ? '#0F172A' : '#FFFFFF',
           colorBgContainer: isDark ? '#1E293B' : '#FFFFFF',
           colorBgElevated: isDark ? '#334155' : '#FFFFFF',

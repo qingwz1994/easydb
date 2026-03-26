@@ -12,6 +12,7 @@ object ServiceRegistry {
     val connectionManager = ConnectionManager()
     val sqlService = SqlExecutionService()
     val connectionStore = ConnectionStore()
+    val groupStore = GroupStore()
     val taskManager = TaskManager()
     val sqlHistoryStore = SqlHistoryStore()
 }

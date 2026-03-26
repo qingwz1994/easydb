@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import {
   Modal, Form, Input, InputNumber, Select, Tabs, Switch, Typography,
 } from 'antd'
-import type { ConnectionConfig } from '@/types'
+import type { ConnectionConfig, ConnectionGroup } from '@/types'
 
 const { Text } = Typography
 
@@ -15,6 +15,7 @@ interface ConnectionModalProps {
   onTest: (values: Partial<ConnectionConfig>) => void
   testResult: { connected: boolean; message: string } | null
   testing: boolean
+  existingGroups: ConnectionGroup[]
 }
 
 
@@ -22,7 +23,7 @@ interface ConnectionModalProps {
 export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   open, editingConnection, confirmLoading,
   onSave, onCancel, onTest,
-  testResult, testing,
+  testResult, testing, existingGroups,
 }) => {
   const [form] = Form.useForm()
   const [sshEnabled, setSshEnabled] = useState(false)
@@ -104,9 +105,22 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
               label: '基本',
               children: (
                 <>
-                  <Form.Item name="name" label="连接名称" rules={[{ required: true, message: '请输入连接名称' }]}>
-                    <Input placeholder="我的 MySQL 连接" />
-                  </Form.Item>
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    <Form.Item name="name" label="连接名称" style={{ flex: 1 }} rules={[{ required: true, message: '请输入连接名称' }]}>
+                      <Input placeholder="我的 MySQL 连接" />
+                    </Form.Item>
+                    <Form.Item name="groupId" label="分组" style={{ flex: 1 }}>
+                      <Select
+                        options={existingGroups.map(g => ({ value: g.id, label: g.name }))}
+                        placeholder="选择预置分组"
+                        allowClear
+                        showSearch
+                        filterOption={(input, option) =>
+                          (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                        }
+                      />
+                    </Form.Item>
+                  </div>
                   <Form.Item name="dbType" label="数据库类型">
                     <Select
                       options={[
