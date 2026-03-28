@@ -39,6 +39,13 @@ import { formatDateTime, formatDuration, getElapsedMs } from '@/utils/format'
 const { Sider } = Layout
 const { Title, Text } = Typography
 
+const TASK_TYPE_LABELS: Record<string, string> = {
+  migration: '迁移',
+  sync: '同步',
+  export: '导出',
+  import: '导入',
+}
+
 export const TaskCenterPage: React.FC = () => {
   const { token } = theme.useToken()
 
@@ -152,26 +159,17 @@ export const TaskCenterPage: React.FC = () => {
     })
   }
 
-  // 日志导出
+  // 日志导出 (下载物理日志文件)
   const handleExportLogs = () => {
     if (!selectedTaskId || !selectedTask) return
-    const logs = taskLogs[selectedTaskId] ?? []
-    const content = [
-      `任务名称: ${selectedTask.name}`,
-      `任务类型: ${selectedTask.type === 'migration' ? '迁移' : '同步'}`,
-      `状态: ${selectedTask.status}`,
-      `创建时间: ${selectedTask.createdAt ? formatDateTime(selectedTask.createdAt) : '-'}`,
-      '---',
-      ...logs.map((l) => `[${l.timestamp ?? ''}] [${l.level ?? 'INFO'}] ${l.message}`),
-    ].join('\n')
-    const blob = new Blob([content], { type: 'text/plain' })
-    const url = URL.createObjectURL(blob)
+    const url = `http://localhost:18080/api/task/${selectedTaskId}/download-log`
     const a = document.createElement('a')
     a.href = url
     a.download = `${selectedTask.name}-log.txt`
+    document.body.appendChild(a)
     a.click()
-    URL.revokeObjectURL(url)
-    toast.success('日志已导出')
+    document.body.removeChild(a)
+    toast.success('物理日志下载已启动')
   }
 
   const selectedTask = tasks.find((t) => t.id === selectedTaskId)
@@ -181,7 +179,7 @@ export const TaskCenterPage: React.FC = () => {
     { title: '任务名称', dataIndex: 'name', key: 'name', ellipsis: true },
     {
       title: '类型', dataIndex: 'type', key: 'type', width: 80,
-      render: (t: string) => <Tag>{t === 'migration' ? '迁移' : '同步'}</Tag>,
+      render: (t: string) => <Tag>{TASK_TYPE_LABELS[t] ?? t}</Tag>,
     },
     {
       title: '状态', dataIndex: 'status', key: 'status', width: 90,
@@ -250,6 +248,8 @@ export const TaskCenterPage: React.FC = () => {
             options={[
               { value: 'migration', label: '迁移' },
               { value: 'sync', label: '同步' },
+              { value: 'export', label: '导出' },
+              { value: 'import', label: '导入' },
             ]}
           />
           <Select
@@ -276,7 +276,7 @@ export const TaskCenterPage: React.FC = () => {
           display: 'flex', flexDirection: 'column', overflow: 'hidden'
         }}>
           {tasks.length === 0 && !loading ? (
-            <EmptyState description="暂无任务，在「数据迁移」或「数据同步」中创建任务" />
+            <EmptyState description="暂无任务，在「迁移 / 同步 / 导出 / 导入」中创建任务" />
           ) : (
             <Table
               columns={columns}
@@ -321,7 +321,7 @@ export const TaskCenterPage: React.FC = () => {
               </div>
 
               <Descriptions column={1} size="small" labelStyle={{ color: token.colorTextSecondary }}>
-                <Descriptions.Item label="类型">{selectedTask.type === 'migration' ? '迁移' : '同步'}</Descriptions.Item>
+                <Descriptions.Item label="类型">{TASK_TYPE_LABELS[selectedTask.type] ?? selectedTask.type}</Descriptions.Item>
                 <Descriptions.Item label="状态"><TaskStatusTag status={selectedTask.status} /></Descriptions.Item>
                 <Descriptions.Item label="进度"><Progress percent={selectedTask.progress} size="small" style={{ marginBottom: 0 }} /></Descriptions.Item>
                 {(selectedTask.successCount != null || selectedTask.failureCount != null) && (

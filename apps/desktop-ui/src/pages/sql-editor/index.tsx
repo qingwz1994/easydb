@@ -16,12 +16,12 @@
  */
 import React, { useState, useCallback, useRef, useEffect } from 'react'
 import {
-  Layout, Button, Space, Typography, Tabs, Table, Tag, Select, Dropdown,
-  theme,
+  Layout, Button, Space, Typography, Tabs, Tag, Select,
+  theme, Tooltip,
 } from 'antd'
 import {
-  PlayCircleOutlined, ClearOutlined, DownloadOutlined,
-  CodeOutlined, PlusOutlined,
+  PlayCircleOutlined, ClearOutlined,
+  CodeOutlined, PlusOutlined, StarOutlined, FolderOpenOutlined
 } from '@ant-design/icons'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
@@ -31,9 +31,20 @@ import { useConnectionStore } from '@/stores/connectionStore'
 import { useSqlEditorStore } from '@/stores/sqlEditorStore'
 import { sqlApi, metadataApi, connectionApi } from '@/services/api'
 import { EmptyState } from '@/components/EmptyState'
+import { SqlResultPanel } from '@/components/SqlResultPanel'
 import { handleApiError, toast } from '@/utils/notification'
-import { exportResultSet } from '@/utils/exportUtils'
 import { createSqlCompletionProvider, clearCompletionCache } from './sqlCompletionProvider'
+import {
+  DEFAULT_SQL_PREVIEW_PAGE_SIZE,
+  collectSqlQuerySessionIds,
+  isPreviewableSql,
+  MAX_SQL_PREVIEW_CELL_CHARS,
+  mergeSqlPreviewResult,
+  normalizeExecutableSql,
+} from './queryPreview'
+import { SaveScriptModal } from './SaveScriptModal'
+import { SavedScriptsModal } from './SavedScriptsModal'
+import { formatHotkey } from '@/utils/osUtils'
 
 const { Content } = Layout
 const { Text } = Typography
@@ -72,6 +83,9 @@ export const SqlEditorPage: React.FC = () => {
   const consumePendingSql = useSqlEditorStore((s) => s.consumePendingSql)
 
   const [executing, setExecuting] = useState(false)
+  const [loadingMoreKey, setLoadingMoreKey] = useState<string | null>(null)
+  const [saveModalOpen, setSaveModalOpen] = useState(false)
+  const [listModalOpen, setListModalOpen] = useState(false)
   const [databases, setDatabases] = useState<string[]>([])
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null)
 
@@ -152,6 +166,11 @@ export const SqlEditorPage: React.FC = () => {
   }
 
   const removeTab = (targetKey: string) => {
+    const targetTab = tabs.find((tab) => tab.key === targetKey)
+    const querySessionIds = collectSqlQuerySessionIds(targetTab?.currentBatch, targetTab?.results)
+    querySessionIds.forEach((querySessionId) => {
+      void sqlApi.querySessionClose(querySessionId).catch(() => {})
+    })
     storeRemoveTab(targetKey)
   }
 
@@ -251,9 +270,23 @@ export const SqlEditorPage: React.FC = () => {
     }
 
     if (!execSql || !activeEditorTab?.connectionId || !activeEditorTab?.database) return
+    const normalizedSql = normalizeExecutableSql(execSql)
     setExecuting(true)
     try {
-      const resultList = await sqlApi.execute(activeEditorTab.connectionId, activeEditorTab.database, execSql) as SqlResult[]
+      const previousSessionIds = collectSqlQuerySessionIds(activeEditorTab.currentBatch, activeEditorTab.results)
+      if (previousSessionIds.length > 0) {
+        await Promise.allSettled(previousSessionIds.map((querySessionId) => sqlApi.querySessionClose(querySessionId)))
+      }
+
+      const resultList = isPreviewableSql(normalizedSql)
+        ? [await sqlApi.querySessionStart({
+          connectionId: activeEditorTab.connectionId,
+          database: activeEditorTab.database,
+          sql: normalizedSql,
+          pageSize: DEFAULT_SQL_PREVIEW_PAGE_SIZE,
+          maxCellChars: MAX_SQL_PREVIEW_CELL_CHARS,
+        }) as SqlResult]
+        : await sqlApi.execute(activeEditorTab.connectionId, activeEditorTab.database, execSql) as SqlResult[]
       const newResults = [...[...resultList].reverse(), ...activeEditorTab.results]
 
       const hasError = resultList.some((r) => r.type === 'error')
@@ -278,6 +311,46 @@ export const SqlEditorPage: React.FC = () => {
     }
   }, [activeEditorTab, updateActiveTab])
 
+  const handleLoadMore = useCallback(async (batchIndex: number) => {
+    if (!activeEditorTab) return
+    const target = activeEditorTab.currentBatch?.[batchIndex]
+    if (!target || target.type !== 'query' || !target.preview || !target.hasMore || !target.querySessionId) return
+
+    const loadKey = `${activeEditorTab.key}-${batchIndex}`
+    setLoadingMoreKey(loadKey)
+    try {
+      const next = await sqlApi.querySessionFetch({
+        querySessionId: target.querySessionId,
+        pageSize: target.pageSize ?? DEFAULT_SQL_PREVIEW_PAGE_SIZE,
+        maxCellChars: MAX_SQL_PREVIEW_CELL_CHARS,
+      }) as SqlResult
+
+      if (next.type === 'error') {
+        toast.error(next.error ?? '加载更多失败')
+        return
+      }
+
+      updateActiveTab({
+        currentBatch: (activeEditorTab.currentBatch ?? []).map((result, idx) => {
+          if (idx !== batchIndex) return result
+          return mergeSqlPreviewResult(result, next)
+        }),
+      })
+    } catch (error) {
+      handleApiError(error, '加载更多失败')
+    } finally {
+      setLoadingMoreKey(null)
+    }
+  }, [activeEditorTab, updateActiveTab])
+
+  const handleResultMetaChange = useCallback((batchIndex: number, patch: Partial<SqlResult>) => {
+    updateActiveTab({
+      currentBatch: (activeEditorTab?.currentBatch ?? []).map((result, idx) => (
+        idx === batchIndex ? { ...result, ...patch } : result
+      )),
+    })
+  }, [activeEditorTab?.currentBatch, updateActiveTab])
+
   const handleClear = () => {
     updateTabSql(activeTabKey, '')
     editorRef.current?.setValue('')
@@ -289,6 +362,7 @@ export const SqlEditorPage: React.FC = () => {
   const results = activeEditorTab?.results ?? []
   const totalDuration = currentBatch.reduce((sum, r) => sum + (r.duration || 0), 0)
   const queryResults = currentBatch.filter((r) => r.type === 'query')
+  const resultTableHeight = Math.max(240, (typeof window !== 'undefined' ? window.innerHeight : 900) - editorHeight - 250)
   const tableNameCounts: Record<string, number> = {}
   
   const allParsedNames = extractAllTableNames(currentBatch[0]?.sql || '')
@@ -370,9 +444,17 @@ export const SqlEditorPage: React.FC = () => {
               />
             </Space>
             <Space>
-              <Button type="primary" size="small" icon={<PlayCircleOutlined />} loading={executing} onClick={handleExecute} disabled={!activeEditorTab?.sql?.trim() || !activeEditorTab.connectionId || !activeEditorTab.database}>
-                执行
+              <Button size="small" icon={<FolderOpenOutlined />} onClick={() => setListModalOpen(true)}>
+                打开收藏
               </Button>
+              <Button size="small" icon={<StarOutlined />} onClick={() => setSaveModalOpen(true)} disabled={!activeEditorTab?.sql?.trim()}>
+                收藏
+              </Button>
+              <Tooltip title={`执行当前/已选 SQL (${formatHotkey(['Cmd', 'Enter'])})`}>
+                <Button type="primary" size="small" icon={<PlayCircleOutlined />} loading={executing} onClick={handleExecute} disabled={!activeEditorTab?.sql?.trim() || !activeEditorTab.connectionId || !activeEditorTab.database}>
+                  执行
+                </Button>
+              </Tooltip>
               <Button size="small" icon={<ClearOutlined />} onClick={handleClear}>清空</Button>
             </Space>
           </div>
@@ -453,11 +535,6 @@ export const SqlEditorPage: React.FC = () => {
                     ...currentBatch.map((r, idx) => {
                       if (r.type !== 'query') return null
                       const currentQueryIndex = queryIndex++
-
-                      const cols = r.columns?.map(c => ({
-                        title: c, dataIndex: c, key: c, width: 150, ellipsis: true,
-                        render: (v: unknown) => String(v ?? 'NULL'),
-                      })) ?? []
                       
                       const parsedName = allParsedNames[idx]
                       let displayLabel = `结果 ${currentQueryIndex + 1}`
@@ -471,48 +548,15 @@ export const SqlEditorPage: React.FC = () => {
                         key: `result-${currentQueryIndex}`,
                         label: displayLabel,
                         children: (
-                          <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-                            <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '4px 0', gap: 8 }}>
-                              <Text type="secondary" style={{ fontSize: 12, flex: 1, lineHeight: '24px' }}>
-                                {r.rows?.length ?? 0} 行 · {r.duration}ms
-                              </Text>
-                              <Dropdown menu={{
-                                items: [
-                                  { key: 'csv', label: '导出为 CSV', onClick: () => exportResultSet(r.columns ?? [], r.rows ?? [], 'csv', displayLabel) },
-                                  { key: 'json', label: '导出为 JSON', onClick: () => exportResultSet(r.columns ?? [], r.rows ?? [], 'json', displayLabel) },
-                                ],
-                              }}>
-                                <Button size="small" icon={<DownloadOutlined />}>导出</Button>
-                              </Dropdown>
-                            </div>
-                            {/* Spreadsheet Grid Optimization */}
-                            <div style={{ flex: 1, overflow: 'hidden' }}>
-                              <Table
-                                bordered
-                                className="sql-spreadsheet-grid"
-                                columns={cols.map(c => ({
-                                  ...c,
-                                  onCell: () => ({
-                                    style: { 
-                                      fontFamily: 'Menlo, Monaco, Consolas, monospace',
-                                      fontSize: 13,
-                                      padding: '4px 8px',
-                                      whiteSpace: 'pre',
-                                    }
-                                  }),
-                                  onHeaderCell: () => ({
-                                    style: { padding: '6px 8px', fontWeight: 600 }
-                                  })
-                                }))}
-                                dataSource={r.rows?.map((row, i) => ({ ...row, _key: i }))}
-                                rowKey="_key"
-                                pagination={{ defaultPageSize: 50, showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100], size: 'small' }}
-                                size="small"
-                                scroll={{ x: 'max-content', y: `calc(100vh - ${editorHeight + 250}px)` }}
-                                rowClassName={(_, index) => index % 2 === 0 ? 'table-row-light' : 'table-row-dark'}
-                              />
-                            </div>
-                          </div>
+                          <SqlResultPanel
+                            result={r}
+                            displayLabel={displayLabel}
+                            tableHeight={resultTableHeight}
+                            loadMoreKey={`${activeEditorTab.key}-${idx}`}
+                            currentLoadKey={loadingMoreKey}
+                            onLoadMore={r.preview && r.hasMore ? () => handleLoadMore(idx) : undefined}
+                            onResultMetaChange={(patch) => handleResultMetaChange(idx, patch)}
+                          />
                         )
                       }
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -550,7 +594,9 @@ export const SqlEditorPage: React.FC = () => {
                               {r.type === 'error'
                                 ? `❌ ${r.error}`
                                 : r.type === 'query'
-                                  ? `✅ 查询返回 ${r.rows?.length ?? 0} 行 (${r.duration}ms)`
+                                  ? r.preview
+                                    ? `✅ 预览加载 ${r.loadedRows ?? r.rows?.length ?? 0} 行${r.hasMore ? '（还有更多）' : ''} (${r.duration}ms)`
+                                    : `✅ 查询返回 ${r.rows?.length ?? 0} 行 (${r.duration}ms)`
                                   : `✅ 影响 ${r.affectedRows} 行 (${r.duration}ms)`
                               }
                             </div>
@@ -568,6 +614,29 @@ export const SqlEditorPage: React.FC = () => {
           )}
         </Layout.Content>
       </Layout>
+
+      {/* 收藏脚本弹窗 */}
+      {activeEditorTab && (
+        <SaveScriptModal
+          open={saveModalOpen}
+          initialSql={activeEditorTab.sql}
+          database={activeEditorTab.database}
+          onCancel={() => setSaveModalOpen(false)}
+          onSuccess={() => {
+            setSaveModalOpen(false)
+          }}
+        />
+      )}
+      <SavedScriptsModal
+        open={listModalOpen}
+        onCancel={() => setListModalOpen(false)}
+        onSelect={(script) => {
+          if (activeTabKey) {
+            updateTabSql(activeTabKey, script.content)
+            toast.success('已应用收藏脚本到当前编辑区')
+          }
+        }}
+      />
     </Layout>
   )
 }

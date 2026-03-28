@@ -41,7 +41,7 @@ export interface TableTabState {
   indexes: IndexInfo[]
   ddl: string
   previewRows: Record<string, unknown>[]
-  detailTab: string
+  detailTab: 'data' | 'design' | 'ddl'
   loadedTabs: string[]
 }
 
@@ -63,8 +63,28 @@ export interface CategoryListTabState {
   categorySearch?: string
 }
 
+/** SQL 查询 Tab 状态 */
+export interface SqlQueryTabState {
+  type: 'sql-query'
+  connectionId: string
+  connectionName: string
+  database?: string
+  queryId: string // 关联 sqlEditorStore 中的 tab key
+  label?: string
+}
+
+/** 表设计器 Tab 状态 */
+export interface TableDesignerTabState {
+  type: 'table-designer'
+  connectionId: string
+  connectionName: string
+  database: string
+  mode: 'create' | 'edit'
+  tableName?: string // 仅在 edit 模式下存在
+}
+
 /** 工作台 Tab 联合类型 */
-export type WorkbenchTab = TableTabState | DbOverviewTabState | CategoryListTabState
+export type WorkbenchTab = TableTabState | DbOverviewTabState | CategoryListTabState | SqlQueryTabState | TableDesignerTabState
 
 /** 当前选中的上下文 */
 export interface SelectedContext {

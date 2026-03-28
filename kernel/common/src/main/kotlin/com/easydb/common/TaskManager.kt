@@ -19,12 +19,17 @@ import java.util.concurrent.ConcurrentHashMap
 class TaskManager(
     private val storageDir: File = File(System.getProperty("user.home"), ".easydb")
 ) {
+    companion object {
+        private const val EXPORT_RETENTION_MILLIS = 3L * 24 * 60 * 60 * 1000
+    }
 
     private val tasks = ConcurrentHashMap<String, TaskInfo>()
     private val taskLogs = ConcurrentHashMap<String, MutableList<TaskLogEntry>>()
+    private val logWriters = ConcurrentHashMap<String, java.io.PrintWriter>()
     private val timeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 
     private val storageFile = File(storageDir, "tasks.json")
+    private val exportDir = File(storageDir, "exports")
     private val json = Json {
         prettyPrint = true
         ignoreUnknownKeys = true
@@ -33,6 +38,7 @@ class TaskManager(
 
     init {
         loadFromDisk()
+        cleanupExpiredExportFiles()
     }
 
     /** 创建新任务 */
@@ -46,7 +52,7 @@ class TaskManager(
             startedAt = LocalDateTime.now().format(timeFormatter)
         )
         tasks[task.id] = task
-        taskLogs[task.id] = mutableListOf()
+        taskLogs[task.id] = java.util.Collections.synchronizedList(mutableListOf())
         saveToDisk()
         return task
     }
@@ -63,12 +69,15 @@ class TaskManager(
 
     /** 获取任务日志 */
     fun getLogs(taskId: String): List<TaskLogEntry> =
-        taskLogs[taskId]?.toList() ?: emptyList()
+        taskLogs[taskId]?.let { list ->
+            synchronized(list) { list.toList() }
+        } ?: emptyList()
 
     /** 取消任务 */
     fun cancel(taskId: String) {
         tasks[taskId]?.let {
             tasks[taskId] = it.copy(status = "cancelled")
+            closeLogWriter(taskId)
             saveToDisk()
         }
     }
@@ -77,8 +86,11 @@ class TaskManager(
     fun delete(taskId: String): Boolean {
         val task = tasks[taskId] ?: return false
         if (task.status == "running" || task.status == "pending") return false
+        deleteManagedExportFile(task)
         tasks.remove(taskId)
         taskLogs.remove(taskId)
+        closeLogWriter(taskId)
+        File(storageDir, "logs/$taskId.log").delete()
         saveToDisk()
         return true
     }
@@ -87,8 +99,11 @@ class TaskManager(
     fun clearCompleted(): Int {
         val toRemove = tasks.values.filter { it.status in listOf("completed", "failed", "cancelled") }
         toRemove.forEach {
+            deleteManagedExportFile(it)
             tasks.remove(it.id)
             taskLogs.remove(it.id)
+            closeLogWriter(it.id)
+            File(storageDir, "logs/${it.id}.log").delete()
         }
         if (toRemove.isNotEmpty()) saveToDisk()
         return toRemove.size
@@ -104,6 +119,7 @@ class TaskManager(
             tasks[taskId]?.let {
                 tasks[taskId] = it.copy(
                     progress = progress,
+                    progressMessage = message,
                     status = if (progress >= 100) "completed" else "running"
                 )
             }
@@ -122,17 +138,106 @@ class TaskManager(
         }
     }
 
-    private fun addLog(taskId: String, level: String, message: String) {
-        taskLogs.getOrPut(taskId) { mutableListOf() }.add(
-            TaskLogEntry(
-                timestamp = LocalDateTime.now().format(timeFormatter),
-                level = level,
-                message = message
-            )
-        )
+    private fun getLogWriter(taskId: String): java.io.PrintWriter {
+        return logWriters.getOrPut(taskId) {
+            val logDir = File(storageDir, "logs")
+            logDir.mkdirs()
+            java.io.PrintWriter(java.io.FileWriter(File(logDir, "$taskId.log"), true))
+        }
     }
 
-    /** 标记任务为失败 */
+    private fun closeLogWriter(taskId: String) {
+        logWriters.remove(taskId)?.close()
+    }
+
+    private fun isManagedExportFile(file: File): Boolean {
+        val exportsPath = exportDir.canonicalFile.toPath()
+        val filePath = file.canonicalFile.toPath()
+        return filePath.startsWith(exportsPath)
+    }
+
+    private fun deleteManagedExportFile(task: TaskInfo) {
+        val filePath = task.payload?.get("filePath") ?: return
+        val file = File(filePath)
+        try {
+            if (file.exists() && isManagedExportFile(file)) {
+                file.delete()
+            }
+        } catch (_: Exception) {
+            // 忽略清理异常，避免影响任务主流程
+        }
+    }
+
+    private fun cleanupExpiredExportFiles() {
+        val expireBefore = System.currentTimeMillis() - EXPORT_RETENTION_MILLIS
+        var tasksChanged = false
+
+        tasks.forEach { (taskId, task) ->
+            val filePath = task.payload?.get("filePath") ?: return@forEach
+            val file = File(filePath)
+
+            val shouldClearPayload = try {
+                when {
+                    !isManagedExportFile(file) -> false
+                    !file.exists() -> true
+                    file.lastModified() < expireBefore -> {
+                        file.delete()
+                        true
+                    }
+                    else -> false
+                }
+            } catch (_: Exception) {
+                false
+            }
+
+            if (shouldClearPayload) {
+                tasks[taskId] = task.copy(payload = null)
+                tasksChanged = true
+            }
+        }
+
+        if (exportDir.exists()) {
+            exportDir.listFiles()?.forEach { file ->
+                try {
+                    if (file.isFile && file.lastModified() < expireBefore) {
+                        file.delete()
+                    }
+                } catch (_: Exception) {
+                    // 忽略单文件清理异常
+                }
+            }
+        }
+
+        if (tasksChanged) {
+            saveToDisk()
+        }
+    }
+
+    private fun addLog(taskId: String, level: String, message: String) {
+        val timestamp = LocalDateTime.now().format(timeFormatter)
+        
+        // 1. In-memory buffer (capped at 1000 lines for frontend UI)
+        val list = taskLogs.getOrPut(taskId) { java.util.Collections.synchronizedList(mutableListOf()) }
+        synchronized(list) {
+            list.add(TaskLogEntry(timestamp, level, message))
+            // OOM Guard: Cap at 1000 lines to prevent blowing up the frontend React virtual DOM and the HTTP response
+            if (list.size > 1200) {
+                val trimmed = list.subList(list.size - 1000, list.size).toList()
+                list.clear()
+                list.addAll(trimmed)
+            }
+        }
+        
+        // 2. Physical disk persistence (unbounded, for log export)
+        try {
+            val writer = getLogWriter(taskId)
+            writer.println("[$timestamp] [$level] $message")
+            writer.flush()
+        } catch (e: Exception) {
+            System.err.println("[TaskManager] Failed to write physical log: ${e.message}")
+        }
+    }
+
     fun markFailed(taskId: String, error: String, result: TaskResult? = null) {
         tasks[taskId]?.let {
             tasks[taskId] = it.copy(
@@ -140,13 +245,15 @@ class TaskManager(
                 errorMessage = error,
                 successCount = result?.successCount,
                 failureCount = result?.failureCount,
-                verification = result?.verification
+                skippedCount = result?.skippedCount,
+                verification = result?.verification,
+                payload = result?.payload
             )
+            closeLogWriter(taskId)
             saveToDisk()
         }
     }
 
-    /** 标记任务为完成（如果任务已被取消则不覆盖） */
     fun markCompleted(taskId: String, duration: Long, result: TaskResult? = null) {
         tasks[taskId]?.let {
             if (it.status == "cancelled") return
@@ -156,16 +263,27 @@ class TaskManager(
                 duration = duration,
                 successCount = result?.successCount,
                 failureCount = result?.failureCount,
-                verification = result?.verification
+                skippedCount = result?.skippedCount,
+                verification = result?.verification,
+                payload = result?.payload
             )
+            closeLogWriter(taskId)
             saveToDisk()
         }
     }
 
     /** 标记任务为已取消（保留已用时长） */
-    fun markCancelled(taskId: String, duration: Long) {
+    fun markCancelled(taskId: String, duration: Long, result: TaskResult? = null) {
         tasks[taskId]?.let {
-            tasks[taskId] = it.copy(status = "cancelled", duration = duration)
+            tasks[taskId] = it.copy(
+                status = "cancelled",
+                duration = duration,
+                successCount = result?.successCount,
+                failureCount = result?.failureCount,
+                skippedCount = result?.skippedCount,
+                payload = result?.payload
+            )
+            closeLogWriter(taskId)
             saveToDisk()
         }
     }
@@ -212,12 +330,15 @@ data class TaskInfo(
     val type: String,                // migration | sync
     val status: String = "pending",  // pending | running | completed | failed | cancelled
     val progress: Int = 0,
+    val progressMessage: String? = null,
     val startedAt: String? = null,
     val duration: Long? = null,
     val errorMessage: String? = null,
     val successCount: Int? = null,
     val failureCount: Int? = null,
-    val verification: List<TableVerifyResult>? = null
+    val skippedCount: Int? = null,
+    val verification: List<TableVerifyResult>? = null,
+    val payload: Map<String, String>? = null
 )
 
 @Serializable

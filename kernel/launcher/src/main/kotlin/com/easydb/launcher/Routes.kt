@@ -61,6 +61,15 @@ fun Application.configureRoutes() {
                 compareRoutes()
             }
 
+            // 脚本收藏夹
+            route("/scripts") {
+                scriptRoutes()
+            }
+
+            route("/export") {
+                exportRoutes()
+            }
+
             // 连接分组
             route("/groups") {
                 groupRoutes()

@@ -5,8 +5,8 @@ import { PlusOutlined } from '@ant-design/icons'
 const { Text } = Typography
 
 interface EmptyStateProps {
-  /** 空状态描述文案 */
-  description: string
+  /** 空状态描述文案或自定义组件 */
+  description: string | React.ReactNode
   /** 可选的操作按钮文案 */
   actionText?: string
   /** 操作按钮点击回调 */
@@ -30,7 +30,7 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   }}>
     <Empty
       image={icon ?? Empty.PRESENTED_IMAGE_SIMPLE}
-      description={<Text type="secondary">{description}</Text>}
+      description={typeof description === 'string' ? <Text type="secondary">{description}</Text> : description}
     >
       {actionText && onAction && (
         <Button type="primary" icon={<PlusOutlined />} onClick={onAction}>

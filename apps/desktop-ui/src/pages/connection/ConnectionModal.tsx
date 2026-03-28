@@ -13,7 +13,7 @@ interface ConnectionModalProps {
   onSave: (values: Partial<ConnectionConfig>) => void
   onCancel: () => void
   onTest: (values: Partial<ConnectionConfig>) => void
-  testResult: { connected: boolean; message: string } | null
+  testResult: { success: boolean; message: string } | null
   testing: boolean
   existingGroups: ConnectionGroup[]
 }
@@ -82,7 +82,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
             </a>
             {testResult && (
               <Text
-                type={testResult.connected ? 'success' : 'danger'}
+                type={testResult.success ? 'success' : 'danger'}
                 style={{ fontSize: 12 }}
               >
                 {testResult.message}

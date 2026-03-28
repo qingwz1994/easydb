@@ -60,9 +60,8 @@ export const ConnectionPage: React.FC = () => {
   const [editingConn, setEditingConn] = useState<ConnectionConfig | null>(null)
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState<{ connected: boolean; message: string } | null>(null)
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
   const [selectedConn, setSelectedConn] = useState<ConnectionConfig | null>(null)
-  const [batchTesting, setBatchTesting] = useState(false)
   
   // Group Model State
   const [groupModalOpen, setGroupModalOpen] = useState(false)
@@ -146,10 +145,10 @@ export const ConnectionPage: React.FC = () => {
     setTesting(true)
     setTestResult(null)
     try {
-      const result = await connectionApi.test(values) as { connected: boolean; message: string }
+      const result = await connectionApi.test(values) as { success: boolean; message: string }
       setTestResult(result)
     } catch (e) {
-      setTestResult({ connected: false, message: e instanceof Error ? e.message : '测试失败' })
+      setTestResult({ success: false, message: e instanceof Error ? e.message : '测试失败' })
     } finally {
       setTesting(false)
     }
@@ -230,48 +229,14 @@ export const ConnectionPage: React.FC = () => {
 
   const handleTestInline = async (conn: ConnectionConfig) => {
     try {
-      const result = await connectionApi.test(conn) as { connected: boolean; message: string }
-      if (result.connected) {
+      const result = await connectionApi.test(conn) as { success: boolean; message: string }
+      if (result.success) {
         toast.success(`「${conn.name}」连接测试成功`)
       } else {
         toast.error(`「${conn.name}」连接测试失败：${result.message}`)
       }
     } catch (e) {
       toast.error(`测试失败：${e instanceof Error ? e.message : '未知错误'}`)
-    }
-  }
-
-  const handleBatchTest = async () => {
-    const untested = connections.filter((c) => c.status === 'disconnected' || c.status === 'error')
-    if (untested.length === 0) {
-      toast.info('没有需要测试的连接')
-      return
-    }
-    setBatchTesting(true)
-    let successCount = 0
-    let failCount = 0
-
-    try {
-      await Promise.allSettled(
-        untested.map(async (conn) => {
-          try {
-            const result = await connectionApi.test(conn) as { connected: boolean; message: string }
-            if (result.connected) {
-              successCount++
-              updateConnection(conn.id, { status: 'connected' })
-            } else {
-              failCount++
-              updateConnection(conn.id, { status: 'error' })
-            }
-          } catch {
-            failCount++
-            updateConnection(conn.id, { status: 'error' })
-          }
-        })
-      )
-    } finally {
-      setBatchTesting(false)
-      toast.success(`批量测试完成：${successCount} 成功，${failCount} 失败`)
     }
   }
 
@@ -360,13 +325,6 @@ export const ConnectionPage: React.FC = () => {
               ]}
             />
             <Button icon={<ReloadOutlined />} onClick={loadAll} />
-            <Dropdown menu={{
-              items: [
-                { key: 'batch-test', label: '批量测试断开的连接', onClick: handleBatchTest, disabled: batchTesting }
-              ]
-            }}>
-              <Button loading={batchTesting}>更多</Button>
-            </Dropdown>
             <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
               新建连接
             </Button>

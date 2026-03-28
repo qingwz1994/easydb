@@ -128,6 +128,11 @@ body {
   background-color: rgba(0, 0, 0, 0.02);
 }
 
+.sql-spreadsheet-grid .ant-table-body,
+.sql-spreadsheet-grid .ant-table-tbody-virtual-holder {
+  padding-bottom: 8px;
+}
+
 [data-theme="dark"] .sql-spreadsheet-grid .table-row-dark > td {
   background-color: rgba(255, 255, 255, 0.02);
 }

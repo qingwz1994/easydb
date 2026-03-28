@@ -10,7 +10,7 @@ export type ConnectionStatus = 'connected' | 'disconnected' | 'connecting' | 'er
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
 
 // 任务类型
-export type TaskType = 'migration' | 'sync'
+export type TaskType = 'migration' | 'sync' | 'export' | 'import'
 
 // 迁移模式
 export type MigrationMode = 'structure_only' | 'data_only' | 'structure_and_data'
@@ -105,10 +105,25 @@ export interface SqlResult {
   columns?: string[]
   rows?: Record<string, unknown>[]
   affectedRows?: number
+  preview?: boolean
+  hasMore?: boolean
+  querySessionId?: string
+  totalRows?: number
+  offset?: number
+  pageSize?: number
+  loadedRows?: number
+  truncatedCellCount?: number
   duration: number
   sql: string
   executedAt: string
   error?: string
+}
+
+export interface SqlQuerySessionStatus {
+  querySessionId: string
+  totalRows?: number
+  counting: boolean
+  exists: boolean
 }
 
 // SQL 历史记录
@@ -220,6 +235,27 @@ export interface SyncTablePreview {
   reason?: string
 }
 
+export interface ExportTableEstimate {
+  tableName: string
+  estimatedRows: number
+  estimatedBytes: number
+  progressUnits: number
+  risk: 'low' | 'medium' | 'high'
+}
+
+export interface ExportEstimateResult {
+  totalTables: number
+  selectedTables: number
+  includeData: boolean
+  exportContent: 'STRUCTURE_ONLY' | 'DATA_ONLY' | 'STRUCTURE_AND_DATA'
+  exportFormat: 'SQL_ZIP' | 'CSV_ZIP'
+  estimatedRows: number
+  estimatedBytes: number
+  largeTableCount: number
+  tables: ExportTableEstimate[]
+  warnings: string[]
+}
+
 // 结构对比配置
 export interface CompareConfig {
   sourceConnectionId: string
@@ -314,3 +350,12 @@ export interface DataEditResult {
   errors: string[]
 }
 
+// 脚本收藏夹
+export interface SavedScript {
+  id: string
+  name: string
+  content: string
+  database?: string
+  createdAt: string
+  updatedAt: string
+}

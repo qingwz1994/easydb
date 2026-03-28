@@ -11,8 +11,10 @@ object ServiceRegistry {
     val mysqlAdapter = MysqlDatabaseAdapter()
     val connectionManager = ConnectionManager()
     val sqlService = SqlExecutionService()
+    val sqlQuerySessionManager = SqlQuerySessionManager()
     val connectionStore = ConnectionStore()
     val groupStore = GroupStore()
     val taskManager = TaskManager()
     val sqlHistoryStore = SqlHistoryStore()
+    val scriptManager = ScriptManager()
 }
