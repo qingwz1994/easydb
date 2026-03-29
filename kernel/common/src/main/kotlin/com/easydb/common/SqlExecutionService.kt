@@ -23,6 +23,35 @@ class SqlExecutionService {
         private const val IMPORT_PROGRESS_UPDATE_EVERY_BYTES = 4L * 1024 * 1024
         private const val IMPORT_LOG_EVERY_STATEMENTS = 100
         private const val IMPORT_PROGRESS_LOG_EVERY_STATEMENTS = 20
+
+        /**
+         * B3: 单条 SQL 语句内存硬上限（32MB）。
+         * 超出此阈值的语句会被直接拒绝执行，避免服务端 JVM 因单条超长 INSERT 被撑爆 OOM。
+         * 用户将收到明确提示，建议改用分批切割模式重新导出。
+         */
+        private const val MAX_SINGLE_SQL_SIZE_BYTES = 32L * 1024 * 1024
+
+        /**
+         * INSERT...VALUES 自动拆分阈值（8MB）。
+         * 当单条 INSERT 累积超过此阈值时，自动按 VALUES 行边界切割为多个小批次执行。
+         * 远小于 32MB 硬上限，确保有足够缓冲空间完成切割。
+         */
+        private const val BATCH_SPLIT_THRESHOLD = 8L * 1024 * 1024
+
+        /**
+         * SQL 结果中原始 SQL 文本的最大长度（字符）。
+         * 超过该长度的 SQL 会被截断，避免超长 INSERT 等拖垂前端渲染。
+         */
+        private const val MAX_RESULT_SQL_DISPLAY_LENGTH = 2000
+    }
+
+    /** 截断超长 SQL，防止 JSON 序列化撒到前端拖垂渲染 */
+    private fun truncateSql(sql: String): String {
+        return if (sql.length > MAX_RESULT_SQL_DISPLAY_LENGTH) {
+            sql.take(MAX_RESULT_SQL_DISPLAY_LENGTH) + " …[SQL 已截断，原始长度 ${sql.length} 字符]"
+        } else {
+            sql
+        }
     }
 
     private val timeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
@@ -72,7 +101,7 @@ class SqlExecutionService {
 
                         results.add(SqlResult(
                             type = "query", columns = columns, rows = rows,
-                            duration = duration, sql = sql,
+                            duration = duration, sql = truncateSql(sql),
                             executedAt = LocalDateTime.now().format(timeFormatter)
                         ))
                     } else {
@@ -82,7 +111,7 @@ class SqlExecutionService {
                         }
                         results.add(SqlResult(
                             type = "update", affectedRows = updateCount,
-                            duration = duration, sql = sql,
+                            duration = duration, sql = truncateSql(sql),
                             executedAt = LocalDateTime.now().format(timeFormatter)
                         ))
                     }
@@ -93,7 +122,7 @@ class SqlExecutionService {
                 if (results.isEmpty()) {
                     results.add(SqlResult(
                         type = "update", affectedRows = 0,
-                        duration = System.currentTimeMillis() - start, sql = sql,
+                        duration = System.currentTimeMillis() - start, sql = truncateSql(sql),
                         executedAt = LocalDateTime.now().format(timeFormatter)
                     ))
                 }
@@ -103,7 +132,7 @@ class SqlExecutionService {
         } catch (e: Exception) {
             val duration = System.currentTimeMillis() - start
             listOf(SqlResult(
-                type = "error", duration = duration, sql = sql,
+                type = "error", duration = duration, sql = truncateSql(sql),
                 executedAt = LocalDateTime.now().format(timeFormatter),
                 error = e.message ?: "SQL 执行异常"
             ))
@@ -461,12 +490,84 @@ class SqlExecutionService {
             }
 
             currentStatement.append(ch)
+
+            // B3 增强：超长 INSERT...VALUES 自动拆分为多个小批次
+            // 当累积超过 8MB 且处于非引号上下文时，尝试按 VALUES 行边界切割
+            if (currentStatement.length > BATCH_SPLIT_THRESHOLD
+                && !state.inSingleQuote && !state.inDoubleQuote && !state.inBacktick
+                && !state.inBlockComment && !state.inLineComment
+            ) {
+                val accumulated = currentStatement.toString()
+                val insertHeader = tryExtractInsertHeader(accumulated)
+
+                if (insertHeader != null) {
+                    // 找到最后一个完整的 '),\n' 或 '), ' 边界
+                    val lastSplitPos = findLastValueSetBoundary(accumulated)
+                    if (lastSplitPos > insertHeader.length) {
+                        // 截取到最后一个完整的 value set，作为一个批次提交
+                        val batch = accumulated.substring(0, lastSplitPos)
+                        onStatement(batch)
+                        // 保留 INSERT 头 + 剩余部分继续累积
+                        val remaining = accumulated.substring(lastSplitPos + 1).trimStart(',', ' ', '\n', '\r')
+                        currentStatement.clear()
+                        currentStatement.append(insertHeader).append(remaining)
+                    }
+                } else if (currentStatement.length > MAX_SINGLE_SQL_SIZE_BYTES) {
+                    // 非 INSERT 语句超过 32MB 硬上限，仍然报错
+                    val preview = currentStatement.substring(0, 200.coerceAtMost(currentStatement.length))
+                    currentStatement.clear()
+                    throw IllegalStateException(
+                        "单条 SQL 语句体积超过 ${MAX_SINGLE_SQL_SIZE_BYTES / 1024 / 1024} MB，" +
+                        "为避免内存溢出已中断导入。请检查文件中是否有超长语句。语句开头：$preview"
+                    )
+                }
+            }
+
             index++
         }
     }
 
     private fun normalizeSqlStatement(statement: String): String {
         return statement.trim().removePrefix("\uFEFF").trim()
+    }
+
+    /**
+     * 尝试提取 INSERT INTO ... VALUES 的头部（不含具体值）。
+     * 如果语句不是 INSERT...VALUES 模式，返回 null。
+     */
+    private fun tryExtractInsertHeader(sql: String): String? {
+        val upper = sql.trimStart().take(500).uppercase()
+        if (!upper.startsWith("INSERT")) return null
+
+        val valuesIdx = upper.indexOf("VALUES")
+        if (valuesIdx < 0) return null
+
+        val headerEnd = valuesIdx + "VALUES".length
+        return sql.substring(0, headerEnd) + " "
+    }
+
+    /**
+     * 在 INSERT...VALUES (...),(...),... 中从尾部往前找最后一个完整的 `)` + `,` 边界。
+     * 返回 `)` 之后的位置（切割点），用于将 VALUES 拆分为两段。
+     */
+    private fun findLastValueSetBoundary(sql: String): Int {
+        var i = sql.length - 1
+        // 跳过尾部的空白和逗号
+        while (i > 0 && (sql[i] == ' ' || sql[i] == '\n' || sql[i] == '\r' || sql[i] == '\t')) {
+            i--
+        }
+        // 从当前位置往前找 ),
+        while (i > 0) {
+            if (sql[i] == ')') {
+                // 检查后面是否有逗号（即后续还有 value set）
+                val afterClose = sql.substring(i + 1).trimStart()
+                if (afterClose.startsWith(",") || afterClose.startsWith("(")) {
+                    return i + 1
+                }
+            }
+            i--
+        }
+        return -1
     }
 
     private fun isEscaped(buffer: StringBuilder): Boolean {

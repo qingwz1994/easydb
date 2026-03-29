@@ -70,6 +70,11 @@ fun Application.configureRoutes() {
                 exportRoutes()
             }
 
+            // 存储管理
+            route("/storage") {
+                storageRoutes()
+            }
+
             // 连接分组
             route("/groups") {
                 groupRoutes()

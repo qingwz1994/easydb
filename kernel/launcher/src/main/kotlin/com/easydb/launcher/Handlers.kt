@@ -27,11 +27,15 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import java.io.File
 import java.util.UUID
+
+/** 专用任务协程域：替代 GlobalScope，支持统一生命周期治理 */
+private val taskScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
 // ─── 连接管理路由 ──────────────────────────────────────────
 fun Route.connectionRoutes() {
@@ -559,14 +563,27 @@ fun Route.sqlRoutes() {
             return@post
         }
 
+        // C1: 同库并发导入限制 —— 同一连接+数据库下只允许一个导入任务运行
+        val taskMgr = ServiceRegistry.taskManager
+        val runningImport = taskMgr.list().find { t ->
+            t.type == "import"
+            && t.status in listOf("pending", "running")
+            && t.name.contains(req.database)
+            && t.name.contains("导入")
+        }
+        if (runningImport != null) {
+            call.fail("DUPLICATE_IMPORT", "数据库 ${req.database} 已有导入任务正在执行（任务 ID: ${runningImport.id}），请等待完成后再试")
+            return@post
+        }
+
         val config = session.config
-        val task = ServiceRegistry.taskManager.createTask(
+        val task = taskMgr.createTask(
             name = "导入 ${req.database} ← ${(req.fileName ?: file.name)}",
             type = "import"
         )
-        val reporter = ServiceRegistry.taskManager.createReporter(task.id)
+        val reporter = taskMgr.createReporter(task.id)
 
-        GlobalScope.launch(Dispatchers.IO) {
+        taskScope.launch {
             reporter.onProgress(1, "初始化导入环境...")
             val startTime = System.currentTimeMillis()
             var dedicatedConn: java.sql.Connection? = null
@@ -585,16 +602,16 @@ fun Route.sqlRoutes() {
                 val duration = System.currentTimeMillis() - startTime
 
                 when {
-                    reporter.isCancelled() -> ServiceRegistry.taskManager.markCancelled(task.id, duration, result)
-                    result.success -> ServiceRegistry.taskManager.markCompleted(task.id, duration, result)
-                    else -> ServiceRegistry.taskManager.markFailed(task.id, result.errorMessage ?: "SQL 文件导入失败", result)
+                    reporter.isCancelled() -> taskMgr.markCancelled(task.id, duration, result)
+                    result.success -> taskMgr.markCompleted(task.id, duration, result)
+                    else -> taskMgr.markFailed(task.id, result.errorMessage ?: "SQL 文件导入失败", result)
                 }
             } catch (e: Exception) {
                 val duration = System.currentTimeMillis() - startTime
                 if (reporter.isCancelled()) {
-                    ServiceRegistry.taskManager.markCancelled(task.id, duration)
+                    taskMgr.markCancelled(task.id, duration)
                 } else {
-                    ServiceRegistry.taskManager.markFailed(task.id, e.message ?: "SQL 文件导入异常")
+                    taskMgr.markFailed(task.id, e.message ?: "SQL 文件导入异常")
                 }
             } finally {
                 try { dedicatedConn?.close() } catch (_: Exception) {}
@@ -653,7 +670,7 @@ fun Route.migrationRoutes() {
         val reporter = taskMgr.createReporter(task.id)
 
         // 异步执行迁移（为每个任务创建独立 JDBC 连接，避免并发任务共享连接导致 autoCommit 冲突）
-        kotlinx.coroutines.GlobalScope.launch {
+        taskScope.launch {
             reporter.onProgress(0, "准备中...")
             val startTime = System.currentTimeMillis()
             // 创建任务专用的独立 JDBC 连接
@@ -731,7 +748,7 @@ fun Route.syncRoutes() {
         val reporter = taskMgr.createReporter(task.id)
 
         // 异步执行同步（为每个任务创建独立 JDBC 连接，避免并发任务共享连接导致 autoCommit 冲突）
-        kotlinx.coroutines.GlobalScope.launch {
+        taskScope.launch {
             reporter.onProgress(0, "准备中...")
             val startTime = System.currentTimeMillis()
             // 创建任务专用的独立 JDBC 连接

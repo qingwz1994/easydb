@@ -10,12 +10,14 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import java.io.File
 import java.io.FileOutputStream
 import java.sql.Connection
+import java.sql.Types
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.zip.ZipEntry
@@ -71,6 +73,57 @@ private const val EXPORT_PROGRESS_UPDATE_EVERY_ROWS = 10_000L
 private const val EXPORT_PROGRESS_LOG_EVERY_ROWS = 100_000L
 private const val EXPORT_PROGRESS_BASE_UNITS_PER_TABLE = 10_000L
 private const val EXPORT_PROGRESS_DATA_UNITS_CAP_PER_TABLE = 500_000L
+private const val EXPORT_QUERY_TIMEOUT_SECONDS = 14400  // 4 小时，后台导出任务不应被短超时误杀
+private const val EXPORT_MIN_DISK_SPACE_BYTES = 5L * 1024 * 1024 * 1024  // 5 GB
+
+/** 专用协程域：替代 GlobalScope，支持统一生命周期治理 */
+private val exportTaskScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+/**
+ * 安全转义 SQL 字符串字面量，覆盖所有 MySQL 关键特殊字符。
+ * 防止导出后再次导入时因字符逃逸导致 SQL 语法断裂或数据丢失。
+ */
+private fun escapeSqlLiteral(value: String): String {
+    val sb = StringBuilder(value.length + 16)
+    for (ch in value) {
+        when (ch) {
+            '\u0000' -> sb.append("\\0")     // NUL 字节
+            '\'' -> sb.append("\\'")
+            '\"' -> sb.append("\\\"")
+            '\\' -> sb.append("\\\\")
+            '\n' -> sb.append("\\n")
+            '\r' -> sb.append("\\r")
+            '\t' -> sb.append("\\t")
+            '\u0008' -> sb.append("\\b")     // Backspace
+            '\u001A' -> sb.append("\\Z")     // Ctrl+Z (Windows EOF)
+            else -> sb.append(ch)
+        }
+    }
+    return sb.toString()
+}
+
+/**
+ * 判断列类型是否为二进制类型（BLOB / BINARY / VARBINARY 等）
+ */
+private fun isBinaryColumn(columnType: Int): Boolean {
+    return columnType in setOf(
+        Types.BINARY, Types.VARBINARY, Types.LONGVARBINARY,
+        Types.BLOB
+    )
+}
+
+/**
+ * 将字节数组转换为 MySQL 十六进制字面量：X'ABCD...'
+ */
+private fun bytesToHexLiteral(bytes: ByteArray): String {
+    val sb = StringBuilder(bytes.size * 2 + 3)
+    sb.append("X'")
+    for (b in bytes) {
+        sb.append(String.format("%02X", b))
+    }
+    sb.append("'")
+    return sb.toString()
+}
 
 private data class TableExportEstimate(
     val estimatedRows: Long,
@@ -198,11 +251,12 @@ fun Route.exportRoutes() {
         val reporter = taskMgr.createReporter(task.id)
 
         // 异步执行导出，Dispatchers.IO 防止阻塞式 JDBC 调用占用轻量延迟线程池
-        GlobalScope.launch(Dispatchers.IO) {
+        exportTaskScope.launch {
             reporter.onProgress(1, "初始化导出环境...")
             val startTime = System.currentTimeMillis()
 
             var dedicatedConn: java.sql.Connection? = null
+            var zipFile: java.io.File? = null
             try {
                 // 使用 req.database 建立专用连接！绝对不能用 database=null，否则在某些分库分表中间件或云代理（如 MyCat/TiDB）下，
                 // 会因为无法路由目标节点而导致握手包被永久黑洞（Hang）！
@@ -222,8 +276,15 @@ fun Route.exportRoutes() {
                 val exportDir = File(System.getProperty("user.home"), ".easydb/exports")
                 if (!exportDir.exists()) exportDir.mkdirs()
 
+                // A4: 磁盘空间预检 —— 低于 5GB 直接拒绝启动
+                val usableSpace = exportDir.usableSpace
+                if (usableSpace < EXPORT_MIN_DISK_SPACE_BYTES) {
+                    val spaceGB = String.format("%.1f", usableSpace.toDouble() / (1024 * 1024 * 1024))
+                    throw Exception("磁盘剩余空间不足（仅剩 ${spaceGB} GB），请清理后重试")
+                }
+
                 val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss").format(Date())
-                val zipFile = File(exportDir, "export_${req.database}_$timestamp.zip")
+                zipFile = File(exportDir, "export_${req.database}_$timestamp.zip")
                 val totalTables = req.tables.size
                 var currentTableIdx = 0
                 val includeData = shouldExportData(req.exportContent)
@@ -297,11 +358,9 @@ fun Route.exportRoutes() {
                                     java.sql.ResultSet.TYPE_FORWARD_ONLY,
                                     java.sql.ResultSet.CONCUR_READ_ONLY
                                 ).use { stmt ->
-                                    // 核心修复：配合 useCursorFetch=true，这里设置 1000 即可开启服务器端游标
-                                    // 从而安全地流式读取大表，而不锁死整个连接！绝不能用 MIN_VALUE！
                                     stmt.fetchSize = 1000
-                                    // 增加查询超时（例如 10 分钟），防止网络或死锁导致永久挂起
-                                    stmt.queryTimeout = 600
+                                    // B1: 后台导出任务使用宽松超时（4小时），避免大表被误杀
+                                    stmt.queryTimeout = EXPORT_QUERY_TIMEOUT_SECONDS
                                     reporter.onLog("INFO", "  [DEBUG] 开始执行查询: SELECT * FROM $table...")
                                     stmt.executeQuery(
                                         "SELECT * FROM ${dialect.quoteIdentifier(req.database)}.${dialect.quoteIdentifier(table)}"
@@ -336,11 +395,16 @@ fun Route.exportRoutes() {
 
                                             writer.write("(")
                                             for (i in 1..colCount) {
-                                                val value = rs.getString(i)
-                                                if (value == null) {
+                                                if (rs.getObject(i) == null) {
                                                     writer.write("NULL")
+                                                } else if (isBinaryColumn(meta.getColumnType(i))) {
+                                                    // A2: BLOB/BINARY 列使用十六进制字面量，保证二进制数据完整性
+                                                    val bytes = rs.getBytes(i)
+                                                    writer.write(bytesToHexLiteral(bytes))
                                                 } else {
-                                                    writer.write("'${value.replace("'", "''")}'")
+                                                    // A1: 使用完善的转义函数覆盖所有特殊字符
+                                                    val value = rs.getString(i)
+                                                    writer.write("'${escapeSqlLiteral(value)}'")
                                                 }
                                                 if (i < colCount) writer.write(", ")
                                             }
@@ -422,9 +486,8 @@ fun Route.exportRoutes() {
                                     java.sql.ResultSet.TYPE_FORWARD_ONLY,
                                     java.sql.ResultSet.CONCUR_READ_ONLY
                                 ).use { stmt ->
-                                    // 核心修复：配合 useCursorFetch=true，这里设置 1000 即可开启服务器端游标
                                     stmt.fetchSize = 1000
-                                    stmt.queryTimeout = 600
+                                    stmt.queryTimeout = EXPORT_QUERY_TIMEOUT_SECONDS
                                     stmt.executeQuery(
                                         "SELECT * FROM ${dialect.quoteIdentifier(req.database)}.${dialect.quoteIdentifier(table)}"
                                     ).use { rs ->
@@ -448,7 +511,8 @@ fun Route.exportRoutes() {
                                             for (i in 1..colCount) {
                                                 val value = rs.getString(i)
                                                 if (value != null) {
-                                                    val escaped = if (value.contains(",") || value.contains("\"") || value.contains("\n"))
+                                                    // A1(CSV): 增加 \r 检测，防止行边界错乱
+                                                    val escaped = if (value.contains(",") || value.contains("\"") || value.contains("\n") || value.contains("\r"))
                                                         "\"${value.replace("\"", "\"\"")}\"" else value
                                                     writer.write(escaped)
                                                 }
@@ -494,7 +558,8 @@ fun Route.exportRoutes() {
                 val duration = System.currentTimeMillis() - startTime
                 if (reporter.isCancelled()) {
                     taskMgr.markCancelled(task.id, duration)
-                    zipFile.delete()
+                    // 注意：这里不直接 delete，因为还在 ZipOutputStream.use {} 内文件被锁
+                    // 延迟到 finally 块中清理
                 } else {
                     reporter.onLog("INFO", "导出文件生成成功：${zipFile.absolutePath}")
                     taskMgr.markCompleted(
@@ -509,8 +574,31 @@ fun Route.exportRoutes() {
                 reporter.onLog("ERROR", "导出发生异常: ${e.message}")
                 taskMgr.markFailed(task.id, e.message ?: "导出异常")
             } finally {
-                reporter.onLog("INFO", "资源清理完成")
+                // 先关闭连接，释放资源
                 try { dedicatedConn?.close() } catch (ignored: Exception) {}
+
+                // ZipOutputStream.use {} 已退出，文件流已关闭，现在可以安全删除
+                val isCancelled = reporter.isCancelled()
+                val taskStatus = taskMgr.get(task.id)?.status
+                reporter.onLog("INFO", "[CLEANUP] isCancelled=$isCancelled, taskStatus=$taskStatus, zipFile=${zipFile?.name}, exists=${zipFile?.exists()}")
+                try {
+                    if (isCancelled || taskStatus == "failed") {
+                        zipFile?.let { file ->
+                            if (file.exists()) {
+                                val deleted = file.delete()
+                                reporter.onLog("INFO", if (deleted) "已清理半成品导出文件: ${file.name}" else "半成品文件清理失败: ${file.name}")
+                            } else {
+                                reporter.onLog("INFO", "[CLEANUP] 文件已不存在: ${file.name}")
+                            }
+                        } ?: reporter.onLog("WARN", "[CLEANUP] zipFile 为 null，跳过清理")
+                    } else {
+                        reporter.onLog("INFO", "[CLEANUP] 任务未取消且未失败，保留导出文件")
+                    }
+                } catch (e: Exception) {
+                    reporter.onLog("WARN", "[CLEANUP] 清理异常: ${e.message}")
+                }
+
+                reporter.onLog("INFO", "资源清理完成")
             }
         }
 

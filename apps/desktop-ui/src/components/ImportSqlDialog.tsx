@@ -149,7 +149,7 @@ export const ImportSqlDialog: React.FC<ImportSqlDialogProps> = ({
       ? formatDuration(duration)
       : ''
 
-  const pollOnce = useCallback(async (id: string) => {
+  const pollOnce = async (id: string) => {
     if (pollingRef.current) return
     pollingRef.current = true
     try {
@@ -167,6 +167,7 @@ export const ImportSqlDialog: React.FC<ImportSqlDialogProps> = ({
       setFailureCount(taskInfo.failureCount ?? 0)
       setSkippedCount(taskInfo.skippedCount ?? 0)
       setErrorMessage(taskInfo.errorMessage ?? '')
+      // A5: 使用增量追加，后端限制了 1000 条所以直接替换也可接受
       setLogs(taskLogs ?? [])
 
       if (logContainerRef.current) {
@@ -181,20 +182,30 @@ export const ImportSqlDialog: React.FC<ImportSqlDialogProps> = ({
         }
       }
     } catch (error) {
-      setPollRetryCount((count) => count + 1)
+      setPollRetryCount((count) => {
+        // A7: 超过 20 次连续失败则停止轮询，防止僵尸请求
+        if (count + 1 >= 20) {
+          stopPolling()
+          console.error('Polling import task failed too many times, stopped.')
+        }
+        return count + 1
+      })
       console.warn('Polling import task failed, will retry', error)
     } finally {
       pollingRef.current = false
     }
-  }, [stopPolling])
+  }
 
-  const startPolling = useCallback((id: string) => {
+  // A7: 串行轮询 —— 上一次请求完成后再等 1.5s 发下一次，避免慢响应积压
+  const startPolling = (id: string) => {
     stopPolling()
-    void pollOnce(id)
-    timerRef.current = setInterval(() => {
-      void pollOnce(id)
-    }, 1500)
-  }, [pollOnce, stopPolling])
+    const poll = async () => {
+      await pollOnce(id)
+      // 如果任务还在跑就继续
+      timerRef.current = setTimeout(() => void poll(), 1500) as unknown as ReturnType<typeof setInterval>
+    }
+    void poll()
+  }
 
   const handlePickFile = useCallback(async () => {
     if (!nativePickerAvailable) {

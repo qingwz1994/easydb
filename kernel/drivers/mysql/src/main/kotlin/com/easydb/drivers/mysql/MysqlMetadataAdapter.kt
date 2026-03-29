@@ -206,7 +206,28 @@ class MysqlMetadataAdapter : MetadataAdapter {
                 while (rs.next()) {
                     val row = mutableMapOf<String, String?>()
                     for (i in 1..columnCount) {
-                        row[meta.getColumnName(i)] = rs.getString(i)
+                        val colType = meta.getColumnType(i)
+                        // BLOB/BINARY 列用友好占位符替代，避免乱码
+                        if (colType in setOf(
+                                java.sql.Types.BLOB,
+                                java.sql.Types.BINARY,
+                                java.sql.Types.VARBINARY,
+                                java.sql.Types.LONGVARBINARY
+                            )) {
+                            val bytes = rs.getBytes(i)
+                            row[meta.getColumnName(i)] = if (bytes == null) {
+                                null
+                            } else {
+                                val sizeLabel = when {
+                                    bytes.size < 1024 -> "${bytes.size} B"
+                                    bytes.size < 1024 * 1024 -> "${bytes.size / 1024} KB"
+                                    else -> "${bytes.size / (1024 * 1024)} MB"
+                                }
+                                "[BLOB $sizeLabel]"
+                            }
+                        } else {
+                            row[meta.getColumnName(i)] = rs.getString(i)
+                        }
                     }
                     result.add(row)
                 }

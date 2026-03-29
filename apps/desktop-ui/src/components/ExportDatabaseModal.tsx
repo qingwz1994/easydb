@@ -370,19 +370,28 @@ export default function ExportDatabaseModal({
         }
       }
     } catch (e) {
-      // 导出期间任务日志会持续增长，瞬时网络/连接 reset 不应直接让 UI 冻住
-      setPollRetryCount((count) => count + 1)
+      setPollRetryCount((count) => {
+        // A7: 超过 20 次连续失败则停止轮询，防止后端崩溃时僵尸轮询
+        if (count + 1 >= 20) {
+          stopPolling()
+          console.error('Polling export task failed too many times, stopped.')
+        }
+        return count + 1
+      })
       console.warn('Polling task failed, will retry', e)
     } finally {
       pollingRef.current = false
     }
   }
 
+  // A7: 串行轮询 —— 上一次请求完成后再等 1.5s 发下一次，避免慢响应积压
   const startPolling = (tid: string) => {
     stopPolling()
-    // 立即执行第一次轮询，然后按较温和的间隔继续轮询，避免并发请求把轮询自己打挂
-    pollOnce(tid)
-    timerRef.current = setInterval(() => pollOnce(tid), 1500)
+    const poll = async () => {
+      await pollOnce(tid)
+      timerRef.current = setTimeout(() => void poll(), 1500) as unknown as ReturnType<typeof setInterval>
+    }
+    void poll()
   }
 
   const stopPolling = () => {

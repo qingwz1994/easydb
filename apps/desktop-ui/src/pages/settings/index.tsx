@@ -15,28 +15,54 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 import React, { useState, useCallback } from 'react'
-import { Typography, Space, Switch, Button, Modal, Radio, Tabs, List, theme, Avatar } from 'antd'
+import { Typography, Space, Switch, Button, Modal, Radio, Tabs, List, theme, Avatar, Progress, Spin, App, Select, Alert } from 'antd'
 import {
   SettingOutlined, InfoCircleOutlined, SyncOutlined, CheckCircleOutlined,
   CloudDownloadOutlined, BulbOutlined, DesktopOutlined, SafetyCertificateOutlined,
-  CodeOutlined, RetweetOutlined, AppstoreOutlined
+  CodeOutlined, RetweetOutlined, AppstoreOutlined,
+  DatabaseOutlined, FileZipOutlined, FileTextOutlined, SettingFilled,
+  DeleteOutlined, ClearOutlined, ExclamationCircleOutlined
 } from '@ant-design/icons'
 import {
   checkForUpdate, getAutoCheckEnabled, setAutoCheckEnabled, APP_VERSION,
   type UpdateInfo,
 } from '@/utils/updater'
 import { useThemeStore, type ThemeMode } from '@/stores/themeStore'
+import { storageApi } from '@/services/api'
 
 const { Title, Text, Paragraph } = Typography
 
+interface StorageCategoryInfo {
+  size: number
+  sizeText: string
+  fileCount: number
+}
+
+interface StorageInfo {
+  basePath: string
+  exports: StorageCategoryInfo
+  logs: StorageCategoryInfo
+  config: StorageCategoryInfo
+  totalSize: number
+  totalSizeText: string
+}
+
 export const SettingsPage: React.FC = () => {
   const { token } = theme.useToken()
+  const { message, modal } = App.useApp()
   const [autoCheck, setAutoCheck] = useState(getAutoCheckEnabled)
   const [checking, setChecking] = useState(false)
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
 
   const themeMode = useThemeStore((s) => s.themeMode)
   const setThemeMode = useThemeStore((s) => s.setThemeMode)
+
+  // 存储管理状态
+  const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null)
+  const [storageLoading, setStorageLoading] = useState(false)
+  const [cleaning, setCleaning] = useState<string | null>(null)
+  const [exportDays, setExportDays] = useState(3)
+  const [logDays, setLogDays] = useState(3)
 
   const handleToggleAutoCheck = useCallback((checked: boolean) => {
     setAutoCheck(checked)
@@ -63,6 +89,59 @@ export const SettingsPage: React.FC = () => {
       setChecking(false)
     }
   }, [])
+
+  // 加载存储信息
+  const loadStorageInfo = useCallback(async () => {
+    setStorageLoading(true)
+    try {
+      const info = await storageApi.info() as StorageInfo
+      setStorageInfo(info)
+    } catch {
+      // 静默失败
+    } finally {
+      setStorageLoading(false)
+    }
+  }, [])
+
+  // 执行清理
+  const handleCleanup = useCallback(async (target: string, mode: string, days?: number) => {
+    const targetLabels: Record<string, string> = { exports: '导出文件', logs: '任务日志', tasks: '任务记录' }
+    const label = targetLabels[target] || target
+
+    const confirmMsg = mode === 'all'
+      ? `确定要清理所有${label}吗？此操作不可恢复。`
+      : `确定要清理超过 ${days} 天的${label}吗？`
+
+    modal.confirm({
+      title: `清理${label}`,
+      icon: <ExclamationCircleOutlined />,
+      content: confirmMsg,
+      okText: '确认清理',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        setCleaning(target)
+        try {
+          const result = await storageApi.cleanup(target, mode, days) as {
+            deletedCount: number
+            freedSize: number
+            freedSizeText: string
+          }
+          message.success(`已清理 ${result.deletedCount} 项，释放 ${result.freedSizeText}`)
+          loadStorageInfo() // 刷新信息
+        } catch {
+          message.error('清理失败')
+        } finally {
+          setCleaning(null)
+        }
+      },
+    })
+  }, [modal, message, loadStorageInfo])
+
+  const calcPercent = (part: number, total: number) => {
+    if (total === 0) return 0
+    return Math.round((part / total) * 100)
+  }
 
   const items = [
     {
@@ -144,6 +223,237 @@ export const SettingsPage: React.FC = () => {
       )
     },
     {
+      key: 'storage',
+      label: <span><DatabaseOutlined /> 存储管理</span>,
+      children: (
+        <div style={{ padding: '0 32px', maxWidth: 800 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+            <Title level={4} style={{ margin: 0, fontWeight: 600 }}>存储管理</Title>
+            <Button
+              icon={<SyncOutlined spin={storageLoading} />}
+              onClick={loadStorageInfo}
+              loading={storageLoading}
+              size="small"
+            >
+              刷新
+            </Button>
+          </div>
+
+          {storageLoading && !storageInfo ? (
+            <div style={{ textAlign: 'center', padding: 60 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16 }}><Text type="secondary">正在扫描存储空间...</Text></div>
+            </div>
+          ) : storageInfo ? (
+            <Space direction="vertical" size={20} style={{ width: '100%' }}>
+              {/* 概览卡片 */}
+              <div style={{
+                background: token.colorBgContainer, borderRadius: 12,
+                border: `1px solid ${token.colorBorderSecondary}`,
+                padding: '24px 28px',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 16 }}>
+                  <Text strong style={{ fontSize: 15 }}>存储空间概览</Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    📁 {storageInfo.basePath}
+                  </Text>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12 }}>
+                  <DatabaseOutlined style={{ fontSize: 28, color: token.colorPrimary }} />
+                  <div style={{ flex: 1 }}>
+                    <Text strong style={{ fontSize: 22 }}>{storageInfo.totalSizeText}</Text>
+                    <Text type="secondary" style={{ marginLeft: 8 }}>总占用</Text>
+                  </div>
+                </div>
+                <Progress
+                  percent={100}
+                  success={{ percent: calcPercent(storageInfo.exports.size, storageInfo.totalSize) }}
+                  strokeColor={token.colorWarning}
+                  trailColor={token.colorBorderSecondary}
+                  showInfo={false}
+                  size={['100%', 12]}
+                  style={{ marginBottom: 8 }}
+                />
+                <div style={{ display: 'flex', gap: 24, fontSize: 12 }}>
+                  <Text type="secondary">
+                    <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: token.colorPrimary, marginRight: 6 }}/>
+                    导出文件 {storageInfo.exports.sizeText}
+                  </Text>
+                  <Text type="secondary">
+                    <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: token.colorWarning, marginRight: 6 }}/>
+                    日志 {storageInfo.logs.sizeText}
+                  </Text>
+                  <Text type="secondary">
+                    <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: token.colorBorderSecondary, marginRight: 6 }}/>
+                    配置 {storageInfo.config.sizeText}
+                  </Text>
+                </div>
+              </div>
+
+              {/* 影响提示 */}
+              <Alert
+                type="warning"
+                showIcon
+                style={{ borderRadius: 8 }}
+                message="清理须知"
+                description={
+                  <ul style={{ margin: '4px 0 0', paddingLeft: 18, fontSize: 12, lineHeight: '20px' }}>
+                    <li><b>导出文件</b>：清理后无法再从任务中心下载对应的 ZIP 压缩包</li>
+                    <li><b>任务日志</b>：清理后任务中心的「导出日志」将无法下载历史物理日志文件，但在线查看不受影响</li>
+                    <li><b>任务记录</b>：清理后任务中心中对应的历史条目将被移除</li>
+                    <li>正在运行中的任务日志不会被清理</li>
+                  </ul>
+                }
+              />
+
+              {/* 分类管理 */}
+              <div style={{
+                background: token.colorBgContainer, borderRadius: 12,
+                border: `1px solid ${token.colorBorderSecondary}`,
+                overflow: 'hidden',
+              }}>
+                {/* 导出文件 */}
+                <div style={{ padding: '16px 20px', borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                    <Avatar size="large" icon={<FileZipOutlined />} style={{ backgroundColor: '#e6f4ff', color: '#1677ff', flexShrink: 0 }}/>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div>
+                        <Text strong>导出文件</Text>
+                        <Text type="secondary" style={{ fontSize: 13, marginLeft: 6 }}>.zip</Text>
+                      </div>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {storageInfo.exports.sizeText} / {storageInfo.exports.fileCount} 个文件 — 历史导出的数据库压缩包
+                      </Text>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                    <Space.Compact size="small">
+                      <Select
+                        value={exportDays}
+                        onChange={setExportDays}
+                        style={{ width: 90 }}
+                        size="small"
+                        options={[
+                          { value: 1, label: '1 天前' },
+                          { value: 3, label: '3 天前' },
+                          { value: 7, label: '7 天前' },
+                          { value: 30, label: '30 天前' },
+                        ]}
+                      />
+                      <Button
+                        size="small"
+                        onClick={() => handleCleanup('exports', 'older_than_days', exportDays)}
+                        loading={cleaning === 'exports'}
+                        icon={<ClearOutlined />}
+                      >
+                        清理
+                      </Button>
+                    </Space.Compact>
+                    <Button
+                      size="small"
+                      danger
+                      onClick={() => handleCleanup('exports', 'all')}
+                      loading={cleaning === 'exports'}
+                      icon={<DeleteOutlined />}
+                    >
+                      全部清理
+                    </Button>
+                  </div>
+                </div>
+
+                {/* 任务日志 */}
+                <div style={{ padding: '16px 20px', borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                    <Avatar size="large" icon={<FileTextOutlined />} style={{ backgroundColor: '#fff7e6', color: '#fa8c16', flexShrink: 0 }}/>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div>
+                        <Text strong>任务日志</Text>
+                        <Text type="secondary" style={{ fontSize: 13, marginLeft: 6 }}>.log</Text>
+                      </div>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {storageInfo.logs.sizeText} / {storageInfo.logs.fileCount} 个文件 — 导入/导出/迁移的运行日志
+                      </Text>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                    <Space.Compact size="small">
+                      <Select
+                        value={logDays}
+                        onChange={setLogDays}
+                        style={{ width: 90 }}
+                        size="small"
+                        options={[
+                          { value: 1, label: '1 天前' },
+                          { value: 3, label: '3 天前' },
+                          { value: 7, label: '7 天前' },
+                          { value: 30, label: '30 天前' },
+                        ]}
+                      />
+                      <Button
+                        size="small"
+                        onClick={() => handleCleanup('logs', 'older_than_days', logDays)}
+                        loading={cleaning === 'logs'}
+                        icon={<ClearOutlined />}
+                      >
+                        清理
+                      </Button>
+                    </Space.Compact>
+                    <Button
+                      size="small"
+                      danger
+                      onClick={() => handleCleanup('logs', 'all')}
+                      loading={cleaning === 'logs'}
+                      icon={<DeleteOutlined />}
+                    >
+                      全部清理
+                    </Button>
+                  </div>
+                </div>
+
+                {/* 任务记录 */}
+                <div style={{ padding: '16px 20px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                    <Avatar size="large" icon={<SettingFilled />} style={{ backgroundColor: '#f6ffed', color: '#52c41a', flexShrink: 0 }}/>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div>
+                        <Text strong>任务记录</Text>
+                        <Text type="secondary" style={{ fontSize: 13, marginLeft: 6 }}>tasks.json</Text>
+                      </div>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {storageInfo.config.sizeText} — 已完成/失败/取消的历史任务元数据
+                      </Text>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                    <Button
+                      size="small"
+                      onClick={() => handleCleanup('tasks', 'all')}
+                      loading={cleaning === 'tasks'}
+                      icon={<ClearOutlined />}
+                    >
+                      清理已完成任务
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </Space>
+          ) : (
+            <div style={{
+              textAlign: 'center', padding: 60,
+              background: token.colorBgContainer, borderRadius: 12,
+              border: `1px solid ${token.colorBorderSecondary}`,
+            }}>
+              <DatabaseOutlined style={{ fontSize: 48, color: token.colorTextQuaternary, marginBottom: 16 }} />
+              <div><Text type="secondary">点击「刷新」扫描存储空间</Text></div>
+              <Button type="primary" onClick={loadStorageInfo} style={{ marginTop: 16 }}>
+                扫描存储空间
+              </Button>
+            </div>
+          )}
+        </div>
+      )
+    },
+    {
       key: 'about',
       label: <span><InfoCircleOutlined /> 关于 EasyDB</span>,
       children: (
@@ -206,6 +516,13 @@ export const SettingsPage: React.FC = () => {
     }
   ]
 
+  // 切换到存储管理 Tab 时自动加载
+  const handleTabChange = useCallback((key: string) => {
+    if (key === 'storage' && !storageInfo) {
+      loadStorageInfo()
+    }
+  }, [storageInfo, loadStorageInfo])
+
   return (
     <div style={{ height: '100%', background: 'var(--color-bg-layout)' }}>
       <div style={{ padding: '16px 32px', margin: '16px 32px 0 32px', background: token.colorBgContainer, borderRadius: 8, boxShadow: '0 2px 10px rgba(0,0,0,0.02)' }}>
@@ -213,6 +530,7 @@ export const SettingsPage: React.FC = () => {
             tabPosition="left"
             items={items}
             size="large"
+            onChange={handleTabChange}
             style={{ minHeight: 'calc(100vh - 120px)' }}
           />
       </div>

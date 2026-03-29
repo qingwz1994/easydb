@@ -23,6 +23,16 @@ class SqlQuerySessionManager {
         private const val IDLE_TIMEOUT_MILLIS = 10 * 60 * 1000L
         private const val QUERY_TIMEOUT_SECONDS = 120
         private const val TRUNCATED_SQL_CELL_SUFFIX = " …[truncated]"
+        private const val MAX_RESULT_SQL_DISPLAY_LENGTH = 2000
+    }
+
+    /** 截断超长 SQL 文本，防止前端渲染卡死 */
+    private fun truncateSql(sql: String): String {
+        return if (sql.length > MAX_RESULT_SQL_DISPLAY_LENGTH) {
+            sql.take(MAX_RESULT_SQL_DISPLAY_LENGTH) + " …[SQL 已截断，原始长度 ${sql.length} 字符]"
+        } else {
+            sql
+        }
     }
 
     private val sessions = ConcurrentHashMap<String, QuerySession>()
@@ -125,14 +135,14 @@ class SqlQuerySessionManager {
                 loadedRows = page.rows.size,
                 truncatedCellCount = page.truncatedCellCount,
                 duration = finalDuration,
-                sql = sql,
+                sql = truncateSql(sql),
                 executedAt = querySession.executedAt
             )
         } catch (e: Exception) {
             createdSessionId?.let { removeAndCloseSession(it) }
             closeQuietly(statement)
             closeQuietly(dedicatedConnection)
-            errorResult(sql, e.message ?: "SQL 预览异常", System.currentTimeMillis() - startAt)
+            errorResult(truncateSql(sql), e.message ?: "SQL 预览异常", System.currentTimeMillis() - startAt)
         }
     }
 
@@ -269,9 +279,35 @@ class SqlQuerySessionManager {
     ): PreviewRow {
         var truncatedCellCount = 0
         val row = linkedMapOf<String, String?>()
+        val meta = resultSet.metaData
 
         for ((index, column) in columns.withIndex()) {
-            val value = resultSet.getString(index + 1)
+            val colIndex = index + 1
+            val colType = meta.getColumnType(colIndex)
+
+            // C2: 对 BLOB/BINARY 大字段做快速占位，避免 getString 全量解码拖慢整个查询页
+            if (colType in setOf(
+                    java.sql.Types.BLOB,
+                    java.sql.Types.BINARY,
+                    java.sql.Types.VARBINARY,
+                    java.sql.Types.LONGVARBINARY
+                )) {
+                val bytes = resultSet.getBytes(colIndex)
+                if (bytes == null) {
+                    row[column] = null
+                } else {
+                    truncatedCellCount++
+                    val sizeLabel = when {
+                        bytes.size < 1024 -> "${bytes.size} B"
+                        bytes.size < 1024 * 1024 -> "${bytes.size / 1024} KB"
+                        else -> "${bytes.size / (1024 * 1024)} MB"
+                    }
+                    row[column] = "[BLOB $sizeLabel]"
+                }
+                continue
+            }
+
+            val value = resultSet.getString(colIndex)
             row[column] = when {
                 value == null -> null
                 value.length > maxCellChars -> {

@@ -253,3 +253,13 @@ export const scriptApi = {
   delete: (id: string) =>
     request(`/api/scripts/${id}`, { method: 'DELETE' }),
 }
+
+// ─── 存储管理 ────────────────────────────────────────────
+export const storageApi = {
+  info: () => request('/api/storage/info'),
+  cleanup: (target: string, mode: string, days?: number) =>
+    request('/api/storage/cleanup', {
+      method: 'POST',
+      body: JSON.stringify({ target, mode, days: days ?? 3 }),
+    }),
+}

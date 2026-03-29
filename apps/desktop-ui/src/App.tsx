@@ -16,7 +16,7 @@
  */
 import React, { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { ConfigProvider, theme, Modal } from 'antd'
+import { ConfigProvider, theme, Modal, App as AntApp } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import { MainLayout } from '@/layouts/MainLayout'
 import { ConnectionPage } from '@/pages/connection'
@@ -89,21 +89,23 @@ const App: React.FC = () => {
           fontFamilyCode,
         },
       }}>
-      <BrowserRouter>
-        <MainLayout>
-          <Routes>
-            <Route path="/" element={<Navigate to="/connection" replace />} />
-            <Route path="/connection" element={<ConnectionPage />} />
-            <Route path="/workbench" element={<WorkbenchPage />} />
-            <Route path="/sql-editor" element={<SqlEditorPage />} />
-            <Route path="/migration" element={<MigrationPage />} />
-            <Route path="/sync" element={<SyncPage />} />
-            <Route path="/task-center" element={<TaskCenterPage />} />
-            <Route path="/structure-compare" element={<StructureComparePage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-          </Routes>
-        </MainLayout>
-      </BrowserRouter>
+      <AntApp>
+        <BrowserRouter>
+          <MainLayout>
+            <Routes>
+              <Route path="/" element={<Navigate to="/connection" replace />} />
+              <Route path="/connection" element={<ConnectionPage />} />
+              <Route path="/workbench" element={<WorkbenchPage />} />
+              <Route path="/sql-editor" element={<SqlEditorPage />} />
+              <Route path="/migration" element={<MigrationPage />} />
+              <Route path="/sync" element={<SyncPage />} />
+              <Route path="/task-center" element={<TaskCenterPage />} />
+              <Route path="/structure-compare" element={<StructureComparePage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+            </Routes>
+          </MainLayout>
+        </BrowserRouter>
+      </AntApp>
     </ConfigProvider>
   )
 }
