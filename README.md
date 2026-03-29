@@ -6,14 +6,14 @@
 
 <p align="center">
   <strong>开源、跨平台的数据库管理工具</strong><br>
-  连接管理 · 对象浏览 · SQL 编辑器 · 数据迁移 · 数据同步 · 任务中心
+  连接管理 · 对象浏览 · SQL 编辑器 · 数据迁移 · 数据同步 · 数据导出 · 任务中心 · 存储管理
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="Platform">
   <img src="https://img.shields.io/badge/database-MySQL-4479A1?logo=mysql&logoColor=white" alt="MySQL">
-  <img src="https://img.shields.io/badge/version-1.2.0-green" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.3.0-green" alt="Version">
 </p>
 
 ---
@@ -46,10 +46,24 @@
   - 同步期间关闭 `unique_checks` / `foreign_key_checks`
   - 动态 batch size（普通表 5000，大表 10000）
 
+### 📤 数据导出
+- 支持整库导出为 ZIP 压缩包（含建表 SQL + 数据 INSERT）
+- 支持导出取消，自动清理半成品文件
+- 支持导出文件下载
+
+### 📥 SQL 文件导入
+- 支持上传 .sql 文件执行导入
+- 支持导入进度追踪和中途取消
+
 ### 📋 任务中心
-- 迁移/同步任务统一管理
+- 迁移/同步/导出/导入任务统一管理
 - 实时进度、耗时、日志查看
 - 任务取消、筛选、历史记录
+
+### ⚙️ 设置中心
+- 深色 / 浅色 / 跟随系统主题切换
+- 存储管理：磁盘占用可视化、分类清理（导出文件 / 日志 / 任务记录）
+- 自动更新检查
 
 ## 🛠️ 技术架构
 
@@ -147,11 +161,11 @@ easydb/
 | 版本 | 状态 | 目标 |
 |------|------|------|
 | v1.0 | ✅ 已完成 | MySQL 连接管理 → 工作台 → SQL 编辑器 → 数据迁移 → 同步 → 任务中心 |
-| v1.1 | ✅ 已完成 | 连接搜索/筛选、数据导出、任务日志优化 |
-| v1.2 | ✅ 已完成 | 数据预览筛选/排序/分页、行内编辑、结构对比、多标签页、 |
-| **v1.3** | 🚧 进行中 | 深色模式、连接分组/收藏、SQL 文件导入执行、自动更新检查 |
-| v1.4 | 📋 规划中 | 查询收藏、快捷键体系、视图/存储过程/函数浏览 |
-| v1.5 | 📋 规划中 | 数据库备份恢复、慢查询分析、国际化 (i18n) |
+| v1.1.0 | ✅ 已完成 | 连接搜索/筛选、数据导出、任务日志优化 |
+| v1.2.0 | ✅ 已完成 | 数据预览筛选/排序/分页、行内编辑、结构对比、多标签页 |
+| **v1.3.0** | 🚧 进行中 | 深色模式、SQL 文件导入、存储管理、导出取消优化、自动更新检查 |
+| v1.4.0 | 📋 规划中 | 查询收藏、快捷键体系、视图/存储过程/函数浏览 |
+| v1.5.0 | 📋 规划中 | 数据库备份恢复、慢查询分析、国际化 (i18n) |
 
 ## 🤝 参与贡献
 
