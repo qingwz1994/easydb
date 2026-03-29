@@ -23,7 +23,11 @@ data class TableInfo(
     val schema: String? = null,
     val type: String = "table", // table | view | trigger
     val rowCount: Long? = null,
-    val comment: String? = null
+    val comment: String? = null,
+    val dataLength: Long? = null,
+    val indexLength: Long? = null,
+    val updateTime: String? = null,
+    val engine: String? = null
 )
 
 @Serializable
@@ -73,11 +77,71 @@ data class SqlExecuteRequest(
 )
 
 @Serializable
+data class SqlQueryPreviewRequest(
+    val connectionId: String,
+    val database: String,
+    val sql: String,
+    val offset: Int = 0,
+    val pageSize: Int = 200,
+    val maxCellChars: Int = 4096
+)
+
+@Serializable
+data class SqlQuerySessionStartRequest(
+    val connectionId: String,
+    val database: String,
+    val sql: String,
+    val pageSize: Int = 200,
+    val maxCellChars: Int = 4096
+)
+
+@Serializable
+data class SqlQuerySessionFetchRequest(
+    val querySessionId: String,
+    val pageSize: Int = 200,
+    val maxCellChars: Int = 4096
+)
+
+@Serializable
+data class SqlQuerySessionCloseRequest(
+    val querySessionId: String
+)
+
+@Serializable
+data class SqlQuerySessionStatusRequest(
+    val querySessionId: String
+)
+
+@Serializable
+data class SqlQuerySessionStatus(
+    val querySessionId: String,
+    val totalRows: Long? = null,
+    val counting: Boolean = false,
+    val exists: Boolean = true
+)
+
+@Serializable
+data class SqlImportFileRequest(
+    val connectionId: String,
+    val database: String,
+    val filePath: String,
+    val fileName: String? = null
+)
+
+@Serializable
 data class SqlResult(
     val type: String, // query | update | error
     val columns: List<String>? = null,
     val rows: List<Map<String, String?>>? = null,
     val affectedRows: Int? = null,
+    val preview: Boolean = false,
+    val hasMore: Boolean? = null,
+    val querySessionId: String? = null,
+    val totalRows: Long? = null,
+    val offset: Int? = null,
+    val pageSize: Int? = null,
+    val loadedRows: Int? = null,
+    val truncatedCellCount: Int? = null,
     val duration: Long,
     val sql: String,
     val executedAt: String,
@@ -230,4 +294,3 @@ data class DataEditResult(
     val affectedRows: Int = 0,
     val errors: List<String> = emptyList()
 )
-

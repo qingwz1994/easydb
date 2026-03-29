@@ -49,7 +49,8 @@ class MysqlMetadataAdapter : MetadataAdapter {
         val conn = (session as MysqlDatabaseSession).connection
         val result = mutableListOf<TableInfo>()
         conn.prepareStatement("""
-            SELECT TABLE_NAME, TABLE_SCHEMA, TABLE_TYPE, TABLE_ROWS, TABLE_COMMENT
+            SELECT TABLE_NAME, TABLE_SCHEMA, TABLE_TYPE, TABLE_ROWS, TABLE_COMMENT,
+                   DATA_LENGTH, INDEX_LENGTH, UPDATE_TIME, ENGINE
             FROM INFORMATION_SCHEMA.TABLES
             WHERE TABLE_SCHEMA = ?
             ORDER BY TABLE_NAME
@@ -63,7 +64,11 @@ class MysqlMetadataAdapter : MetadataAdapter {
                         schema = rs.getString("TABLE_SCHEMA"),
                         type = if (tableType == "VIEW") "view" else "table",
                         rowCount = rs.getLong("TABLE_ROWS"),
-                        comment = rs.getString("TABLE_COMMENT")
+                        comment = rs.getString("TABLE_COMMENT"),
+                        dataLength = rs.getLong("DATA_LENGTH"),
+                        indexLength = rs.getLong("INDEX_LENGTH"),
+                        updateTime = rs.getString("UPDATE_TIME"),
+                        engine = rs.getString("ENGINE")
                     ))
                 }
             }
@@ -201,7 +206,28 @@ class MysqlMetadataAdapter : MetadataAdapter {
                 while (rs.next()) {
                     val row = mutableMapOf<String, String?>()
                     for (i in 1..columnCount) {
-                        row[meta.getColumnName(i)] = rs.getString(i)
+                        val colType = meta.getColumnType(i)
+                        // BLOB/BINARY 列用友好占位符替代，避免乱码
+                        if (colType in setOf(
+                                java.sql.Types.BLOB,
+                                java.sql.Types.BINARY,
+                                java.sql.Types.VARBINARY,
+                                java.sql.Types.LONGVARBINARY
+                            )) {
+                            val bytes = rs.getBytes(i)
+                            row[meta.getColumnName(i)] = if (bytes == null) {
+                                null
+                            } else {
+                                val sizeLabel = when {
+                                    bytes.size < 1024 -> "${bytes.size} B"
+                                    bytes.size < 1024 * 1024 -> "${bytes.size / 1024} KB"
+                                    else -> "${bytes.size / (1024 * 1024)} MB"
+                                }
+                                "[BLOB $sizeLabel]"
+                            }
+                        } else {
+                            row[meta.getColumnName(i)] = rs.getString(i)
+                        }
                     }
                     result.add(row)
                 }

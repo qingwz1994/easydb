@@ -132,7 +132,8 @@ data class TaskResult(
     val failureCount: Int = 0,
     val skippedCount: Int = 0,
     val errorMessage: String? = null,
-    val verification: List<TableVerifyResult>? = null
+    val verification: List<TableVerifyResult>? = null,
+    val payload: Map<String, String>? = null
 )
 
 @Serializable

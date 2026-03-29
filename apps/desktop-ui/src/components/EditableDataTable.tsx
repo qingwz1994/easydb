@@ -668,32 +668,42 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
         .editable-data-table .ant-table-wrapper {
           height: 100%;
         }
+        /* Pro-Max Spreadsheet Header */
         .editable-data-table .ant-table-thead > tr > th {
-          background: ${token.colorFillAlter};
+          background: transparent !important;
           font-weight: 600;
+          color: ${token.colorTextSecondary};
+          border-bottom: 2px solid ${token.colorBorderSecondary} !important;
+          padding: 8px 12px !important;
+        }
+        /* Pro-Max Spreadsheet Cells */
+        .editable-data-table .ant-table-tbody > tr > td {
+          padding: 4px 12px !important;
+          border-bottom: 1px solid ${token.colorBorderSecondary} !important;
+          border-right: none !important;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 13px;
+        }
+        .editable-data-table .ant-table-tbody > tr:hover > td {
+          background: ${token.colorFillAlter} !important;
         }
         .editable-data-table .ant-table-tbody > tr.row-selected > td {
-          background: ${token.colorPrimaryBg};
-        }
-        .editable-data-table .ant-table-tbody > tr.row-selected:hover > td {
-          background: ${token.colorPrimaryBg};
+          background: ${token.colorPrimaryBg} !important;
         }
         .editable-data-table .ant-table-tbody > tr.row-inserted > td {
-          background: ${token.colorSuccessBg};
-        }
-        .editable-data-table .ant-table-tbody > tr.row-inserted:hover > td {
-          background: ${token.colorSuccessBg};
+          background: ${token.colorSuccessBg} !important;
         }
         .editable-data-table .ant-table-tbody > tr.row-deleted > td {
-          background: ${token.colorErrorBg};
+          background: ${token.colorErrorBg} !important;
           color: ${token.colorTextQuaternary};
           text-decoration: line-through;
         }
-        .editable-data-table .ant-table-tbody > tr.row-deleted:hover > td {
-          background: ${token.colorErrorBg};
-        }
         .editable-data-table .ant-table-tbody td.cell-changed {
           background: ${token.colorWarningBg} !important;
+        }
+        /* Remove default AntD column dividers */
+        .editable-data-table .ant-table-cell::before {
+          display: none !important;
         }
       `}</style>
       {/* WHERE 筛选栏 */}

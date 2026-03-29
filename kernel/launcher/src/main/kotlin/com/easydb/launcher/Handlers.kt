@@ -26,15 +26,23 @@ import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
+import java.io.File
 import java.util.UUID
+
+/** 专用任务协程域：替代 GlobalScope，支持统一生命周期治理 */
+private val taskScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
 // ─── 连接管理路由 ──────────────────────────────────────────
 fun Route.connectionRoutes() {
     val store = ServiceRegistry.connectionStore
     val adapter = ServiceRegistry.mysqlAdapter
     val connMgr = ServiceRegistry.connectionManager
+    val querySessionMgr = ServiceRegistry.sqlQuerySessionManager
 
     // 获取连接列表
     get("/list") {
@@ -64,6 +72,7 @@ fun Route.connectionRoutes() {
     // 删除连接
     delete("/{id}") {
         val id = call.parameters["id"] ?: return@delete call.fail("INVALID_ID", "缺少连接 ID")
+        querySessionMgr.closeByConnectionId(id)
         connMgr.closeSession(id)
         store.delete(id)
         call.ok(true)
@@ -83,6 +92,7 @@ fun Route.connectionRoutes() {
             ?: return@post call.fail("NOT_FOUND", "连接不存在")
 
         try {
+            querySessionMgr.closeByConnectionId(id)
             connMgr.openSession(adapter.connectionAdapter(), config)
             store.updateStatus(id, "connected")
             call.ok(store.getById(id)!!)
@@ -94,8 +104,46 @@ fun Route.connectionRoutes() {
     // 关闭连接
     post("/{id}/close") {
         val id = call.parameters["id"] ?: return@post call.fail("INVALID_ID", "缺少连接 ID")
+        querySessionMgr.closeByConnectionId(id)
         connMgr.closeSession(id)
         store.updateStatus(id, "disconnected")
+        call.ok(true)
+    }
+}
+
+// ─── 连接分组路由 ──────────────────────────────────────────
+fun Route.groupRoutes() {
+    val store = ServiceRegistry.groupStore
+
+    // 获取分组列表
+    get("/list") {
+        call.ok(store.getAll())
+    }
+
+    // 新建分组
+    post("/create") {
+        val group = call.receive<ConnectionGroup>()
+        val newGroup = group.copy(id = UUID.randomUUID().toString())
+        store.save(newGroup)
+        call.ok(newGroup)
+    }
+
+    // 更新分组
+    put("/{id}") {
+        val id = call.parameters["id"] ?: return@put call.fail("INVALID_ID", "缺少分组 ID")
+        val group = call.receive<ConnectionGroup>()
+        if (store.getById(id) == null) {
+            call.fail("NOT_FOUND", "分组不存在")
+            return@put
+        }
+        val updated = store.save(group.copy(id = id))
+        call.ok(updated)
+    }
+
+    // 删除分组
+    delete("/{id}") {
+        val id = call.parameters["id"] ?: return@delete call.fail("INVALID_ID", "缺少分组 ID")
+        store.delete(id)
         call.ok(true)
     }
 }
@@ -409,6 +457,7 @@ fun Route.metadataRoutes() {
 fun Route.sqlRoutes() {
     val connMgr = ServiceRegistry.connectionManager
     val sqlService = ServiceRegistry.sqlService
+    val querySessionMgr = ServiceRegistry.sqlQuerySessionManager
     val historyStore = ServiceRegistry.sqlHistoryStore
 
     post("/execute") {
@@ -427,6 +476,149 @@ fun Route.sqlRoutes() {
         val results = sqlService.execute(session, req.database, req.sql)
         historyStore.add(req.connectionId, req.database, req.sql, results.first())
         call.ok(results)
+    }
+
+    post("/query-preview") {
+        val req = call.receive<SqlQueryPreviewRequest>()
+        val session = connMgr.getSession(req.connectionId)
+        if (session == null) {
+            val errorResult = SqlResult(
+                type = "error",
+                duration = 0,
+                sql = req.sql,
+                executedAt = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
+                error = "连接未打开，请先打开连接"
+            )
+            call.ok(errorResult)
+            return@post
+        }
+
+        val result = sqlService.previewQuery(
+            session = session,
+            database = req.database,
+            sql = req.sql,
+            offset = req.offset,
+            pageSize = req.pageSize,
+            maxCellChars = req.maxCellChars
+        )
+        if (req.offset == 0) {
+            historyStore.add(req.connectionId, req.database, req.sql, result)
+        }
+        call.ok(result)
+    }
+
+    post("/query-session/start") {
+        val req = call.receive<SqlQuerySessionStartRequest>()
+        val session = connMgr.getSession(req.connectionId)
+        if (session == null) {
+            val errorResult = SqlResult(
+                type = "error",
+                duration = 0,
+                sql = req.sql,
+                executedAt = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")),
+                error = "连接未打开，请先打开连接"
+            )
+            call.ok(errorResult)
+            return@post
+        }
+
+        val result = querySessionMgr.start(
+            session = session,
+            database = req.database,
+            sql = req.sql,
+            pageSize = req.pageSize,
+            maxCellChars = req.maxCellChars
+        )
+        historyStore.add(req.connectionId, req.database, req.sql, result)
+        call.ok(result)
+    }
+
+    post("/query-session/fetch") {
+        val req = call.receive<SqlQuerySessionFetchRequest>()
+        call.ok(querySessionMgr.fetch(req.querySessionId, req.pageSize, req.maxCellChars))
+    }
+
+    post("/query-session/status") {
+        val req = call.receive<SqlQuerySessionStatusRequest>()
+        call.ok(querySessionMgr.getStatus(req.querySessionId))
+    }
+
+    post("/query-session/close") {
+        val req = call.receive<SqlQuerySessionCloseRequest>()
+        querySessionMgr.close(req.querySessionId)
+        call.ok(true)
+    }
+
+    post("/import-file/start") {
+        val req = call.receive<SqlImportFileRequest>()
+        val session = connMgr.getSession(req.connectionId)
+        if (session == null) {
+            call.fail("NOT_CONNECTED", "连接未打开，请先打开连接")
+            return@post
+        }
+
+        val file = File(req.filePath)
+        if (!file.exists() || !file.isFile) {
+            call.fail("FILE_NOT_FOUND", "SQL 文件不存在或无法访问")
+            return@post
+        }
+
+        // C1: 同库并发导入限制 —— 同一连接+数据库下只允许一个导入任务运行
+        val taskMgr = ServiceRegistry.taskManager
+        val runningImport = taskMgr.list().find { t ->
+            t.type == "import"
+            && t.status in listOf("pending", "running")
+            && t.name.contains(req.database)
+            && t.name.contains("导入")
+        }
+        if (runningImport != null) {
+            call.fail("DUPLICATE_IMPORT", "数据库 ${req.database} 已有导入任务正在执行（任务 ID: ${runningImport.id}），请等待完成后再试")
+            return@post
+        }
+
+        val config = session.config
+        val task = taskMgr.createTask(
+            name = "导入 ${req.database} ← ${(req.fileName ?: file.name)}",
+            type = "import"
+        )
+        val reporter = taskMgr.createReporter(task.id)
+
+        taskScope.launch {
+            reporter.onProgress(1, "初始化导入环境...")
+            val startTime = System.currentTimeMillis()
+            var dedicatedConn: java.sql.Connection? = null
+
+            try {
+                val importConfig = config.copy(database = req.database)
+                reporter.onLog("INFO", "正在验证并建立专用导入连接 [${req.database}]...")
+                dedicatedConn = withTimeout(15000L) {
+                    MysqlConnectionAdapter.createJdbcConnection(importConfig)
+                }
+                reporter.onLog("INFO", "专用导入连接已就绪")
+                reporter.onLog("INFO", "准备导入文件: ${file.absolutePath}")
+
+                val taskSession = MysqlDatabaseSession(config.id, config, dedicatedConn)
+                val result = sqlService.importSqlFile(taskSession, req.database, file, reporter)
+                val duration = System.currentTimeMillis() - startTime
+
+                when {
+                    reporter.isCancelled() -> taskMgr.markCancelled(task.id, duration, result)
+                    result.success -> taskMgr.markCompleted(task.id, duration, result)
+                    else -> taskMgr.markFailed(task.id, result.errorMessage ?: "SQL 文件导入失败", result)
+                }
+            } catch (e: Exception) {
+                val duration = System.currentTimeMillis() - startTime
+                if (reporter.isCancelled()) {
+                    taskMgr.markCancelled(task.id, duration)
+                } else {
+                    taskMgr.markFailed(task.id, e.message ?: "SQL 文件导入异常")
+                }
+            } finally {
+                try { dedicatedConn?.close() } catch (_: Exception) {}
+            }
+        }
+
+        call.ok(TaskStartResult(taskId = task.id))
     }
 
     get("/history") {
@@ -478,7 +670,7 @@ fun Route.migrationRoutes() {
         val reporter = taskMgr.createReporter(task.id)
 
         // 异步执行迁移（为每个任务创建独立 JDBC 连接，避免并发任务共享连接导致 autoCommit 冲突）
-        kotlinx.coroutines.GlobalScope.launch {
+        taskScope.launch {
             reporter.onProgress(0, "准备中...")
             val startTime = System.currentTimeMillis()
             // 创建任务专用的独立 JDBC 连接
@@ -556,7 +748,7 @@ fun Route.syncRoutes() {
         val reporter = taskMgr.createReporter(task.id)
 
         // 异步执行同步（为每个任务创建独立 JDBC 连接，避免并发任务共享连接导致 autoCommit 冲突）
-        kotlinx.coroutines.GlobalScope.launch {
+        taskScope.launch {
             reporter.onProgress(0, "准备中...")
             val startTime = System.currentTimeMillis()
             // 创建任务专用的独立 JDBC 连接
@@ -614,6 +806,19 @@ fun Route.taskRoutes() {
     get("/{taskId}/logs") {
         val taskId = call.parameters["taskId"]!!
         call.ok(taskMgr.getLogs(taskId))
+    }
+    get("/{taskId}/download-log") {
+        val taskId = call.parameters["taskId"]!!
+        val logFile = java.io.File(System.getProperty("user.home"), ".easydb/logs/$taskId.log")
+        call.response.header("Content-Disposition", "attachment; filename=\"easydb-task-$taskId.log\"")
+        if (logFile.exists() && logFile.isFile) {
+            call.respondFile(logFile)
+        } else {
+            // fallback if physical log doesn't exist
+            val inMemoryLogs = taskMgr.getLogs(taskId)
+            val content = inMemoryLogs.joinToString("\n") { "[${it.timestamp}] [${it.level}] ${it.message}" }
+            call.respondText(content, io.ktor.http.ContentType.Text.Plain)
+        }
     }
     get("/{taskId}/steps") {
         call.ok(emptyList<String>())
@@ -732,5 +937,30 @@ fun Route.systemRoutes() {
                 "error" to (e.message ?: "检查更新失败")
             ))
         }
+    }
+}
+
+fun Route.scriptRoutes() {
+    get("/list") {
+        val scriptManager = ServiceRegistry.scriptManager
+        call.ok(scriptManager.list())
+    }
+
+    post("/save") {
+        val req = call.receive<Map<String, String>>()
+        val id = req["id"]
+        val name = req["name"] ?: return@post call.respond(mapOf("code" to 1, "message" to "Name is required"))
+        val content = req["content"] ?: return@post call.respond(mapOf("code" to 1, "message" to "Content is required"))
+        val database = req["database"]
+
+        val scriptManager = ServiceRegistry.scriptManager
+        val saved = scriptManager.save(name, content, database, id)
+        call.ok(saved)
+    }
+
+    delete("/{id}") {
+        val id = call.parameters["id"] ?: return@delete call.respond(mapOf("code" to 1, "message" to "ID is required"))
+        val scriptManager = ServiceRegistry.scriptManager
+        if (scriptManager.delete(id)) call.ok(mapOf("success" to true)) else call.respond(mapOf("code" to 1, "message" to "Script not found"))
     }
 }

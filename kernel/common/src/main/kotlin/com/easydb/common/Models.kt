@@ -41,7 +41,16 @@ data class ConnectionConfig(
     val status: String = "disconnected",
     val lastUsedAt: String? = null,
     val ssh: SshConfig? = null,
-    val ssl: SslConfig? = null
+    val ssl: SslConfig? = null,
+    val groupId: String? = null
+)
+
+// ─── 连接分组 ──────────────────────────────────────────────
+@Serializable
+data class ConnectionGroup(
+    val id: String = "",
+    val name: String,
+    val sortOrder: Int = 0
 )
 
 // ─── SSH 隧道配置 ──────────────────────────────────────────

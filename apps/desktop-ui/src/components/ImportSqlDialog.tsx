@@ -1,406 +1,550 @@
-/**
- * SQL 文件导入弹窗 — 选择 .sql 文件 → 确认目标连接/库 → 逐语句执行 → 实时日志
- */
-import React, { useState, useRef, useCallback } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Modal, Upload, Button, Space, Typography, Progress, Select, Tag, Alert,
+  Alert,
+  Button,
+  Input,
+  Modal,
+  Progress,
+  Result,
+  Select,
+  Space,
+  Steps,
+  Tag,
+  Typography,
   theme,
 } from 'antd'
 import {
-  UploadOutlined, PlayCircleOutlined, CheckCircleOutlined,
-  LoadingOutlined,
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  ExclamationCircleOutlined,
+  FileTextOutlined,
+  FolderOpenOutlined,
+  PlayCircleOutlined,
+  SyncOutlined,
 } from '@ant-design/icons'
-import { sqlApi } from '@/services/api'
-import type { SqlResult } from '@/types'
+import { invoke } from '@tauri-apps/api/core'
+import { sqlApi, taskApi } from '@/services/api'
+import { handleApiError, toast } from '@/utils/notification'
+import { formatDuration, getElapsedMs } from '@/utils/format'
 
 const { Text } = Typography
 
 interface ImportSqlDialogProps {
   open: boolean
   onClose: () => void
-  /** 预设的连接 ID */
   connectionId?: string
   connectionName?: string
-  /** 预设的数据库 */
   database?: string
-  /** 可选的数据库列表 */
   databases?: string[]
 }
 
-interface LogEntry {
-  time: string
-  level: 'info' | 'success' | 'error' | 'warn'
+interface SelectedSqlFile {
+  path: string
+  name: string
+  size: number
+}
+
+type ImportTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+
+interface ImportTaskInfo {
+  progress?: number
+  status: ImportTaskStatus
+  progressMessage?: string
+  startedAt?: string
+  duration?: number
+  successCount?: number
+  failureCount?: number
+  skippedCount?: number
+  errorMessage?: string
+}
+
+interface ImportTaskLog {
+  timestamp: string
+  level: string
   message: string
-}
-
-/** 将 SQL 文件内容拆分为独立语句（分号分割，跳过注释和字符串内的分号） */
-function splitSqlStatements(sql: string): string[] {
-  const statements: string[] = []
-  let current = ''
-  let inSingleQuote = false
-  let inDoubleQuote = false
-  let inBacktick = false
-  let inLineComment = false
-  let inBlockComment = false
-
-  for (let i = 0; i < sql.length; i++) {
-    const ch = sql[i]
-    const next = sql[i + 1]
-
-    // 处理行注释
-    if (!inSingleQuote && !inDoubleQuote && !inBacktick && !inBlockComment) {
-      if (ch === '-' && next === '-') {
-        inLineComment = true
-        current += ch
-        continue
-      }
-      if (ch === '#' && !inLineComment) {
-        inLineComment = true
-        current += ch
-        continue
-      }
-    }
-    if (inLineComment) {
-      current += ch
-      if (ch === '\n') inLineComment = false
-      continue
-    }
-
-    // 处理块注释
-    if (!inSingleQuote && !inDoubleQuote && !inBacktick) {
-      if (ch === '/' && next === '*' && !inBlockComment) {
-        inBlockComment = true
-        current += ch
-        continue
-      }
-    }
-    if (inBlockComment) {
-      current += ch
-      if (ch === '*' && next === '/') {
-        current += next
-        i++
-        inBlockComment = false
-      }
-      continue
-    }
-
-    // 处理引号
-    if (!inDoubleQuote && !inBacktick && ch === '\'' && !isEscaped(sql, i)) {
-      inSingleQuote = !inSingleQuote
-    } else if (!inSingleQuote && !inBacktick && ch === '"' && !isEscaped(sql, i)) {
-      inDoubleQuote = !inDoubleQuote
-    } else if (!inSingleQuote && !inDoubleQuote && ch === '`') {
-      inBacktick = !inBacktick
-    }
-
-    // 分号分割
-    if (ch === ';' && !inSingleQuote && !inDoubleQuote && !inBacktick) {
-      const stmt = current.trim()
-      if (stmt && !isCommentOnly(stmt)) {
-        statements.push(stmt)
-      }
-      current = ''
-      continue
-    }
-
-    current += ch
-  }
-
-  // 处理末尾没有分号的语句
-  const last = current.trim()
-  if (last && !isCommentOnly(last)) {
-    statements.push(last)
-  }
-
-  return statements
-}
-
-function isEscaped(sql: string, pos: number): boolean {
-  let count = 0
-  for (let i = pos - 1; i >= 0 && sql[i] === '\\'; i--) {
-    count++
-  }
-  return count % 2 === 1
-}
-
-function isCommentOnly(s: string): boolean {
-  const lines = s.split('\n').map(l => l.trim()).filter(Boolean)
-  return lines.every(l => l.startsWith('--') || l.startsWith('#') || l.startsWith('/*'))
 }
 
 export const ImportSqlDialog: React.FC<ImportSqlDialogProps> = ({
   open, onClose, connectionId, connectionName, database, databases,
 }) => {
   const { token } = theme.useToken()
-  const [fileContent, setFileContent] = useState<string | null>(null)
-  const [fileName, setFileName] = useState<string>('')
-  const [fileSize, setFileSize] = useState(0)
-  const [selectedDb, setSelectedDb] = useState<string>(database ?? '')
-  const [executing, setExecuting] = useState(false)
-  const [progress, setProgress] = useState({ current: 0, total: 0 })
-  const [logs, setLogs] = useState<LogEntry[]>([])
-  const [done, setDone] = useState(false)
-  const [stats, setStats] = useState({ success: 0, errors: 0, skipped: 0 })
-  const abortRef = useRef(false)
+  const nativePickerAvailable = hasTauriInvoke()
+  const [currentStep, setCurrentStep] = useState(0)
+  const [selectedDb, setSelectedDb] = useState(database ?? '')
+  const [selectedFile, setSelectedFile] = useState<SelectedSqlFile | null>(null)
+  const [manualFilePath, setManualFilePath] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [taskId, setTaskId] = useState<string | null>(null)
+  const [taskStatus, setTaskStatus] = useState<ImportTaskStatus>('pending')
+  const [progress, setProgress] = useState(0)
+  const [progressMessage, setProgressMessage] = useState('')
+  const [startedAt, setStartedAt] = useState<string | null>(null)
+  const [duration, setDuration] = useState<number | null>(null)
+  const [successCount, setSuccessCount] = useState(0)
+  const [failureCount, setFailureCount] = useState(0)
+  const [skippedCount, setSkippedCount] = useState(0)
+  const [errorMessage, setErrorMessage] = useState('')
+  const [logs, setLogs] = useState<ImportTaskLog[]>([])
+  const [pollRetryCount, setPollRetryCount] = useState(0)
+
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pollingRef = useRef(false)
   const logContainerRef = useRef<HTMLDivElement>(null)
 
-  const addLog = useCallback((level: LogEntry['level'], message: string) => {
-    const time = new Date().toLocaleTimeString('zh-CN', { hour12: false })
-    setLogs(prev => {
-      const next = [...prev, { time, level, message }]
-      // 限制日志数量避免内存问题
-      return next.length > 2000 ? next.slice(-1500) : next
-    })
-    // 自动滚动到底部
-    setTimeout(() => {
+  useEffect(() => {
+    if (open) {
+      setSelectedDb(database ?? '')
+    }
+  }, [open, database])
+
+  const stopPolling = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+    pollingRef.current = false
+  }, [])
+
+  const resetState = useCallback(() => {
+    stopPolling()
+    setCurrentStep(0)
+    setSelectedDb(database ?? '')
+    setSelectedFile(null)
+    setManualFilePath('')
+    setLoading(false)
+    setTaskId(null)
+    setTaskStatus('pending')
+    setProgress(0)
+    setProgressMessage('')
+    setStartedAt(null)
+    setDuration(null)
+    setSuccessCount(0)
+    setFailureCount(0)
+    setSkippedCount(0)
+    setErrorMessage('')
+    setLogs([])
+    setPollRetryCount(0)
+  }, [database, stopPolling])
+
+  useEffect(() => {
+    if (!open) {
+      resetState()
+    }
+    return () => stopPolling()
+  }, [open, resetState, stopPolling])
+
+  const latestLogMessage = useMemo(() => (
+    logs.length > 0 ? logs[logs.length - 1].message : ''
+  ), [logs])
+
+  const effectiveFile = useMemo<SelectedSqlFile | null>(() => {
+    if (selectedFile) return selectedFile
+    return buildFileFromPath(manualFilePath)
+  }, [manualFilePath, selectedFile])
+
+  const stageMessage = progressMessage || latestLogMessage
+  const durationText = taskStatus === 'running' && startedAt
+    ? formatDuration(getElapsedMs(startedAt))
+    : duration != null
+      ? formatDuration(duration)
+      : ''
+
+  const pollOnce = async (id: string) => {
+    if (pollingRef.current) return
+    pollingRef.current = true
+    try {
+      const [taskInfo, taskLogs] = await Promise.all([
+        taskApi.detail(id) as Promise<ImportTaskInfo>,
+        taskApi.logs(id) as Promise<ImportTaskLog[]>,
+      ])
+      setPollRetryCount(0)
+      setTaskStatus(taskInfo.status)
+      setProgress(taskInfo.progress ?? 0)
+      setProgressMessage(taskInfo.progressMessage ?? '')
+      setStartedAt(taskInfo.startedAt ?? null)
+      setDuration(taskInfo.duration ?? null)
+      setSuccessCount(taskInfo.successCount ?? 0)
+      setFailureCount(taskInfo.failureCount ?? 0)
+      setSkippedCount(taskInfo.skippedCount ?? 0)
+      setErrorMessage(taskInfo.errorMessage ?? '')
+      // A5: 使用增量追加，后端限制了 1000 条所以直接替换也可接受
+      setLogs(taskLogs ?? [])
+
       if (logContainerRef.current) {
         logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight
       }
-    }, 50)
-  }, [])
 
-  const handleFileSelect = useCallback((file: File) => {
-    if (!file.name.endsWith('.sql')) {
-      addLog('error', `文件 ${file.name} 不是 .sql 格式`)
-      return false
+      if (taskInfo.status === 'completed' || taskInfo.status === 'failed' || taskInfo.status === 'cancelled') {
+        stopPolling()
+        setCurrentStep(2)
+        if (taskInfo.status === 'completed') {
+          setProgress(100)
+        }
+      }
+    } catch (error) {
+      setPollRetryCount((count) => {
+        // A7: 超过 20 次连续失败则停止轮询，防止僵尸请求
+        if (count + 1 >= 20) {
+          stopPolling()
+          console.error('Polling import task failed too many times, stopped.')
+        }
+        return count + 1
+      })
+      console.warn('Polling import task failed, will retry', error)
+    } finally {
+      pollingRef.current = false
     }
+  }
 
-    setFileName(file.name)
-    setFileSize(file.size)
-    setDone(false)
-    setLogs([])
-    setStats({ success: 0, errors: 0, skipped: 0 })
-
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      const content = e.target?.result as string
-      setFileContent(content)
-      const stmtCount = splitSqlStatements(content).length
-      addLog('info', `已加载文件 ${file.name}（${formatSize(file.size)}），包含 ${stmtCount} 条语句`)
+  // A7: 串行轮询 —— 上一次请求完成后再等 1.5s 发下一次，避免慢响应积压
+  const startPolling = (id: string) => {
+    stopPolling()
+    const poll = async () => {
+      await pollOnce(id)
+      // 如果任务还在跑就继续
+      timerRef.current = setTimeout(() => void poll(), 1500) as unknown as ReturnType<typeof setInterval>
     }
-    reader.onerror = () => {
-      addLog('error', `读取文件失败：${reader.error?.message ?? '未知错误'}`)
-    }
-    reader.readAsText(file, 'utf-8')
+    void poll()
+  }
 
-    return false // 阻止默认上传
-  }, [addLog])
-
-  const handleExecute = useCallback(async () => {
-    if (!fileContent || !connectionId || !selectedDb) return
-
-    const statements = splitSqlStatements(fileContent)
-    if (statements.length === 0) {
-      addLog('warn', '文件中没有可执行的 SQL 语句')
+  const handlePickFile = useCallback(async () => {
+    if (!nativePickerAvailable) {
+      toast.warning('当前环境未注入 Tauri Runtime，请直接粘贴 SQL 文件绝对路径')
       return
     }
 
-    setExecuting(true)
-    setDone(false)
-    abortRef.current = false
-    setProgress({ current: 0, total: statements.length })
-    setStats({ success: 0, errors: 0, skipped: 0 })
+    try {
+      const file = await invoke<SelectedSqlFile | null>('pick_sql_file')
+      if (!file) return
+      setSelectedFile(file)
+      setManualFilePath(file.path)
+      setLogs([])
+      setCurrentStep(0)
+      setTaskStatus('pending')
+      setProgress(0)
+      setProgressMessage('')
+      setErrorMessage('')
+    } catch (error) {
+      handleApiError(error, '选择 SQL 文件失败')
+    }
+  }, [nativePickerAvailable])
 
-    addLog('info', `开始执行，共 ${statements.length} 条语句，目标库：${selectedDb}`)
-
-    let successCount = 0
-    let errorCount = 0
-
-    for (let i = 0; i < statements.length; i++) {
-      if (abortRef.current) {
-        addLog('warn', `用户中止，已执行 ${i}/${statements.length}`)
-        break
-      }
-
-      const stmt = statements[i]
-      const preview = stmt.length > 80 ? stmt.slice(0, 80) + '...' : stmt
-
-      try {
-        const results = await sqlApi.execute(connectionId, selectedDb, stmt) as SqlResult[]
-        const hasError = results.some(r => r.type === 'error')
-        if (hasError) {
-          const errMsg = results.find(r => r.type === 'error')?.error ?? '未知错误'
-          addLog('error', `[${i + 1}/${statements.length}] 失败: ${errMsg}\n  → ${preview}`)
-          errorCount++
-        } else {
-          const affected = results.reduce((sum, r) => sum + (r.affectedRows ?? 0), 0)
-          if (affected > 0) {
-            addLog('success', `[${i + 1}/${statements.length}] 成功: 影响 ${affected} 行  → ${preview}`)
-          } else {
-            addLog('success', `[${i + 1}/${statements.length}] 成功  → ${preview}`)
-          }
-          successCount++
-        }
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : '执行异常'
-        addLog('error', `[${i + 1}/${statements.length}] 异常: ${errMsg}\n  → ${preview}`)
-        errorCount++
-      }
-
-      setProgress({ current: i + 1, total: statements.length })
-      setStats({ success: successCount, errors: errorCount, skipped: 0 })
+  const handleStart = useCallback(async () => {
+    if (!effectiveFile || !connectionId || !selectedDb) {
+      toast.warning('请选择 SQL 文件和目标数据库')
+      return
     }
 
-    const status = abortRef.current ? '已中止' : '执行完成'
-    addLog('info', `${status}：成功 ${successCount}，失败 ${errorCount}，共 ${statements.length} 条`)
+    try {
+      setLoading(true)
+      const result = await sqlApi.importFileStart({
+        connectionId,
+        database: selectedDb,
+        filePath: effectiveFile.path,
+        fileName: effectiveFile.name,
+      }) as { taskId: string }
 
-    setExecuting(false)
-    setDone(true)
-  }, [fileContent, connectionId, selectedDb, addLog])
+      setTaskId(result.taskId)
+      setCurrentStep(1)
+      setTaskStatus('running')
+      setProgress(1)
+      setProgressMessage('初始化导入环境...')
+      setStartedAt(null)
+      setDuration(null)
+      setSuccessCount(0)
+      setFailureCount(0)
+      setSkippedCount(0)
+      setErrorMessage('')
+      setPollRetryCount(0)
+      setLogs([])
+      startPolling(result.taskId)
+    } catch (error) {
+      handleApiError(error, '启动 SQL 导入失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [connectionId, effectiveFile, selectedDb, startPolling])
 
-  const handleAbort = useCallback(() => {
-    abortRef.current = true
-  }, [])
+  const handleAbort = useCallback(async () => {
+    if (!taskId) return
+    try {
+      await taskApi.cancel(taskId)
+      toast.success('已发送取消信号')
+    } catch (error) {
+      handleApiError(error, '取消导入失败')
+    }
+  }, [taskId])
 
   const handleClose = useCallback(() => {
-    if (executing) {
-      abortRef.current = true
-    }
-    setFileContent(null)
-    setFileName('')
-    setFileSize(0)
-    setLogs([])
-    setDone(false)
-    setStats({ success: 0, errors: 0, skipped: 0 })
-    setProgress({ current: 0, total: 0 })
+    if (taskStatus === 'running') return
+    resetState()
     onClose()
-  }, [executing, onClose])
+  }, [onClose, resetState, taskStatus])
 
-  const percent = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0
+  const resultStatus = taskStatus === 'completed'
+    ? 'success'
+    : taskStatus === 'cancelled'
+      ? 'warning'
+      : 'error'
+
+  const resultTitle = taskStatus === 'completed'
+    ? 'SQL 文件导入完成'
+    : taskStatus === 'cancelled'
+      ? 'SQL 文件导入已取消'
+      : 'SQL 文件导入失败'
+
+  const executionStepIcon = taskStatus === 'running'
+    ? <SyncOutlined spin />
+    : taskStatus === 'completed'
+      ? <CheckCircleOutlined />
+      : taskStatus === 'cancelled'
+        ? <ExclamationCircleOutlined />
+        : taskStatus === 'failed'
+          ? <CloseCircleOutlined />
+          : <PlayCircleOutlined />
 
   return (
     <Modal
-      title="执行 SQL 文件"
+      title="导入 SQL 文件"
       open={open}
+      width={760}
       onCancel={handleClose}
-      width={720}
+      maskClosable={false}
+      closable={taskStatus !== 'running'}
       footer={
-        <Space>
-          {executing ? (
-            <Button danger onClick={handleAbort}>中止执行</Button>
-          ) : (
-            <>
-              <Button onClick={handleClose}>{done ? '关闭' : '取消'}</Button>
-              <Button
-                type="primary"
-                icon={<PlayCircleOutlined />}
-                onClick={handleExecute}
-                disabled={!fileContent || !connectionId || !selectedDb || done}
-              >
-                开始执行
-              </Button>
-            </>
-          )}
-        </Space>
+        currentStep === 0 ? (
+          <Space>
+            <Button onClick={handleClose}>取消</Button>
+            <Button
+              type="primary"
+              icon={<PlayCircleOutlined />}
+              onClick={handleStart}
+              loading={loading}
+              disabled={!effectiveFile || !connectionId || !selectedDb}
+            >
+              开始导入
+            </Button>
+          </Space>
+        ) : currentStep === 1 ? (
+          <Space>
+            <Button danger onClick={handleAbort}>中止导入</Button>
+          </Space>
+        ) : (
+          <Button type="primary" onClick={handleClose}>关闭</Button>
+        )
       }
     >
-      {/* 文件选择 */}
-      <div style={{ marginBottom: 16 }}>
-        <Space direction="vertical" style={{ width: '100%' }} size={12}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <Text strong style={{ flexShrink: 0, width: 80 }}>SQL 文件：</Text>
-            <Upload
-              accept=".sql"
-              showUploadList={false}
-              beforeUpload={handleFileSelect}
-              disabled={executing}
-            >
-              <Button icon={<UploadOutlined />} disabled={executing}>选择文件</Button>
-            </Upload>
-            {fileName && (
-              <Text type="secondary">{fileName}（{formatSize(fileSize)}）</Text>
-            )}
-          </div>
+      <div style={{ padding: '8px 0' }}>
+        <Steps
+          size="small"
+          current={currentStep}
+          style={{ marginBottom: 24, padding: '0 40px' }}
+          items={[
+            { title: '导入选项', icon: <FileTextOutlined /> },
+            { title: '执行导入', icon: executionStepIcon },
+            { title: '导入结果', icon: <CheckCircleOutlined /> },
+          ]}
+        />
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <Text strong style={{ flexShrink: 0, width: 80 }}>目标连接：</Text>
-            <Tag icon={<CheckCircleOutlined />} color="success">{connectionName ?? connectionId}</Tag>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <Text strong style={{ flexShrink: 0, width: 80 }}>目标数据库：</Text>
-            {databases && databases.length > 0 ? (
-              <Select
-                value={selectedDb}
-                onChange={setSelectedDb}
-                style={{ width: 200 }}
-                placeholder="选择数据库"
-                disabled={executing}
-                options={databases.map(db => ({ value: db, label: db }))}
-              />
-            ) : (
-              <Tag>{selectedDb || '未选择'}</Tag>
-            )}
-          </div>
-        </Space>
-      </div>
-
-      {/* 进度条 */}
-      {progress.total > 0 && (
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              {executing ? (
-                <><LoadingOutlined spin style={{ marginRight: 4 }} />执行中...</>
-              ) : done ? (
-                <><CheckCircleOutlined style={{ color: token.colorSuccess, marginRight: 4 }} />已完成</>
-              ) : null}
-            </Text>
-            <Space size={12}>
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                {progress.current}/{progress.total} 条
-              </Text>
-              <Tag color="success">成功 {stats.success}</Tag>
-              {stats.errors > 0 && <Tag color="error">失败 {stats.errors}</Tag>}
-            </Space>
-          </div>
-          <Progress percent={percent} size="small" status={stats.errors > 0 ? 'exception' : undefined} />
-        </div>
-      )}
-
-      {/* 执行日志 */}
-      <div
-        ref={logContainerRef}
-        style={{
-          height: 280,
-          overflow: 'auto',
-          background: token.colorBgLayout,
-          borderRadius: token.borderRadius,
-          padding: '8px 12px',
-          fontFamily: 'monospace',
-          fontSize: 12,
-          lineHeight: 1.6,
-        }}
-      >
-        {logs.length === 0 ? (
-          <Text type="secondary">选择 SQL 文件后点击「开始执行」</Text>
-        ) : (
-          logs.map((log, i) => (
-            <div key={i} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-              <Text type="secondary">[{log.time}]</Text>{' '}
-              <Text style={{
-                color: log.level === 'error' ? token.colorError
-                  : log.level === 'success' ? token.colorSuccess
-                  : log.level === 'warn' ? token.colorWarning
-                  : token.colorTextSecondary,
-              }}>
-                {log.message}
-              </Text>
+        {currentStep === 0 && (
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <Text strong style={{ width: 90, flexShrink: 0 }}>SQL 文件：</Text>
+              <Button icon={<FolderOpenOutlined />} onClick={handlePickFile}>
+                选择本地文件
+              </Button>
+              {effectiveFile && (
+                <Text type="secondary">
+                  {effectiveFile.name}{effectiveFile.size > 0 ? `（${formatSize(effectiveFile.size)}）` : ''}
+                </Text>
+              )}
             </div>
-          ))
+
+            {!nativePickerAvailable && (
+              <Alert
+                type="warning"
+                showIcon
+                message="当前环境缺少 Tauri Runtime"
+                description="无法调用桌面原生文件选择器。你可以直接粘贴 SQL 文件绝对路径继续导入。"
+              />
+            )}
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <Text strong style={{ width: 90, flexShrink: 0 }}>绝对路径：</Text>
+              <Input
+                value={manualFilePath}
+                onChange={(e) => {
+                  const nextPath = e.target.value
+                  setManualFilePath(nextPath)
+                  if (selectedFile && nextPath !== selectedFile.path) {
+                    setSelectedFile(null)
+                  }
+                }}
+                placeholder="/Users/xxx/Downloads/demo.sql"
+              />
+            </div>
+
+            {effectiveFile && (
+              <Alert
+                type="info"
+                showIcon
+                message="将由后端流式导入，不再把整个 SQL 文件读入前端内存"
+                description={effectiveFile.path}
+              />
+            )}
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <Text strong style={{ width: 90, flexShrink: 0 }}>目标连接：</Text>
+              <Tag color="success">{connectionName ?? connectionId ?? '未选择'}</Tag>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <Text strong style={{ width: 90, flexShrink: 0 }}>目标数据库：</Text>
+              {databases && databases.length > 0 ? (
+                <Select
+                  value={selectedDb}
+                  onChange={setSelectedDb}
+                  style={{ width: 240 }}
+                  placeholder="选择数据库"
+                  options={databases.map((db) => ({ value: db, label: db }))}
+                />
+              ) : (
+                <Tag>{selectedDb || '未选择'}</Tag>
+              )}
+            </div>
+          </Space>
+        )}
+
+        {currentStep === 1 && (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+              <Text strong>正在执行导入...</Text>
+              <Text type="secondary">{progress}%</Text>
+            </div>
+
+            <Progress percent={progress} status={taskStatus === 'failed' ? 'exception' : 'active'} />
+
+            {durationText && (
+              <div style={{ marginTop: 8 }}>
+                <Text type="secondary">导入耗时：{durationText}</Text>
+              </div>
+            )}
+
+            {stageMessage && (
+              <div style={{ marginTop: 8 }}>
+                <Text type="secondary">当前阶段：{stageMessage}</Text>
+              </div>
+            )}
+
+            <Space size={[8, 8]} wrap style={{ marginTop: 12 }}>
+              <Tag color="success">成功 {successCount}</Tag>
+              {failureCount > 0 && <Tag color="error">失败 {failureCount}</Tag>}
+              {skippedCount > 0 && <Tag>跳过 {skippedCount}</Tag>}
+              {pollRetryCount > 0 && <Tag color="warning">状态刷新重试中 × {pollRetryCount}</Tag>}
+            </Space>
+
+            <div
+              ref={logContainerRef}
+              style={{
+                marginTop: 24,
+                height: 280,
+                overflow: 'auto',
+                background: token.colorBgLayout,
+                borderRadius: token.borderRadius,
+                padding: '8px 12px',
+                fontFamily: 'monospace',
+                fontSize: 12,
+                lineHeight: 1.6,
+                border: `1px solid ${token.colorBorderSecondary}`,
+              }}
+            >
+              {logs.length === 0 ? (
+                <Text type="secondary">等待日志输出...</Text>
+              ) : (
+                logs.map((log, index) => (
+                  <div key={`${log.timestamp}-${index}`} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                    <Text type="secondary">[{log.timestamp}]</Text>{' '}
+                    <Text style={{
+                      color: log.level === 'ERROR' ? token.colorError
+                        : log.level === 'WARN' ? token.colorWarning
+                        : token.colorTextSecondary,
+                    }}
+                    >
+                      {log.message}
+                    </Text>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {currentStep === 2 && (
+          <div>
+            <Result
+              status={resultStatus}
+              title={resultTitle}
+              subTitle={
+                <>
+                  {durationText ? `导入耗时：${durationText}` : '导入任务已结束'}
+                  {(errorMessage || failureCount > 0) && (
+                    <div style={{ marginTop: 8 }}>
+                      {errorMessage || `共有 ${failureCount} 条 SQL 语句执行失败，请查看日志`}
+                    </div>
+                  )}
+                </>
+              }
+              extra={[
+                <Tag color="success" key="success">成功 {successCount}</Tag>,
+                failureCount > 0 ? <Tag color="error" key="error">失败 {failureCount}</Tag> : null,
+                skippedCount > 0 ? <Tag key="skip">跳过 {skippedCount}</Tag> : null,
+              ].filter(Boolean)}
+            />
+
+            {taskStatus === 'failed' && (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginBottom: 12 }}
+                message="导入过程中有失败语句"
+                description="请结合下方日志定位第几条语句失败，以及对应的数据库报错。"
+              />
+            )}
+
+            <div
+              style={{
+                height: 220,
+                overflow: 'auto',
+                background: token.colorBgLayout,
+                borderRadius: token.borderRadius,
+                padding: '8px 12px',
+                fontFamily: 'monospace',
+                fontSize: 12,
+                lineHeight: 1.6,
+                border: `1px solid ${token.colorBorderSecondary}`,
+              }}
+            >
+              {logs.length === 0 ? (
+                <Text type="secondary">暂无日志</Text>
+              ) : (
+                logs.map((log, index) => (
+                  <div key={`${log.timestamp}-${index}`} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                    <Text type="secondary">[{log.timestamp}]</Text>{' '}
+                    <Text style={{
+                      color: log.level === 'ERROR' ? token.colorError
+                        : log.level === 'WARN' ? token.colorWarning
+                        : token.colorTextSecondary,
+                    }}
+                    >
+                      {log.message}
+                    </Text>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         )}
       </div>
-
-      {/* 完成后提示 */}
-      {done && stats.errors > 0 && (
-        <Alert
-          style={{ marginTop: 12 }}
-          type="warning"
-          showIcon
-          message={`执行完成，${stats.errors} 条语句失败`}
-          description="请查看上方日志了解失败原因"
-        />
-      )}
     </Modal>
   )
 }
@@ -408,5 +552,30 @@ export const ImportSqlDialog: React.FC<ImportSqlDialogProps> = ({
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
+}
+
+function hasTauriInvoke(): boolean {
+  if (typeof window === 'undefined') return false
+  const candidate = window as Window & {
+    __TAURI_INTERNALS__?: {
+      invoke?: unknown
+    }
+  }
+  return typeof candidate.__TAURI_INTERNALS__?.invoke === 'function'
+}
+
+function buildFileFromPath(filePath: string): SelectedSqlFile | null {
+  const normalized = filePath.trim()
+  if (!normalized) return null
+
+  const segments = normalized.split(/[\\/]/).filter(Boolean)
+  const name = segments[segments.length - 1] ?? normalized
+
+  return {
+    path: normalized,
+    name,
+    size: 0,
+  }
 }

@@ -16,7 +16,7 @@
  */
 import React, { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { ConfigProvider, theme, Modal } from 'antd'
+import { ConfigProvider, theme, Modal, App as AntApp } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import { MainLayout } from '@/layouts/MainLayout'
 import { ConnectionPage } from '@/pages/connection'
@@ -28,8 +28,15 @@ import { TaskCenterPage } from '@/pages/task-center'
 import { SettingsPage } from '@/pages/settings'
 import { StructureComparePage } from '@/pages/structure-compare'
 import { checkForUpdate, getAutoCheckEnabled } from '@/utils/updater'
+import { useThemeStore } from '@/stores/themeStore'
+
+const fontFamily = "'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+const fontFamilyCode = "'JetBrains Mono', 'Fira Code', 'SF Mono', monospace"
 
 const App: React.FC = () => {
+  const effectiveTheme = useThemeStore((s) => s.effectiveTheme)
+  const isDark = effectiveTheme === 'dark'
+
   // 启动时自动检查更新
   useEffect(() => {
     if (!getAutoCheckEnabled()) return
@@ -68,28 +75,37 @@ const App: React.FC = () => {
     <ConfigProvider
       locale={zhCN}
       theme={{
-        algorithm: theme.defaultAlgorithm,
+        algorithm: isDark ? theme.darkAlgorithm : theme.defaultAlgorithm,
         token: {
-          colorPrimary: '#1677ff',
+          colorPrimary: isDark ? '#22C55E' : '#22C55E',
+          colorBgBase: isDark ? '#0F172A' : '#FFFFFF',
+          colorBgContainer: isDark ? '#1E293B' : '#FFFFFF',
+          colorBgElevated: isDark ? '#334155' : '#FFFFFF',
+          colorBorder: isDark ? '#475569' : '#E2E8F0',
+          colorBorderSecondary: isDark ? '#334155' : '#F1F5F9',
           borderRadius: 6,
+          fontSize: 13,
+          fontFamily,
+          fontFamilyCode,
         },
-      }}
-    >
-      <BrowserRouter>
-        <MainLayout>
-          <Routes>
-            <Route path="/" element={<Navigate to="/connection" replace />} />
-            <Route path="/connection" element={<ConnectionPage />} />
-            <Route path="/workbench" element={<WorkbenchPage />} />
-            <Route path="/sql-editor" element={<SqlEditorPage />} />
-            <Route path="/migration" element={<MigrationPage />} />
-            <Route path="/sync" element={<SyncPage />} />
-            <Route path="/task-center" element={<TaskCenterPage />} />
-            <Route path="/structure-compare" element={<StructureComparePage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-          </Routes>
-        </MainLayout>
-      </BrowserRouter>
+      }}>
+      <AntApp>
+        <BrowserRouter>
+          <MainLayout>
+            <Routes>
+              <Route path="/" element={<Navigate to="/connection" replace />} />
+              <Route path="/connection" element={<ConnectionPage />} />
+              <Route path="/workbench" element={<WorkbenchPage />} />
+              <Route path="/sql-editor" element={<SqlEditorPage />} />
+              <Route path="/migration" element={<MigrationPage />} />
+              <Route path="/sync" element={<SyncPage />} />
+              <Route path="/task-center" element={<TaskCenterPage />} />
+              <Route path="/structure-compare" element={<StructureComparePage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+            </Routes>
+          </MainLayout>
+        </BrowserRouter>
+      </AntApp>
     </ConfigProvider>
   )
 }

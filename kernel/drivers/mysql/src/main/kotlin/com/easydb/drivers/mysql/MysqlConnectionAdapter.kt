@@ -68,10 +68,13 @@ class MysqlConnectionAdapter : ConnectionAdapter {
                 setProperty("user", config.username)
                 setProperty("password", config.password)
                 setProperty("connectTimeout", "5000")
-                setProperty("socketTimeout", "0") // 大数据量同步时不超时
+                setProperty("socketTimeout", "300000") // 设置为5分钟，绝对不能设置为 0 (无限等待)，否则在防火墙丢包或连接数被打满时会导致后端线程永久挂起
                 setProperty("useSSL", "false")
                 setProperty("allowPublicKeyRetrieval", "true")
                 setProperty("allowMultiQueries", "true") // 支持多语句执行
+                // 开启服务器端游标读取！配合 fetchSize 可以在不锁死连接的情况下流式读取千万级大表
+                setProperty("useCursorFetch", "true")
+                setProperty("defaultFetchSize", "1000")
                 setProperty("serverTimezone", "UTC")
                 setProperty("characterEncoding", "UTF-8")
                 setProperty("rewriteBatchedStatements", "true") // 批量写入优化：合并为多值 INSERT

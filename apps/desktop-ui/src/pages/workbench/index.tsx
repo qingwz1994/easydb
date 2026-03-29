@@ -14,23 +14,27 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-import React, { useEffect, useState, useCallback, useRef, useDeferredValue, useMemo, type MouseEvent as ReactMouseEvent } from 'react'
+import React, { useEffect, useState, useCallback, useRef, useDeferredValue, useMemo, useLayoutEffect, type MouseEvent as ReactMouseEvent } from 'react'
 import {
-  Layout, Tree, Tabs, Table, Typography, Input, Space, Button, Tag, Tooltip, Select, Modal, Dropdown,
-  theme, Card, Statistic, Row, Col, Breadcrumb,
+  Layout, Tree, Tabs, Table, Typography, Input, Space, Button, Tag, Tooltip, Modal, Dropdown,
+  theme, Breadcrumb,
 } from 'antd'
 import {
-  DatabaseOutlined, TableOutlined, EyeOutlined, DownloadOutlined, UploadOutlined,
-  SearchOutlined, CodeOutlined, ThunderboltOutlined, ReloadOutlined,
-  ApiOutlined, CloseOutlined, PlusOutlined,
+  DatabaseOutlined, ReloadOutlined, 
+  CodeOutlined, StarOutlined,
   DeleteOutlined, EditOutlined,
+  CloseOutlined, PlusOutlined, UploadOutlined, DownloadOutlined, ExportOutlined
 } from '@ant-design/icons'
 import type { DataNode } from 'antd/es/tree'
-import type { DatabaseInfo, TableInfo, ColumnInfo, IndexInfo, ConnectionConfig } from '@/types'
+import {
+  FileText, Table2, Activity, Zap, Eye, KeyRound, Search, Plus, Database,
+} from 'lucide-react'
+import type { TableInfo, ColumnInfo, ConnectionConfig, SavedScript, DatabaseInfo } from '@/types'
 import { useWorkbenchStore, type TableTabState, type WorkbenchTab } from '@/stores/workbenchStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useSqlEditorStore } from '@/stores/sqlEditorStore'
-import { metadataApi, connectionApi } from '@/services/api'
+import { useCommandStore } from '@/stores/commandStore'
+import { metadataApi, connectionApi, scriptApi } from '@/services/api'
 import { handleApiError, toast } from '@/utils/notification'
 import { exportTableData } from '@/utils/exportUtils'
 import { EmptyState } from '@/components/EmptyState'
@@ -38,14 +42,18 @@ import { EditableDataTable } from '@/components/EditableDataTable'
 import { CreateDatabaseModal } from '@/components/CreateDatabaseModal'
 import { EditDatabaseModal } from '@/components/EditDatabaseModal'
 import { ImportSqlDialog } from '@/components/ImportSqlDialog'
+import ExportDatabaseModal from '@/components/ExportDatabaseModal'
 import { TableDesigner } from '@/components/TableDesigner'
-import { useNavigate } from 'react-router-dom'
-import type { MenuProps } from 'antd'
+import { QueryEditorPane } from '@/components/QueryEditorPane'
+import { ShortcutsModal } from '@/components/ShortcutsModal'
+import { formatHotkey } from '@/utils/osUtils'
 
 const { Sider, Content } = Layout
 const { Text } = Typography
 
 /** 分类列表视图 — 独立组件，搜索状态通过 props 持久化 */
+import type { MenuProps } from 'antd'
+
 const CategoryListView: React.FC<{
   connectionId: string
   database: string
@@ -56,6 +64,7 @@ const CategoryListView: React.FC<{
   search: string
   onSearchChange: (value: string) => void
 }> = ({ database, category, objects, objectCategories, onSelectObject, search, onSearchChange }) => {
+  const { token } = theme.useToken()
   const deferredSearch = useDeferredValue(search)
 
   const catDef = objectCategories.find((c) => c.key === category)
@@ -68,20 +77,49 @@ const CategoryListView: React.FC<{
       )
     : categoryObjects
 
+  // 极速计算硬核 DBA 指标
+  const isTables = category === 'tables'
+
+  const formatBytes = (bytes: number) => {
+    if (!bytes || bytes === 0) return '0 B'
+    const k = 1024
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+  }
+
+  const maxDisk = isTables ? Math.max(...categoryObjects.map(t => (t.dataLength || 0) + (t.indexLength || 0)), 1) : 1
+  const totalDisk = isTables ? categoryObjects.reduce((acc, t) => acc + (t.dataLength || 0) + (t.indexLength || 0), 0) : 0
+  const topTable = isTables ? [...categoryObjects].sort((a, b) => ((b.dataLength || 0) + (b.indexLength || 0)) - ((a.dataLength || 0) + (a.indexLength || 0)))[0] : null
+  const nonInnodbCount = isTables ? categoryObjects.filter(t => t.engine && t.engine.toUpperCase() !== 'INNODB').length : 0
+
   const catColumns =
     category === 'tables'
       ? [
           { title: '表名', dataIndex: 'name', key: 'name', ellipsis: true,
-            render: (name: string) => <Text copyable={{ text: name }} style={{ fontSize: 13 }}>{name}</Text>,
+            render: (name: string) => <Text copyable={{ text: name }} strong style={{ fontSize: 13, color: token.colorPrimary }}>{name}</Text>,
           },
           { title: '注释', dataIndex: 'comment', key: 'comment', ellipsis: true,
-            render: (v: string) => v || <Text type="secondary">—</Text>,
+            render: (v: string) => v ? <Text style={{ fontSize: 13 }}>{v}</Text> : <Text type="secondary" style={{ fontStyle: 'italic', fontSize: 12 }}>—</Text>,
           },
-          { title: '行数(约)', dataIndex: 'rowCount', key: 'rowCount', width: 100,
-            render: (v: number) => (v != null ? v.toLocaleString() : '—'),
+          { title: '物理空间占有 (Data+Index)', key: 'diskUsage', width: 220,
+            render: (_: unknown, t: TableInfo) => {
+              const totalBytes = (t.dataLength || 0) + (t.indexLength || 0)
+              if (totalBytes === 0) return <Text type="secondary">—</Text>
+              const pct = Math.min(100, Math.max(0.5, (totalBytes / maxDisk) * 100))
+              return (
+                <div style={{ position: 'relative', width: '100%', height: 22, display: 'flex', alignItems: 'center' }}>
+                  <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${pct}%`, background: token.colorPrimaryBg, borderRadius: 4, zIndex: 0 }} />
+                  <span style={{ position: 'relative', zIndex: 1, paddingLeft: 6, fontSize: 12, fontFamily: 'monospace' }}>{formatBytes(totalBytes)}</span>
+                </div>
+              )
+            },
           },
-          { title: '类型', dataIndex: 'type', key: 'type', width: 80,
-            render: (v: string) => <Tag>{v.toUpperCase()}</Tag>,
+          { title: '引擎', dataIndex: 'engine', key: 'engine', width: 100,
+            render: (v: string) => v ? <Tag color={v.toUpperCase() === 'INNODB' ? 'blue' : 'warning'}>{v.toUpperCase()}</Tag> : <Text type="secondary">—</Text>,
+          },
+          { title: '最后写入时间', dataIndex: 'updateTime', key: 'updateTime', width: 180,
+            render: (v: string) => v ? <Text style={{ fontSize: 12 }}>{v}</Text> : <Text type="secondary" style={{ fontStyle: 'italic', fontSize: 12 }}>空/未记录</Text>,
           },
         ]
       : category === 'views'
@@ -103,32 +141,55 @@ const CategoryListView: React.FC<{
           ]
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', padding: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', padding: '24px 32px', background: token.colorBgLayout }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
         <Space>
-          <Text strong style={{ fontSize: 15 }}>
+          <Text strong style={{ fontSize: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
             {catDef?.icon}
-            <span style={{ marginLeft: 6 }}>{database} / {catDef?.label} ({categoryObjects.length})</span>
+            <span>{catDef?.label} ({categoryObjects.length})</span>
           </Text>
+          <Text type="secondary" style={{ fontSize: 13 }}>/ {database}</Text>
         </Space>
         <Input
-          placeholder="搜索名称或注释..."
-          prefix={<SearchOutlined />}
-          size="small"
-          style={{ width: 240 }}
+          placeholder="在此过滤表名称或注释..."
+          prefix={<Search size={14} color={token.colorTextQuaternary} style={{ marginRight: 4 }}/>}
+          size="middle"
+          variant="filled"
+          style={{ width: 300, borderRadius: 6 }}
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
           allowClear
         />
       </div>
-      <div style={{ flex: 1, overflow: 'auto' }}>
+
+      {isTables && categoryObjects.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 20, flexShrink: 0 }}>
+          <div style={{ background: token.colorBgContainer, padding: '16px 20px', borderRadius: 12, border: `1px solid ${token.colorBorderSecondary}`, display: 'flex', flexDirection: 'column' }}>
+            <Text type="secondary" style={{ fontSize: 12, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}><Zap size={14} color={token.colorPrimary}/> 磁盘存储霸主 (Top 1 物理体积)</Text>
+            <Text strong style={{ fontSize: 16 }}>{topTable?.name}</Text>
+            <Text type="secondary" style={{ fontSize: 12, marginTop: 4 }}>占据 {formatBytes((topTable?.dataLength || 0) + (topTable?.indexLength || 0))} 容量</Text>
+          </div>
+          <div style={{ background: token.colorBgContainer, padding: '16px 20px', borderRadius: 12, border: `1px solid ${token.colorBorderSecondary}`, display: 'flex', flexDirection: 'column' }}>
+            <Text type="secondary" style={{ fontSize: 12, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}><Database size={14} /> 全库表体积总计</Text>
+            <Text strong style={{ fontSize: 24, fontFamily: 'monospace', lineHeight: 1 }}>{formatBytes(totalDisk)}</Text>
+            <Text type="secondary" style={{ fontSize: 12, marginTop: 6 }}>纯数据与索引体积</Text>
+          </div>
+          <div style={{ background: token.colorBgContainer, padding: '16px 20px', borderRadius: 12, border: `1px solid ${token.colorBorderSecondary}`, display: 'flex', flexDirection: 'column' }}>
+            <Text type="secondary" style={{ fontSize: 12, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}><Eye size={14} color={nonInnodbCount > 0 ? token.colorWarning : token.colorSuccess} /> 架构健康度预警</Text>
+            <Text strong style={{ fontSize: 24, lineHeight: 1, color: nonInnodbCount > 0 ? token.colorWarning : token.colorSuccess }}>{nonInnodbCount}</Text>
+            <Text type="secondary" style={{ fontSize: 12, marginTop: 6 }}>非 InnoDB 引擎的表数量</Text>
+          </div>
+        </div>
+      )}
+
+      <div style={{ flex: 1, overflow: 'hidden', background: token.colorBgContainer, borderRadius: 12, border: `1px solid ${token.colorBorderSecondary}` }}>
         <Table
           dataSource={filtered}
           columns={catColumns}
           rowKey="name"
           size="small"
-          pagination={filtered.length > 100 ? { pageSize: 100, showSizeChanger: true, showTotal: (t) => `共 ${t} 项` } : false}
-          scroll={{ y: 'calc(100vh - 200px)' }}
+          pagination={{ defaultPageSize: 1000, hideOnSinglePage: true, showSizeChanger: true, pageSizeOptions: ['100', '500', '1000', '2000'], showTotal: (t) => `共 ${t} 项` }}
+          scroll={{ y: 'calc(100vh - 300px)' }}
           onRow={(record) => ({
             onClick: () => onSelectObject(record.name),
             style: { cursor: 'pointer' },
@@ -141,9 +202,8 @@ const CategoryListView: React.FC<{
 
 export const WorkbenchPage: React.FC = () => {
   const { token } = theme.useToken()
-  const navigate = useNavigate()
 
-  // --- Store（持久化状态，路由切换不丢失） ---
+  // --- Store（持久化状态，路由切换不丢失）---
   const openConnections = useWorkbenchStore((s) => s.openConnections)
   const addOpenConnection = useWorkbenchStore((s) => s.addOpenConnection)
   const removeOpenConnection = useWorkbenchStore((s) => s.removeOpenConnection)
@@ -156,6 +216,9 @@ export const WorkbenchPage: React.FC = () => {
   const setExpandedKeys = useWorkbenchStore((s) => s.setTreeExpandedKeys)
   const selectedCtx = useWorkbenchStore((s) => s.selectedCtx)
   const setSelectedCtx = useWorkbenchStore((s) => s.setSelectedCtx)
+  const activeConnectionId = useWorkbenchStore((s) => s.activeConnectionId)
+  const activeConnectionName = useWorkbenchStore((s) => s.activeConnectionName)
+  const activeDatabase = useWorkbenchStore((s) => s.activeDatabase)
 
   const connections = useConnectionStore((s) => s.connections)
   const setConnections = useConnectionStore((s) => s.setConnections)
@@ -166,6 +229,21 @@ export const WorkbenchPage: React.FC = () => {
   const [searchText, setSearchText] = useState('')
   const deferredSearch = useDeferredValue(searchText)
 
+  // --- 树组件虚拟列表高度 ---
+  const [treeHeight, setTreeHeight] = useState(600)
+  const treeContainerRef = useRef<HTMLDivElement>(null)
+
+  useLayoutEffect(() => {
+    if (!treeContainerRef.current) return
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setTreeHeight(entry.contentRect.height)
+      }
+    })
+    ro.observe(treeContainerRef.current)
+    return () => ro.disconnect()
+  }, [])
+
   // --- 多 Tab 状态（持久化到 Store，路由切换不丢失）---
   const openTableTabs = useWorkbenchStore((s) => s.openTableTabs)
   const setOpenTableTabs = useWorkbenchStore((s) => s.setOpenTableTabs)
@@ -174,15 +252,18 @@ export const WorkbenchPage: React.FC = () => {
   const batchUpdate = useWorkbenchStore((s) => s.batchUpdate)
   const activeTab = activeTableTabKey ? openTableTabs[activeTableTabKey] ?? null : null
 
-  const setPendingSql = useSqlEditorStore((s) => s.setPendingSql)
+  // --- 请求竞态控制 ---
+  const loadSeqRef = useRef(0)
+  useEffect(() => {
+    return () => { loadSeqRef.current++ }
+  }, [])
 
   // --- 右键菜单状态（单个 Dropdown 代替 N 个）---
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; nodeKey: string } | null>(null)
   // --- Tab 右键菜单 ---
   const [tabCtxMenu, setTabCtxMenu] = useState<{ x: number; y: number; tabKey: string } | null>(null)
 
-  // --- 请求竞态控制 ---
-  const loadSeqRef = useRef(0)
+
 
   // --- 新建数据库弹窗状态 ---
   const [createDbModal, setCreateDbModal] = useState<{ connectionId: string; connectionName: string } | null>(null)
@@ -190,11 +271,14 @@ export const WorkbenchPage: React.FC = () => {
   // --- 编辑数据库弹窗状态 ---
   const [editDbModal, setEditDbModal] = useState<{ connectionId: string; databaseName: string } | null>(null)
 
-  // --- 新建/编辑表状态 ---
-  const [createTableCtx, setCreateTableCtx] = useState<{ connectionId: string; connectionName: string; database: string; editTableName?: string } | null>(null)
 
   // --- SQL 文件导入弹窗状态 ---
-  const [importSqlModal, setImportSqlModal] = useState<{ connectionId: string; connectionName: string; database: string } | null>(null)
+  const [importSqlModal, setImportSqlModal] = useState<{ connectionId: string; connectionName: string; database?: string } | null>(null)
+  const [exportModal, setExportModal] = useState<{ connectionId: string; connectionName: string, database: string } | null>(null)
+
+  const [showShortcuts, setShowShortcuts] = useState(false)
+
+  const storeAddTab = useSqlEditorStore((s) => s.addTab)
 
   // --- 自动加载连接列表 ---
   useEffect(() => {
@@ -295,26 +379,24 @@ export const WorkbenchPage: React.FC = () => {
         )
       }
       if (needTab) {
-        if (tab === 'preview') {
+        if (tab === 'data') {
           promises.push(
             metadataApi.previewRows(connId, dbName, tableName).then((rows: unknown) => {
               if (seq !== loadSeqRef.current) return
               updateTabState(tabKey, (prev) => ({
                 previewRows: rows as Record<string, unknown>[],
-                loadedTabs: [...prev.loadedTabs, 'preview'],
+                loadedTabs: [...prev.loadedTabs, 'data'],
               }))
             })
           )
-        } else if (tab === 'indexes') {
-          promises.push(
-            metadataApi.indexes(connId, dbName, tableName).then((idxs: unknown) => {
+        } else if (tab === 'design') {
+          // TableDesigner handles its own data loading internally, so nothing is strictly required here except marking it loaded.
+          promises.push(Promise.resolve().then(() => {
               if (seq !== loadSeqRef.current) return
               updateTabState(tabKey, (prev) => ({
-                indexes: idxs as IndexInfo[],
-                loadedTabs: [...prev.loadedTabs, 'indexes'],
+                loadedTabs: [...prev.loadedTabs, 'design'],
               }))
-            })
-          )
+          }))
         } else if (tab === 'ddl') {
           promises.push(
             metadataApi.ddl(connId, dbName, tableName).then((ddlStr: unknown) => {
@@ -349,7 +431,7 @@ export const WorkbenchPage: React.FC = () => {
         indexes: [],
         ddl: '',
         previewRows: [],
-        detailTab: 'preview',
+        detailTab: 'data',
         loadedTabs: [],
       }
       batchUpdate({
@@ -361,7 +443,7 @@ export const WorkbenchPage: React.FC = () => {
         activeDatabase: dbName,
         activeTable: tableName,
       })
-      loadTabDataForTab(tabKey, connId, dbName, tableName, 'preview')
+      loadTabDataForTab(tabKey, connId, dbName, tableName, 'data')
     } else {
       batchUpdate({
         activeTableTabKey: tabKey,
@@ -485,22 +567,148 @@ export const WorkbenchPage: React.FC = () => {
     if (wasCurrent) {
       setActiveTableTabKey(null)
     }
-  }, [removeOpenConnection, selectedCtx])
+  }, [removeOpenConnection, selectedCtx, setActiveTableTabKey, setOpenTableTabs])
 
   // --- 打开 SQL 编辑器 ---
   const openSqlEditor = useCallback(() => {
-    const connId = selectedCtx?.connectionId ?? undefined
-    const db = selectedCtx?.database ?? undefined
-    setPendingSql('', connId, db)
-    navigate('/sql-editor')
-  }, [selectedCtx, navigate, setPendingSql])
+    const connId = selectedCtx?.connectionId ?? activeConnectionId ?? openConnections[0]?.id
+    const db = selectedCtx?.database ?? activeDatabase ?? undefined
+
+    // 创建 SQL Editor Store 级别的 Tab
+    const queryId = storeAddTab(connId, db)
+
+    // 映射到 Workbench 级别的 Tab
+    const tabKey = `sql:${queryId}`
+    batchUpdate({
+      openTableTabs: {
+        ...openTableTabs,
+        [tabKey]: {
+          type: 'sql-query',
+          connectionId: connId,
+          connectionName: openConnections.find(c => c.id === connId)?.name || 'Unknown',
+          database: db,
+          queryId,
+          label: `查询 ${queryId.replace('tab-', '')}`
+        }
+      },
+      activeTableTabKey: tabKey
+    })
+  }, [selectedCtx, activeConnectionId, activeDatabase, openConnections, storeAddTab, openTableTabs, batchUpdate])
+
+  // --- 打开表设计器 ---
+  const openTableDesignerTab = useCallback((connId: string, connName: string, db: string, tableName?: string) => {
+    if (tableName) {
+      // Edit mode: open the unified table tab and focus directly on 'design'
+      const key = `table:${connId}::${db}::${tableName}`
+      const existing = openTableTabs[key]
+      if (!existing) {
+        openOrActivateTab(connId, connName, db, tableName)
+        // Set the active tab to design right after initialization
+        setTimeout(() => {
+          updateTabState(key, () => ({ detailTab: 'design' }))
+          loadTabDataForTab(key, connId, db, tableName, 'design')
+        }, 50)
+      } else {
+        batchUpdate({ activeTableTabKey: key, selectedCtx: { connectionId: connId, database: db, table: tableName } })
+        updateTabState(key, () => ({ detailTab: 'design' }))
+        loadTabDataForTab(key, connId, db, tableName, 'design')
+      }
+      return
+    }
+
+    // Create mode: Open standalone TableDesigner tab
+    const uniqueId = `design:${connId}:${db}:new_${Date.now()}`
+
+    batchUpdate({
+      openTableTabs: {
+        ...openTableTabs,
+        [uniqueId]: {
+          type: 'table-designer',
+          connectionId: connId,
+          connectionName: connName,
+          database: db,
+          mode: 'create',
+        }
+      },
+      activeTableTabKey: uniqueId
+    })
+  }, [openTableTabs, batchUpdate, openOrActivateTab, updateTabState, loadTabDataForTab])
 
   // --- 对象分类 ---
   const objectCategories = useMemo(() => [
-    { key: 'tables', label: '表', types: ['table'], icon: <TableOutlined /> },
-    { key: 'views', label: '视图', types: ['view'], icon: <EyeOutlined /> },
-    { key: 'triggers', label: '触发器', types: ['trigger'], icon: <ThunderboltOutlined /> },
+    { key: 'tables', label: '表', types: ['table'], icon: <Table2 size={16} /> },
+    { key: 'views', label: '视图', types: ['view'], icon: <Eye size={16} /> },
+    { key: 'triggers', label: '触发器', types: ['trigger'], icon: <Zap size={16} /> },
   ], [])
+  // --- 高性能图标缓存 ---
+  const iconTable = useMemo(() => <Table2 size={14} color={token.colorPrimary} />, [token.colorPrimary])
+  const iconView = useMemo(() => <Eye size={14} color="#3B82F6" />, [])
+  const iconTrigger = useMemo(() => <Zap size={14} color="#F59E0B" />, [])
+  const iconDb = useMemo(() => <Database size={16} color={token.colorTextSecondary} />, [token.colorTextSecondary])
+  const iconConn = useMemo(() => <Activity size={16} color={token.colorPrimary} />, [token.colorPrimary])
+
+  // --- 收藏脚本 --------------------------------------------
+  const [savedScripts, setSavedScripts] = useState<SavedScript[]>([])
+  const loadSavedScripts = useCallback(async () => {
+    try {
+      const res = await scriptApi.list()
+      setSavedScripts(res as SavedScript[])
+    } catch(e) { /* ignore */ }
+  }, [])
+  useEffect(() => { loadSavedScripts() }, [loadSavedScripts])
+  // 暴露给外部调用（如保存弹窗结束后想刷新）可以利用发布订阅，或简单定时、或重新挂载
+  useEffect(() => {
+    const handleFocus = () => loadSavedScripts()
+    window.addEventListener('focus', handleFocus)
+    return () => window.removeEventListener('focus', handleFocus)
+  }, [loadSavedScripts])
+
+  // --- 注册收藏脚本及帮助中心到 Command Palette ----------------------
+  const registerCommand = useCommandStore(s => s.registerCommand)
+  const unregisterCommand = useCommandStore(s => s.unregisterCommand)
+
+  useEffect(() => {
+    // 快捷键聚合帮助
+    registerCommand({
+      id: 'show-shortcuts',
+      title: '键盘快捷键大全',
+      category: '帮助',
+      icon: <FileText size={16} />,
+      action: () => setShowShortcuts(true)
+    })
+
+    savedScripts.forEach(script => {
+      registerCommand({
+        id: `script-${script.id}`,
+        title: `脚本: ${script.name}`,
+        category: '收藏的脚本',
+        icon: <StarOutlined style={{ color: token.colorWarning }} />,
+        action: () => {
+          const queryId = storeAddTab(script.database ? undefined : undefined)
+          const tabKey = `sql:${queryId}`
+          batchUpdate({
+            openTableTabs: {
+              ...useWorkbenchStore.getState().openTableTabs,
+              [tabKey]: {
+                type: 'sql-query',
+                queryId,
+                label: script.name,
+                connectionId: script.database ? 'saved' : '',
+                connectionName: 'Saved Script'
+              }
+            },
+            activeTableTabKey: tabKey,
+          })
+          useSqlEditorStore.getState().updateTab(queryId, { sql: script.content, database: script.database })
+        }
+      })
+    })
+    return () => {
+      savedScripts.forEach(script => {
+        unregisterCommand(`script-${script.id}`)
+      })
+    }
+  }, [savedScripts, registerCommand, unregisterCommand, storeAddTab, batchUpdate, token.colorWarning])
 
   // --- 构建多连接对象树 ---
   // key 编码规则：
@@ -509,7 +717,29 @@ export const WorkbenchPage: React.FC = () => {
   //   分类节点: "cat:{connId}:{dbName}:{catKey}"
   //   对象节点: "obj:{connId}:{dbName}:{objName}"
 
-  const treeData: DataNode[] = useMemo(() => openConnections.map((conn) => {
+  // --- 解决切换工作台路由时的海量节点遍历卡顿 ---
+  const [deferTree, setDeferTree] = useState(true)
+  useEffect(() => {
+    // 延迟 50ms 计算树，让页面骨架先秒切渲染，解决点击“工作台”即卡死的性能瓶颈
+    const timer = setTimeout(() => setDeferTree(false), 50)
+    return () => clearTimeout(timer)
+  }, [])
+
+  const treeData: DataNode[] = useMemo(() => {
+    if (deferTree) return [] // 初次渲染不计算
+
+    const scriptsNode: DataNode = {
+      key: 'saved-scripts',
+      title: <span style={{ fontWeight: 600 }}>📚 收藏脚本</span>,
+      children: savedScripts.map(s => ({
+        key: `script:${s.id}`,
+        title: s.name,
+        icon: <StarOutlined style={{ color: token.colorWarning }} />,
+        isLeaf: true,
+      }))
+    }
+
+    const connNodes = openConnections.map((conn) => {
     const connDbs = databasesMap[conn.id] || []
     const isLoading = loadingConns.has(conn.id)
 
@@ -539,12 +769,8 @@ export const WorkbenchPage: React.FC = () => {
               icon: cat.icon,
               children: items.map((t) => ({
                 key: `obj:${conn.id}:${db.name}:${t.name}`,
-                title: (
-                  <Tooltip title={t.name} mouseEnterDelay={0.5}>
-                    <span>{t.name}</span>
-                  </Tooltip>
-                ),
-                icon: t.type === 'view' ? <EyeOutlined /> : t.type === 'trigger' ? <ThunderboltOutlined /> : <TableOutlined />,
+                title: t.name,
+                icon: t.type === 'view' ? iconView : t.type === 'trigger' ? iconTrigger : iconTable,
                 isLeaf: true,
               })),
             } as DataNode
@@ -554,7 +780,7 @@ export const WorkbenchPage: React.FC = () => {
         return {
           key: `db:${conn.id}:${db.name}`,
           title: db.name,
-          icon: <DatabaseOutlined />,
+          icon: iconDb,
           children: categoryChildren,
         } as DataNode
       })
@@ -578,10 +804,13 @@ export const WorkbenchPage: React.FC = () => {
           </Tooltip>
         </div>
       ),
-      icon: <ApiOutlined style={{ color: token.colorPrimary }} />,
+      icon: iconConn,
       children: isLoading ? [{ key: `loading:${conn.id}`, title: '加载中...', isLeaf: true, selectable: false }] : dbChildren,
     } as DataNode
-  }), [openConnections, databasesMap, objectsMap, loadingConns, deferredSearch, objectCategories, token, handleRemoveConnection])
+  })
+
+  return [scriptsNode, ...connNodes]
+  }, [deferTree, openConnections, databasesMap, objectsMap, loadingConns, deferredSearch, objectCategories, token, handleRemoveConnection, iconConn, iconDb, iconTable, iconTrigger, iconView, savedScripts])
 
   // --- 搜索时自动展开所有匹配的节点 ---
   const prevExpandedRef = useRef<React.Key[]>([])
@@ -738,6 +967,15 @@ export const WorkbenchPage: React.FC = () => {
         },
         { type: 'divider' },
         {
+          key: 'export-db',
+          icon: <ExportOutlined />,
+          label: '导出数据库...',
+          onClick: () => {
+             const conn = openConnections.find((c) => c.id === connId)
+             setExportModal({ connectionId: connId, connectionName: conn?.name ?? '', database: dbName })
+          }
+        },
+        {
           key: 'import-sql',
           icon: <UploadOutlined />,
           label: '执行 SQL 文件',
@@ -790,7 +1028,7 @@ export const WorkbenchPage: React.FC = () => {
           label: '新建表',
           onClick: () => {
             const conn = openConnections.find((c) => c.id === connId)
-            setCreateTableCtx({ connectionId: connId, connectionName: conn?.name ?? '', database: dbName })
+            openTableDesignerTab(connId, conn?.name ?? '', dbName)
           },
         })
       }
@@ -815,7 +1053,7 @@ export const WorkbenchPage: React.FC = () => {
           label: '设计表',
           onClick: () => {
             const conn = openConnections.find((c) => c.id === connId)
-            setCreateTableCtx({ connectionId: connId, connectionName: conn?.name ?? '', database: dbName, editTableName: objName })
+            openTableDesignerTab(connId, conn?.name ?? '', dbName, objName)
           },
         },
         {
@@ -924,63 +1162,15 @@ export const WorkbenchPage: React.FC = () => {
       ]
     }
     return []
-  }, [openConnections, loadDatabases, loadTables, selectedCtx, setSelectedCtx])
+  }, [openConnections, loadDatabases, loadTables, selectedCtx, setSelectedCtx, handleTableExport, setCreateDbModal, setEditDbModal, setImportSqlModal, setExportModal, openTableDesignerTab])
 
   // ctxMenuItems 缓存（必须在 getContextMenuItems 之后）
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const ctxMenuItems = useMemo(() => ctxMenu ? getContextMenuItems(ctxMenu.nodeKey) : [], [ctxMenu, getContextMenuItems])
 
   // 可添加的连接列表（排除已在工作台中的）
   const availableConnections = connections.filter(
     (c) => !openConnections.some((o) => o.id === c.id)
   )
-
-  // --- 表结构列定义 ---
-  const columnTableColumns = [
-    { title: '字段名', dataIndex: 'name', key: 'name', width: 160 },
-    { title: '类型', dataIndex: 'type', key: 'type', width: 140 },
-    {
-      title: '可空',
-      dataIndex: 'nullable',
-      key: 'nullable',
-      width: 60,
-      render: (v: boolean) => v ? '是' : '否',
-    },
-    { title: '默认值', dataIndex: 'defaultValue', key: 'defaultValue', width: 120 },
-    {
-      title: '主键',
-      dataIndex: 'isPrimaryKey',
-      key: 'isPrimaryKey',
-      width: 60,
-      render: (v: boolean) => v ? <Tag color="gold">PK</Tag> : null,
-    },
-    { title: '备注', dataIndex: 'comment', key: 'comment' },
-  ]
-
-  // 索引列定义
-  const indexTableColumns = [
-    { title: '索引名', dataIndex: 'name', key: 'name', width: 200 },
-    {
-      title: '字段',
-      dataIndex: 'columns',
-      key: 'columns',
-      render: (cols: string[]) => cols.join(', '),
-    },
-    {
-      title: '唯一',
-      dataIndex: 'isUnique',
-      key: 'isUnique',
-      width: 60,
-      render: (v: boolean) => v ? '是' : '否',
-    },
-    {
-      title: '主键',
-      dataIndex: 'isPrimary',
-      key: 'isPrimary',
-      width: 60,
-      render: (v: boolean) => v ? <Tag color="gold">PK</Tag> : null,
-    },
-  ]
 
   // 当前选中节点的 tree key
   const selectedTreeKeys: React.Key[] = selectedCtx
@@ -1002,11 +1192,12 @@ export const WorkbenchPage: React.FC = () => {
         style={{
           background: token.colorBgContainer,
           borderRight: `1px solid ${token.colorBorderSecondary}`,
-          overflow: 'auto',
+          overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
         }}
       >
+        <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
         <style>{`
           .workbench-object-tree .ant-tree-node-content-wrapper.ant-tree-node-selected {
             background: ${token.colorPrimaryBg};
@@ -1027,46 +1218,53 @@ export const WorkbenchPage: React.FC = () => {
             overflow: hidden;
           }
         `}</style>
-        <div style={{ padding: '12px 12px 8px' }}>
-          <Space style={{ marginBottom: 8, width: '100%' }} direction="vertical" size={8}>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <Select
-                key={`conn-select-${availableConnections.length}`}
-                size="small"
-                style={{ flex: 1 }}
-                placeholder="添加连接..."
-                value={null}
-                onChange={handleAddConnection}
-                disabled={!!connectingId}
-                loading={!!connectingId}
-                options={availableConnections.map((c) => ({
-                  label: (
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
-                      {c.status !== 'connected' && (
-                        <span style={{ fontSize: 11, color: token.colorTextQuaternary, marginLeft: 4, flexShrink: 0 }}>未连接</span>
-                      )}
-                    </div>
-                  ),
-                  value: c.id,
-                }))}
-                listHeight={320}
-                suffixIcon={connectingId ? undefined : <PlusOutlined />}
-                notFoundContent={<Text type="secondary" style={{ fontSize: 12 }}>所有连接已添加</Text>}
-              />
-            </div>
-            <Input
-              placeholder="搜索数据库或对象..."
-              prefix={<SearchOutlined />}
-              size="small"
-              value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
-              allowClear
-            />
+        {/* --- 极致优化的侧边栏微型头部 --- */}
+        <div style={{ padding: '12px 14px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: token.colorTextQuaternary, letterSpacing: 0.5 }}>
+            DATABASES
+          </span>
+          <Space size={2}>
+            <Dropdown
+              trigger={['click']}
+              placement="bottomRight"
+              menu={{
+                items: availableConnections.length > 0
+                  ? availableConnections.map((c) => ({
+                      key: c.id,
+                      label: (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minWidth: 160 }}>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+                          {c.status !== 'connected' && (
+                            <span style={{ fontSize: 11, color: token.colorTextQuaternary, marginLeft: 8, flexShrink: 0 }}>未连接</span>
+                          )}
+                        </div>
+                      ),
+                      onClick: () => handleAddConnection(c.id),
+                    }))
+                  : [{ key: 'empty', label: <span style={{ color: token.colorTextQuaternary }}>全体连接已载入</span>, disabled: true }],
+              }}
+            >
+              <Tooltip title="接入数据库" placement="bottom">
+                <Button loading={!!connectingId} type="text" size="small" icon={!connectingId && <Plus size={14} />} style={{ width: 24, height: 24, padding: 0, color: token.colorTextSecondary }} />
+              </Tooltip>
+            </Dropdown>
           </Space>
         </div>
-        <div style={{ flex: 1, overflow: 'auto' }}>
-          {openConnections.length === 0 ? (
+
+        {/* --- 无感下沉搜索框 --- */}
+        <div style={{ padding: '0 12px 8px' }}>
+          <Input
+            placeholder="在此过滤表或数据库..."
+            prefix={<Search size={14} color={token.colorTextQuaternary} style={{ marginRight: 4 }} />}
+            variant="filled"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            allowClear
+            style={{ borderRadius: 6, fontSize: 12, padding: '4px 10px' }}
+          />
+        </div>
+        <div ref={treeContainerRef} style={{ flex: 1, overflow: 'hidden' }}>
+          {openConnections.length === 0 && savedScripts.length === 0 ? (
             <div style={{ padding: '24px 12px', textAlign: 'center' }}>
               <Text type="secondary" style={{ fontSize: 13 }}>
                 从上方下拉框添加连接
@@ -1075,10 +1273,23 @@ export const WorkbenchPage: React.FC = () => {
           ) : (
             <>
               <Tree
+                height={treeHeight}
                 className="workbench-object-tree"
                 treeData={treeData}
                 showIcon
                 blockNode
+                titleRender={
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  (nodeData: any) => {
+                  if (nodeData.isLeaf && String(nodeData.key).startsWith('obj:')) {
+                    return (
+                      <Tooltip title={String(nodeData.title)} mouseEnterDelay={0.5} placement="right">
+                        <span>{nodeData.title as React.ReactNode}</span>
+                      </Tooltip>
+                    )
+                  }
+                  return nodeData.title as React.ReactNode
+                }}
                 onSelect={handleTreeSelect}
                 selectedKeys={selectedTreeKeys}
                 expandedKeys={expandedKeys}
@@ -1092,6 +1303,28 @@ export const WorkbenchPage: React.FC = () => {
                     const objName = parts.slice(2).join(':')
                     const conn = openConnections.find((c) => c.id === connId)
                     openOrActivateTab(connId, conn?.name ?? '', dbName, objName)
+                  } else if (key.startsWith('script:')) {
+                    const scriptId = key.slice(7)
+                    const s = savedScripts.find(x => x.id === scriptId)
+                    if (s) {
+                       const queryId = storeAddTab(activeConnectionId || undefined, s.database || activeDatabase || undefined)
+
+                       const tabKey = `sql:${queryId}`
+                       batchUpdate({
+                         openTableTabs: {
+                           ...openTableTabs,
+                           [tabKey]: {
+                             type: 'sql-query',
+                             queryId,
+                             label: s.name,
+                             connectionId: activeConnectionId || '',
+                             connectionName: activeConnectionName || 'Saved Script'
+                           }
+                         },
+                         activeTableTabKey: tabKey,
+                       })
+                       useSqlEditorStore.getState().updateTab(queryId, { sql: s.content, database: s.database || activeDatabase || '' })
+                    }
                   }
                 }}
                 onRightClick={({ event, node }) => {
@@ -1114,6 +1347,7 @@ export const WorkbenchPage: React.FC = () => {
                     background: token.colorBgElevated, borderRadius: token.borderRadius,
                     boxShadow: token.boxShadowSecondary, padding: '4px 0', minWidth: 160,
                   }}>
+                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                     {ctxMenuItems.map((item: any, i: number) => {
                       if (!item) return null
                       if (item.type === 'divider') return <div key={`d${i}`} style={{ height: 1, background: token.colorBorderSecondary, margin: '4px 0' }} />
@@ -1139,21 +1373,23 @@ export const WorkbenchPage: React.FC = () => {
             </>
           )}
         </div>
+        </div>
       </Sider>
 
       {/* 右侧详情区 */}
       <Content style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', background: token.colorBgLayout }}>
-        {createTableCtx ? (
-          <TableDesigner
-            connectionId={createTableCtx.connectionId}
-            connectionName={createTableCtx.connectionName}
-            database={createTableCtx.database}
-            editTableName={createTableCtx.editTableName}
-            onSuccess={() => {
-              loadTables(createTableCtx.connectionId, createTableCtx.database)
-              setCreateTableCtx(null)
-            }}
-            onCancel={() => setCreateTableCtx(null)}
+        {openConnections.length === 0 && Object.keys(openTableTabs).length === 0 ? (
+          <EmptyState
+            icon={<DatabaseOutlined style={{ fontSize: 48, color: token.colorTextQuaternary }} />}
+            description={
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ marginBottom: 16, color: token.colorTextSecondary }}>暂无打开的数据库连接</div>
+                <div style={{ fontSize: 13, color: token.colorTextQuaternary }}>请先在“连接管理”中双击打开一个连接<br/>或者在左侧双击打开你收藏的 SQL 脚本</div>
+                <div style={{ marginTop: 24, padding: '8px 16px', background: token.colorBgElevated, borderRadius: 8, display: 'inline-block' }}>
+                  <kbd style={{ fontFamily: 'monospace', background: token.colorBgLayout, padding: '2px 4px', borderRadius: 4 }}>Cmd/Ctrl</kbd> + <kbd style={{ fontFamily: 'monospace', background: token.colorBgLayout, padding: '2px 4px', borderRadius: 4 }}>K</kbd> 唤起命令面板
+                </div>
+              </div>
+            }
           />
         ) : activeTableTabKey && openTableTabs[activeTableTabKey] ? (
           <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
@@ -1177,6 +1413,36 @@ export const WorkbenchPage: React.FC = () => {
                 min-height: 0;
                 overflow: hidden;
               }
+              /* Pro-Max Borderless Geeky Tabs */
+              .workbench-main-tabs.ant-tabs-card > .ant-tabs-nav {
+                margin: 0 !important;
+                background: ${token.colorBgContainer};
+              }
+              .workbench-main-tabs.ant-tabs-card > .ant-tabs-nav::before {
+                border-bottom: 1px solid ${token.colorBorderSecondary} !important;
+              }
+              .workbench-main-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab {
+                border: none !important;
+                background: transparent !important;
+                border-radius: 0 !important;
+                padding: 8px 16px !important;
+                margin: 0 !important;
+                border-bottom: 2px solid transparent !important;
+                transition: all 0.2s;
+              }
+              .workbench-main-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab-active {
+                background: ${token.colorBgElevated} !important;
+                border-bottom: 2px solid ${token.colorPrimary} !important;
+              }
+              .workbench-main-tabs .ant-tabs-tab-remove {
+                opacity: 0;
+                transition: opacity 0.2s;
+                margin-left: 8px !important;
+              }
+              .workbench-main-tabs .ant-tabs-tab-active .ant-tabs-tab-remove,
+              .workbench-main-tabs .ant-tabs-tab:hover .ant-tabs-tab-remove {
+                opacity: 1;
+              }
             `}</style>
             {/* 表 Tab 栏 */}
             {(() => {
@@ -1184,6 +1450,7 @@ export const WorkbenchPage: React.FC = () => {
               return (
                 <>
                   <Tabs
+                    className="workbench-main-tabs"
                     type="editable-card"
                     size="small"
                     hideAdd
@@ -1197,7 +1464,9 @@ export const WorkbenchPage: React.FC = () => {
                             ? { connectionId: tab.connectionId, database: tab.database, table: tab.tableName }
                             : tab.type === 'category-list'
                               ? { connectionId: tab.connectionId, database: tab.database, category: tab.category }
-                              : { connectionId: tab.connectionId, database: tab.database },
+                              : tab.type === 'sql-query'
+                                ? { connectionId: tab.connectionId, database: tab.database }
+                                : { connectionId: tab.connectionId, database: tab.database },
                           activeConnectionId: tab.connectionId,
                           activeConnectionName: tab.connectionName,
                           activeDatabase: tab.database,
@@ -1222,15 +1491,21 @@ export const WorkbenchPage: React.FC = () => {
                           ? tab.database
                           : tab.type === 'category-list'
                             ? `${tab.database} / ${tab.category === 'tables' ? '表' : tab.category === 'views' ? '视图' : tab.category === 'triggers' ? '触发器' : tab.category}`
-                            : ''
+                            : tab.type === 'sql-query'
+                              ? tab.label || `查询`
+                              : ''
                       const tabIcon = tab.type === 'table'
-                        ? <TableOutlined style={{ marginRight: 4 }} />
+                        ? <Table2 size={14} style={{ marginRight: 6 }} />
                         : tab.type === 'db-overview'
-                          ? <DatabaseOutlined style={{ marginRight: 4 }} />
-                          : <TableOutlined style={{ marginRight: 4 }} />
+                          ? <Database size={14} style={{ marginRight: 6 }} />
+                          : tab.type === 'sql-query'
+                            ? <CodeOutlined style={{ marginRight: 6 }} />
+                            : <KeyRound size={16} style={{ marginRight: 6 }} /> // Assuming this is the intended insertion point for KeyRound
                       const tabTitle = tab.type === 'table'
                         ? `${tab.database}.${tab.tableName}`
-                        : tab.database
+                        : tab.type === 'sql-query'
+                          ? `SQL 查询`
+                          : tab.database
                       return {
                         key,
                         label: (
@@ -1354,15 +1629,16 @@ export const WorkbenchPage: React.FC = () => {
                       size="small"
                       activeKey={t.detailTab}
                       onChange={(key) => {
-                        updateTabState(tabKey, () => ({ detailTab: key }))
-                        loadTabDataForTab(tabKey, t.connectionId, t.database, t.tableName, key)
+                        const nextTab = key as 'data' | 'design' | 'ddl'
+                        updateTabState(tabKey, () => ({ detailTab: nextTab }))
+                        loadTabDataForTab(tabKey, t.connectionId, t.database, t.tableName, nextTab)
                       }}
                       style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '0 16px' }}
                       tabBarStyle={{ flexShrink: 0, marginBottom: 0 }}
                       items={[
                         {
-                          key: 'preview',
-                          label: `数据预览${t.previewRows.length > 0 ? ` (${t.previewRows.length})` : ''}`,
+                          key: 'data',
+                          label: `数据${t.previewRows.length > 0 ? ` (${t.previewRows.length})` : ''}`,
                           children: (
                             <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8, padding: '0 2px', flexShrink: 0 }}>
@@ -1397,9 +1673,9 @@ export const WorkbenchPage: React.FC = () => {
                                   dataSource={t.previewRows}
                                   onRefresh={() => {
                                     updateTabState(tabKey, (prev) => ({
-                                      loadedTabs: prev.loadedTabs.filter(k => k !== 'preview' && k !== 'columns'),
+                                      loadedTabs: prev.loadedTabs.filter(k => k !== 'data'),
                                     }))
-                                    loadTabDataForTab(tabKey, t.connectionId, t.database, t.tableName, 'preview')
+                                    loadTabDataForTab(tabKey, t.connectionId, t.database, t.tableName, 'data')
                                   }}
                                   onFilter={async (params) => {
                                     try {
@@ -1419,20 +1695,27 @@ export const WorkbenchPage: React.FC = () => {
                           ),
                         },
                         {
-                          key: 'columns',
-                          label: '字段结构',
+                          key: 'design',
+                          label: '设计',
                           children: (
-                            <div style={{ overflow: 'auto', height: '100%', minHeight: 0 }}>
-                              <Table columns={columnTableColumns} dataSource={t.columns} rowKey="name" pagination={false} size="small" />
-                            </div>
-                          ),
-                        },
-                        {
-                          key: 'indexes',
-                          label: '索引',
-                          children: (
-                            <div style={{ overflow: 'auto', height: '100%', minHeight: 0 }}>
-                              <Table columns={indexTableColumns} dataSource={t.indexes} rowKey="name" pagination={false} size="small" />
+                            <div style={{ height: '100%', overflow: 'hidden' }}>
+                              <TableDesigner
+                                connectionId={t.connectionId}
+                                connectionName={t.connectionName}
+                                database={t.database}
+                                editTableName={t.tableName}
+                                onSuccess={() => {
+                                  // Refresh columns when design is saved
+                                  updateTabState(tabKey, (prev) => ({
+                                    loadedTabs: prev.loadedTabs.filter(k => k !== 'columns'),
+                                  }))
+                                  loadTabDataForTab(tabKey, t.connectionId, t.database, t.tableName, 'columns')
+                                }}
+                                onCancel={() => {
+                                  // Revert back to data view if they cancel design
+                                  updateTabState(tabKey, () => ({ detailTab: 'data' }))
+                                }}
+                              />
                             </div>
                           ),
                         },
@@ -1459,49 +1742,77 @@ export const WorkbenchPage: React.FC = () => {
                 const objKey = `${activeTab.connectionId}::${activeTab.database}`
                 const dbObjects = objectsMap[objKey] || []
                 return (
-                  <div style={{ flex: 1, padding: 24, overflow: 'auto' }}>
-                    <Space direction="vertical" size={16} style={{ width: '100%' }}>
-                      <Space>
-                        <Text strong style={{ fontSize: 16 }}>
-                          <DatabaseOutlined style={{ marginRight: 6 }} />
-                          {activeTab.database}
-                        </Text>
-                        <Text type="secondary" style={{ fontSize: 12 }}>({activeTab.connectionName})</Text>
-                        <Button size="small" icon={<CodeOutlined />} onClick={() => openSqlEditor()}>打开 SQL 编辑器</Button>
-                      </Space>
-                      <Row gutter={16}>
-                        <Col span={6}>
-                          <Card size="small">
-                            <Statistic title="表" value={dbObjects.filter((t) => t.type === 'table').length} valueStyle={{ color: token.colorPrimary }} prefix={<TableOutlined />} />
-                          </Card>
-                        </Col>
-                        <Col span={6}>
-                          <Card size="small">
-                            <Statistic title="视图" value={dbObjects.filter((t) => t.type === 'view').length} valueStyle={{ color: token.colorInfo }} prefix={<EyeOutlined />} />
-                          </Card>
-                        </Col>
-                        <Col span={6}>
-                          <Card size="small">
-                            <Statistic title="触发器" value={dbObjects.filter((t) => t.type === 'trigger').length} valueStyle={{ color: token.colorWarning }} prefix={<ThunderboltOutlined />} />
-                          </Card>
-                        </Col>
-                        <Col span={6}>
-                          <Card size="small">
-                            <Statistic title="对象总数" value={dbObjects.length} />
-                          </Card>
-                        </Col>
-                      </Row>
-                      {dbObjects.length === 0 ? (
-                        <EmptyState description="当前数据库下无对象" />
-                      ) : (
-                        <Card size="small" title="快捷操作">
-                          <Space>
-                            <Button icon={<CodeOutlined />} onClick={() => openSqlEditor()}>打开 SQL 编辑器</Button>
-                            <Button icon={<ReloadOutlined />} onClick={() => loadTables(activeTab.connectionId, activeTab.database)}>刷新对象列表</Button>
+                  <div style={{ flex: 1, padding: '32px 40px', overflow: 'auto', background: token.colorBgBase }}>
+                    <div style={{ maxWidth: 1000, margin: '0 auto' }}>
+                      <div style={{ marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div>
+                          <Text strong style={{ fontSize: 24, display: 'flex', alignItems: 'center', gap: 10, color: token.colorText }}>
+                            <Database size={24} color={token.colorPrimary} />
+                            {activeTab.database}
+                          </Text>
+                          <Text type="secondary" style={{ fontSize: 13, marginTop: 4, display: 'block' }}>连接网络: {activeTab.connectionName}</Text>
+                        </div>
+                        <Button type="primary" size="large" icon={<CodeOutlined />} onClick={() => openSqlEditor()} style={{ background: token.colorPrimary, border: 'none', boxShadow: '0 0 15px rgba(34,197,94,0.3)', borderRadius: 8 }}>
+                          新建查询 Workspace
+                        </Button>
+                      </div>
+
+                      {/* Bento Grid */}
+                      <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(12, 1fr)',
+                        gap: 16,
+                        gridAutoRows: 'minmax(120px, auto)'
+                      }}>
+                        {/* Box 1: Tables Count */}
+                        <div style={{ gridColumn: 'span 4', background: token.colorBgContainer, borderRadius: 12, padding: 20, border: `1px solid ${token.colorBorderSecondary}`, display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
+                          <Table2 size={20} color={token.colorPrimary} style={{ marginBottom: 12 }} />
+                          <Text type="secondary" style={{ fontSize: 13, marginBottom: 4 }}>数据表总数</Text>
+                          <Text strong style={{ fontSize: 32, lineHeight: 1 }}>{dbObjects.filter((t) => t.type === 'table').length}</Text>
+                          <div style={{ position: 'absolute', right: -15, bottom: -15, opacity: 0.03 }}>
+                            <Table2 size={120} />
+                          </div>
+                        </div>
+
+                        {/* Box 2: Views & Triggers */}
+                        <div style={{ gridColumn: 'span 4', display: 'flex', flexDirection: 'column', gap: 16 }}>
+                          <div style={{ flex: 1, background: token.colorBgContainer, borderRadius: 12, padding: '16px 20px', border: `1px solid ${token.colorBorderSecondary}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                              <Text type="secondary" style={{ fontSize: 13, display: 'block', marginBottom: 2 }}>视图分类</Text>
+                              <Text strong style={{ fontSize: 20 }}>{dbObjects.filter((t) => t.type === 'view').length}</Text>
+                            </div>
+                            <div style={{ width: 40, height: 40, borderRadius: 8, background: 'rgba(59,130,246,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <Eye size={20} color="#3B82F6" />
+                            </div>
+                          </div>
+                          <div style={{ flex: 1, background: token.colorBgContainer, borderRadius: 12, padding: '16px 20px', border: `1px solid ${token.colorBorderSecondary}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                              <Text type="secondary" style={{ fontSize: 13, display: 'block', marginBottom: 2 }}>系统触发器</Text>
+                              <Text strong style={{ fontSize: 20 }}>{dbObjects.filter((t) => t.type === 'trigger').length}</Text>
+                            </div>
+                            <div style={{ width: 40, height: 40, borderRadius: 8, background: 'rgba(245,158,11,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <Zap size={20} color="#F59E0B" />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Box 3: Quick Actions */}
+                        <div style={{ gridColumn: 'span 4', background: token.colorBgContainer, borderRadius: 12, padding: 20, border: `1px solid ${token.colorBorderSecondary}` }}>
+                          <Text strong style={{ fontSize: 14, marginBottom: 16, display: 'flex', alignItems: 'center' }}>
+                            <Activity size={16} style={{ marginRight: 6 }} />
+                            快捷面板
+                          </Text>
+                          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                            <Button block style={{ textAlign: 'left', background: token.colorBgElevated, border: 'none', color: token.colorTextSecondary }} icon={<ReloadOutlined />} onClick={() => loadTables(activeTab.connectionId, activeTab.database)}>
+                              重新加载对象树
+                            </Button>
+                            <Button block style={{ textAlign: 'left', background: token.colorBgElevated, border: 'none', color: token.colorTextSecondary }} icon={<PlusOutlined />} onClick={() => openTableDesignerTab(activeTab.connectionId, activeTab.connectionName, activeTab.database)}>
+                              进入可视化表设计器
+                            </Button>
                           </Space>
-                        </Card>
-                      )}
-                    </Space>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 )
               }
@@ -1532,11 +1843,57 @@ export const WorkbenchPage: React.FC = () => {
                 )
               }
 
+              // ===== SQL 编辑器 Tab =====
+              if (activeTab.type === 'sql-query') {
+                return (
+                  <div style={{ flex: 1, overflow: 'hidden' }}>
+                    <QueryEditorPane queryId={activeTab.queryId} />
+                  </div>
+                )
+              }
+
+              // ===== 表设计器 Tab =====
+              if (activeTab.type === 'table-designer') {
+                return (
+                  <div style={{ flex: 1, overflow: 'hidden' }}>
+                    <TableDesigner
+                      connectionId={activeTab.connectionId}
+                      connectionName={activeTab.connectionName}
+                      database={activeTab.database}
+                      editTableName={activeTab.tableName}
+                      onSuccess={() => {
+                        loadTables(activeTab.connectionId, activeTab.database)
+                        closeTableTab(activeTableTabKey!)
+                      }}
+                      onCancel={() => closeTableTab(activeTableTabKey!)}
+                    />
+                  </div>
+                )
+              }
+
               return null
             })()}
           </div>
         ) : (
-          <EmptyState description={openConnections.length === 0 ? '从左侧添加连接开始浏览' : '选择左侧对象树中的数据库或表以查看详情'} />
+          <EmptyState
+            description={
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+                <div>{openConnections.length === 0 ? '从左侧添加连接开始浏览' : '选择左侧对象树中的数据库或表以开始查询'}</div>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: token.colorTextSecondary
+                }}>
+                  或按 <kbd style={{ padding: '2px 6px', background: token.colorBgLayout, border: `1px solid ${token.colorBorder}`, borderRadius: 4, fontFamily: 'monospace', color: token.colorText }}>{formatHotkey(['Cmd', 'K'])}</kbd> 唤起全局命令
+                </div>
+                {openConnections.length > 0 && (
+                  <Space size={16} style={{ marginTop: 8 }}>
+                    <Button type="primary" icon={<CodeOutlined />} onClick={() => openSqlEditor()}>新建查询</Button>
+                    <Button icon={<Search size={14} />} onClick={() => useCommandStore.getState().toggleOpen()}>全局搜索</Button>
+                    <Button type="link" onClick={() => setShowShortcuts(true)}>查看快捷键</Button>
+                  </Space>
+                )}
+              </div>
+            }
+          />
         )}
       </Content>
 
@@ -1573,6 +1930,17 @@ export const WorkbenchPage: React.FC = () => {
           onClose={() => setImportSqlModal(null)}
         />
       )}
+      {exportModal && (<ExportDatabaseModal
+        open={true}
+        onClose={() => setExportModal(null)}
+        {...exportModal}
+      />)}
+
+      {/* 快捷键查看弹窗 */}
+      <ShortcutsModal
+        open={showShortcuts}
+        onCancel={() => setShowShortcuts(false)}
+      />
     </Layout>
   )
 }

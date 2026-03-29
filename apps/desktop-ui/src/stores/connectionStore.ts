@@ -15,14 +15,19 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 import { create } from 'zustand'
-import type { ConnectionConfig, ConnectionStatus } from '@/types'
+import type { ConnectionConfig, ConnectionStatus, ConnectionGroup } from '@/types'
 
 interface ConnectionState {
   connections: ConnectionConfig[]
+  groups: ConnectionGroup[]
   currentConnectionId: string | null
   currentDatabase: string | null
 
   setConnections: (connections: ConnectionConfig[]) => void
+  setGroups: (groups: ConnectionGroup[]) => void
+  addGroup: (group: ConnectionGroup) => void
+  updateGroup: (id: string, group: ConnectionGroup) => void
+  removeGroup: (id: string) => void
   addConnection: (connection: ConnectionConfig) => void
   updateConnection: (id: string, updates: Partial<ConnectionConfig>) => void
   removeConnection: (id: string) => void
@@ -33,10 +38,19 @@ interface ConnectionState {
 
 export const useConnectionStore = create<ConnectionState>((set) => ({
   connections: [],
+  groups: [],
   currentConnectionId: null,
   currentDatabase: null,
 
   setConnections: (connections) => set({ connections }),
+  setGroups: (groups) => set({ groups }),
+  addGroup: (group) => set((state) => ({ groups: [...state.groups, group] })),
+  updateGroup: (id, group) => set((state) => ({
+    groups: state.groups.map(g => g.id === id ? group : g)
+  })),
+  removeGroup: (id) => set((state) => ({
+    groups: state.groups.filter(g => g.id !== id)
+  })),
 
   addConnection: (connection) =>
     set((state) => ({ connections: [...state.connections, connection] })),

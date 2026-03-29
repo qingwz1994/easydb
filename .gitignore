@@ -53,6 +53,25 @@ Thumbs.db
 .kernel.log
 .ui.log
 
+# Python cache
+__pycache__/
+*.pyc
+
+# AI tool configs (local/personal)
+.agent/
+.agents/
+.codex/
+.claude/
+.trellis/
+AGENTS.md
+
+# Design artifacts (not part of source code)
+design-system/
+
+# Temp data / test scripts
+task/
+test/
+
 # Temp data files
 docs/*.csv
 icon-new.png

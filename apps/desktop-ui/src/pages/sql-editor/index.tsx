@@ -16,12 +16,12 @@
  */
 import React, { useState, useCallback, useRef, useEffect } from 'react'
 import {
-  Layout, Button, Space, Typography, Tabs, Table, Tag, Select, Tooltip, Dropdown,
-  theme,
+  Layout, Button, Space, Typography, Tabs, Tag, Select,
+  theme, Tooltip,
 } from 'antd'
 import {
-  PlayCircleOutlined, ClearOutlined, DownloadOutlined,
-  DatabaseOutlined, ApiOutlined, CodeOutlined, PlusOutlined, QuestionCircleOutlined,
+  PlayCircleOutlined, ClearOutlined,
+  CodeOutlined, PlusOutlined, StarOutlined, FolderOpenOutlined
 } from '@ant-design/icons'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
@@ -31,11 +31,22 @@ import { useConnectionStore } from '@/stores/connectionStore'
 import { useSqlEditorStore } from '@/stores/sqlEditorStore'
 import { sqlApi, metadataApi, connectionApi } from '@/services/api'
 import { EmptyState } from '@/components/EmptyState'
+import { SqlResultPanel } from '@/components/SqlResultPanel'
 import { handleApiError, toast } from '@/utils/notification'
-import { exportResultSet } from '@/utils/exportUtils'
 import { createSqlCompletionProvider, clearCompletionCache } from './sqlCompletionProvider'
+import {
+  DEFAULT_SQL_PREVIEW_PAGE_SIZE,
+  collectSqlQuerySessionIds,
+  isPreviewableSql,
+  MAX_SQL_PREVIEW_CELL_CHARS,
+  mergeSqlPreviewResult,
+  normalizeExecutableSql,
+} from './queryPreview'
+import { SaveScriptModal } from './SaveScriptModal'
+import { SavedScriptsModal } from './SavedScriptsModal'
+import { formatHotkey } from '@/utils/osUtils'
 
-const { Content, Header } = Layout
+const { Content } = Layout
 const { Text } = Typography
 
 // 标签页数据结构
@@ -58,8 +69,6 @@ export const SqlEditorPage: React.FC = () => {
 
   const activeConnectionId = useWorkbenchStore((s) => s.activeConnectionId)
   const activeDatabase = useWorkbenchStore((s) => s.activeDatabase)
-  const setActiveConnection = useWorkbenchStore((s) => s.setActiveConnection)
-  const setActiveDatabase = useWorkbenchStore((s) => s.setActiveDatabase)
   const connections = useConnectionStore((s) => s.connections)
   const setConnections = useConnectionStore((s) => s.setConnections)
   const updateConnection = useConnectionStore((s) => s.updateConnection)
@@ -74,6 +83,9 @@ export const SqlEditorPage: React.FC = () => {
   const consumePendingSql = useSqlEditorStore((s) => s.consumePendingSql)
 
   const [executing, setExecuting] = useState(false)
+  const [loadingMoreKey, setLoadingMoreKey] = useState<string | null>(null)
+  const [saveModalOpen, setSaveModalOpen] = useState(false)
+  const [listModalOpen, setListModalOpen] = useState(false)
   const [databases, setDatabases] = useState<string[]>([])
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null)
 
@@ -94,15 +106,33 @@ export const SqlEditorPage: React.FC = () => {
       connectionApi.list().then((list) => {
         const allConns = list as ConnectionConfig[]
         setConnections(allConns)
-        if (!activeConnectionId) {
-          const connected = allConns.find((c) => c.status === 'connected')
-          if (connected) {
-            setActiveConnection(connected.id, connected.name)
-          }
-        }
       }).catch(() => {})
     }
-  }, [activeConnectionId, connections.length, setActiveConnection, setConnections])
+  }, [connections.length, setConnections])
+
+  // --- 手写拖拽分割线 Hook ---
+  const [editorHeight, setEditorHeight] = useState(300)
+  const isDraggingRef = useRef(false)
+
+  useEffect(() => {
+    const handleMouseMove = (e: globalThis.MouseEvent) => {
+      if (!isDraggingRef.current) return
+      // 头部导航 + Tab高度 大约扣除 90px
+      const newHeight = e.clientY - 90
+      setEditorHeight(Math.max(100, Math.min(newHeight, window.innerHeight - 200)))
+    }
+    const handleMouseUp = () => {
+      isDraggingRef.current = false
+      document.body.style.cursor = 'default'
+      document.body.style.userSelect = 'auto'
+    }
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [])
 
   // 标签页操作
   const updateTabSql = useCallback((key: string, sql: string) => {
@@ -136,6 +166,11 @@ export const SqlEditorPage: React.FC = () => {
   }
 
   const removeTab = (targetKey: string) => {
+    const targetTab = tabs.find((tab) => tab.key === targetKey)
+    const querySessionIds = collectSqlQuerySessionIds(targetTab?.currentBatch, targetTab?.results)
+    querySessionIds.forEach((querySessionId) => {
+      void sqlApi.querySessionClose(querySessionId).catch(() => {})
+    })
     storeRemoveTab(targetKey)
   }
 
@@ -163,16 +198,13 @@ export const SqlEditorPage: React.FC = () => {
     }
     if (activeEditorTab) {
       updateActiveTab({ connectionId: connId, database: undefined })
-    } else {
-      setActiveConnection(connId, conn.name)
+      clearCompletionCache()
     }
   }
 
   const handleDatabaseChange = (db: string) => {
     if (activeEditorTab) {
       updateActiveTab({ database: db })
-    } else {
-      setActiveDatabase(db)
     }
     clearCompletionCache()
     if (activeEditorTab?.connectionId && monacoRef.current) {
@@ -238,9 +270,23 @@ export const SqlEditorPage: React.FC = () => {
     }
 
     if (!execSql || !activeEditorTab?.connectionId || !activeEditorTab?.database) return
+    const normalizedSql = normalizeExecutableSql(execSql)
     setExecuting(true)
     try {
-      const resultList = await sqlApi.execute(activeEditorTab.connectionId, activeEditorTab.database, execSql) as SqlResult[]
+      const previousSessionIds = collectSqlQuerySessionIds(activeEditorTab.currentBatch, activeEditorTab.results)
+      if (previousSessionIds.length > 0) {
+        await Promise.allSettled(previousSessionIds.map((querySessionId) => sqlApi.querySessionClose(querySessionId)))
+      }
+
+      const resultList = isPreviewableSql(normalizedSql)
+        ? [await sqlApi.querySessionStart({
+          connectionId: activeEditorTab.connectionId,
+          database: activeEditorTab.database,
+          sql: normalizedSql,
+          pageSize: DEFAULT_SQL_PREVIEW_PAGE_SIZE,
+          maxCellChars: MAX_SQL_PREVIEW_CELL_CHARS,
+        }) as SqlResult]
+        : await sqlApi.execute(activeEditorTab.connectionId, activeEditorTab.database, execSql) as SqlResult[]
       const newResults = [...[...resultList].reverse(), ...activeEditorTab.results]
 
       const hasError = resultList.some((r) => r.type === 'error')
@@ -265,6 +311,46 @@ export const SqlEditorPage: React.FC = () => {
     }
   }, [activeEditorTab, updateActiveTab])
 
+  const handleLoadMore = useCallback(async (batchIndex: number) => {
+    if (!activeEditorTab) return
+    const target = activeEditorTab.currentBatch?.[batchIndex]
+    if (!target || target.type !== 'query' || !target.preview || !target.hasMore || !target.querySessionId) return
+
+    const loadKey = `${activeEditorTab.key}-${batchIndex}`
+    setLoadingMoreKey(loadKey)
+    try {
+      const next = await sqlApi.querySessionFetch({
+        querySessionId: target.querySessionId,
+        pageSize: target.pageSize ?? DEFAULT_SQL_PREVIEW_PAGE_SIZE,
+        maxCellChars: MAX_SQL_PREVIEW_CELL_CHARS,
+      }) as SqlResult
+
+      if (next.type === 'error') {
+        toast.error(next.error ?? '加载更多失败')
+        return
+      }
+
+      updateActiveTab({
+        currentBatch: (activeEditorTab.currentBatch ?? []).map((result, idx) => {
+          if (idx !== batchIndex) return result
+          return mergeSqlPreviewResult(result, next)
+        }),
+      })
+    } catch (error) {
+      handleApiError(error, '加载更多失败')
+    } finally {
+      setLoadingMoreKey(null)
+    }
+  }, [activeEditorTab, updateActiveTab])
+
+  const handleResultMetaChange = useCallback((batchIndex: number, patch: Partial<SqlResult>) => {
+    updateActiveTab({
+      currentBatch: (activeEditorTab?.currentBatch ?? []).map((result, idx) => (
+        idx === batchIndex ? { ...result, ...patch } : result
+      )),
+    })
+  }, [activeEditorTab?.currentBatch, updateActiveTab])
+
   const handleClear = () => {
     updateTabSql(activeTabKey, '')
     editorRef.current?.setValue('')
@@ -276,94 +362,15 @@ export const SqlEditorPage: React.FC = () => {
   const results = activeEditorTab?.results ?? []
   const totalDuration = currentBatch.reduce((sum, r) => sum + (r.duration || 0), 0)
   const queryResults = currentBatch.filter((r) => r.type === 'query')
+  const resultTableHeight = Math.max(240, (typeof window !== 'undefined' ? window.innerHeight : 900) - editorHeight - 250)
   const tableNameCounts: Record<string, number> = {}
   
   const allParsedNames = extractAllTableNames(currentBatch[0]?.sql || '')
   let queryIndex = 0
 
   return (
-    <Layout style={{ height: '100%' }}>
-      {/* 工具栏 */}
-      <Header style={{
-        height: 44,
-        lineHeight: '44px',
-        background: token.colorBgContainer,
-        borderBottom: `1px solid ${token.colorBorderSecondary}`,
-        padding: '0 16px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-      }}>
-        <Space size={12}>
-          <Space size={4}>
-            <ApiOutlined />
-            <Select
-              size="small"
-              style={{ width: 160 }}
-              placeholder="选择连接"
-              value={currentConnId}
-              onChange={handleConnectionChange}
-              options={connections.map((c) => ({
-                label: (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span>{c.name}</span>
-                    {c.status !== 'connected' && (
-                      <span style={{ fontSize: 12, color: token.colorTextQuaternary }}>未连接</span>
-                    )}
-                  </div>
-                ),
-                value: c.id
-              }))}
-              listHeight={320}
-            />
-          </Space>
-          <Space size={4}>
-            <DatabaseOutlined />
-            <Select
-              size="small"
-              style={{ width: 160 }}
-              placeholder="选择数据库"
-              value={currentDatabase}
-              onChange={handleDatabaseChange}
-              options={databases.map((db) => ({ label: db, value: db }))}
-              disabled={!currentConnId}
-              showSearch
-            />
-          </Space>
-        </Space>
-        <Space>
-          <Button
-            type="primary"
-            size="small"
-            icon={<PlayCircleOutlined />}
-            loading={executing}
-            onClick={handleExecute}
-            disabled={!activeEditorTab?.sql?.trim() || !currentConnId || !currentDatabase}
-          >
-            执行
-          </Button>
-          <Button size="small" icon={<ClearOutlined />} onClick={handleClear}>
-            清空
-          </Button>
-          <Tooltip
-            title={
-              <div style={{ fontSize: 12, lineHeight: 1.8 }}>
-                <div><b>快捷键</b></div>
-                <div>⌘+Enter — 执行 SQL</div>
-                <div style={{ marginTop: 4 }}><b>智能提示</b></div>
-                <div>输入 <code>表名.</code> — 自动补全字段</div>
-                <div>先写 FROM 表名，再编辑 SELECT — 直接提示字段</div>
-                <div>支持选中部分 SQL 单独执行</div>
-              </div>
-            }
-            placement="bottomRight"
-          >
-            <QuestionCircleOutlined style={{ color: token.colorTextQuaternary, fontSize: 14, cursor: 'pointer' }} />
-          </Tooltip>
-        </Space>
-      </Header>
-
-      <Layout style={{ flex: 1 }}>
+    <Layout style={{ height: '100%', background: token.colorBgContainer }}>
+      <Layout style={{ flex: 1, background: 'transparent' }}>
         <Layout.Content style={{ display: 'flex', flexDirection: 'column' }}>
           {tabs.length === 0 ? (
             /* 无标签页时的空状态引导 */
@@ -379,6 +386,7 @@ export const SqlEditorPage: React.FC = () => {
           {/* 编辑器标签页 */}
           <div style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
             <Tabs
+              className="sql-editor-tabs"
               type="editable-card"
               size="small"
               activeKey={activeTabKey}
@@ -397,54 +405,116 @@ export const SqlEditorPage: React.FC = () => {
             />
           </div>
 
-          {/* 编辑器区域 */}
-          {!activeEditorTab.connectionId ? (
-            <div style={{ flex: 1 }}>
+          {/* 编辑器上下文悬浮栏 */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '8px 16px', borderBottom: `1px solid ${token.colorBorderSecondary}`, background: token.colorBgContainer
+          }}>
+            <Space size={12}>
+              <Select
+                size="small"
+                variant="filled"
+                style={{ width: 160 }}
+                placeholder="选择连接"
+                value={activeEditorTab.connectionId}
+                onChange={handleConnectionChange}
+                options={connections.map((c) => ({
+                  label: (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span>{c.name}</span>
+                      {c.status !== 'connected' && (
+                        <span style={{ fontSize: 12, color: token.colorTextQuaternary }}>未连</span>
+                      )}
+                    </div>
+                  ),
+                  value: c.id
+                }))}
+                listHeight={320}
+              />
+              <Select
+                size="small"
+                variant="filled"
+                style={{ width: 160 }}
+                placeholder="选择数据库"
+                value={activeEditorTab.database}
+                onChange={handleDatabaseChange}
+                options={databases.map((db) => ({ label: db, value: db }))}
+                disabled={!activeEditorTab.connectionId}
+                showSearch
+              />
+            </Space>
+            <Space>
+              <Button size="small" icon={<FolderOpenOutlined />} onClick={() => setListModalOpen(true)}>
+                打开收藏
+              </Button>
+              <Button size="small" icon={<StarOutlined />} onClick={() => setSaveModalOpen(true)} disabled={!activeEditorTab?.sql?.trim()}>
+                收藏
+              </Button>
+              <Tooltip title={`执行当前/已选 SQL (${formatHotkey(['Cmd', 'Enter'])})`}>
+                <Button type="primary" size="small" icon={<PlayCircleOutlined />} loading={executing} onClick={handleExecute} disabled={!activeEditorTab?.sql?.trim() || !activeEditorTab.connectionId || !activeEditorTab.database}>
+                  执行
+                </Button>
+              </Tooltip>
+              <Button size="small" icon={<ClearOutlined />} onClick={handleClear}>清空</Button>
+            </Space>
+          </div>
+
+          {/* Monaco 编辑器区域 */}
+          <div style={{ height: editorHeight, position: 'relative' }}>
+            {!activeEditorTab.connectionId ? (
               <EmptyState
                 description="请先在顶部下拉框中选择一个数据库连接"
                 actionText="前往连接管理"
                 onAction={() => { window.location.hash = '/connection' }}
               />
-            </div>
-          ) : !activeEditorTab.database ? (
-            <div style={{ flex: 1 }}>
-              <EmptyState description="请在工具栏中选择一个数据库" />
-            </div>
-          ) : (
-            <>
-              <div style={{
-                height: 240,
-                borderBottom: `1px solid ${token.colorBorderSecondary}`,
-              }}>
-                <Editor
-                  key={activeTabKey}
-                  height="100%"
-                  language="sql"
-                  theme="vs-dark"
-                  defaultValue={activeEditorTab.sql}
-                  onChange={(value) => updateTabSql(activeTabKey, value ?? '')}
-                  onMount={handleEditorMount}
-                  options={{
-                    fontSize: 13,
-                    fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-                    lineNumbers: 'on',
-                    minimap: { enabled: false },
-                    scrollBeyondLastLine: false,
-                    wordWrap: 'on',
-                    automaticLayout: true,
-                    tabSize: 2,
-                    suggestOnTriggerCharacters: true,
-                    quickSuggestions: true,
-                    folding: true,
-                    renderLineHighlight: 'line',
-                    selectionHighlight: true,
-                    occurrencesHighlight: 'singleFile',
-                    bracketPairColorization: { enabled: true },
-                    padding: { top: 8, bottom: 8 },
-                    placeholder: '输入 SQL 语句... (⌘+Enter 执行，支持选中部分执行)',
-                  } as editor.IStandaloneEditorConstructionOptions}
-                />
-              </div>
+            ) : !activeEditorTab.database ? (
+              <EmptyState description="请在上方选择我们要查询的数据库" />
+            ) : (
+              <Editor
+                key={activeTabKey}
+                height="100%"
+                language="sql"
+                theme="vs-dark"
+                defaultValue={activeEditorTab.sql}
+                onChange={(value) => updateTabSql(activeTabKey, value ?? '')}
+                onMount={handleEditorMount}
+                options={{
+                  fontSize: 13,
+                  fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+                  lineNumbers: 'on',
+                  minimap: { enabled: false },
+                  scrollBeyondLastLine: false,
+                  wordWrap: 'on',
+                  automaticLayout: true,
+                  tabSize: 2,
+                  suggestOnTriggerCharacters: true,
+                  quickSuggestions: true,
+                  folding: true,
+                  renderLineHighlight: 'line',
+                  selectionHighlight: true,
+                  occurrencesHighlight: 'singleFile',
+                  bracketPairColorization: { enabled: true },
+                  padding: { top: 8, bottom: 8 },
+                  placeholder: '输入 SQL 语句... (⌘+Enter 执行，支持选中部分执行)',
+                } as editor.IStandaloneEditorConstructionOptions}
+              />
+            )}
+          </div>
+
+          {/* 拖拽分割条 */}
+          <div
+            onMouseDown={() => {
+              isDraggingRef.current = true
+              document.body.style.cursor = 'row-resize'
+              document.body.style.userSelect = 'none'
+            }}
+            style={{
+              height: 4, cursor: 'row-resize', background: token.colorBgSpotlight, zIndex: 10,
+              opacity: 0.5, transition: 'opacity 0.2s', borderBottom: `1px solid ${token.colorBorderSecondary}`
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
+            onMouseLeave={(e) => (!isDraggingRef.current && (e.currentTarget.style.opacity = '0.5'))}
+          />
 
               {/* 结果区 */}
               <Content style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', background: token.colorBgContainer, flex: 1 }}>
@@ -465,11 +535,6 @@ export const SqlEditorPage: React.FC = () => {
                     ...currentBatch.map((r, idx) => {
                       if (r.type !== 'query') return null
                       const currentQueryIndex = queryIndex++
-
-                      const cols = r.columns?.map(c => ({
-                        title: c, dataIndex: c, key: c, width: 150, ellipsis: true,
-                        render: (v: unknown) => String(v ?? 'NULL'),
-                      })) ?? []
                       
                       const parsedName = allParsedNames[idx]
                       let displayLabel = `结果 ${currentQueryIndex + 1}`
@@ -483,29 +548,15 @@ export const SqlEditorPage: React.FC = () => {
                         key: `result-${currentQueryIndex}`,
                         label: displayLabel,
                         children: (
-                          <div style={{ height: 'calc(100vh - 410px)', overflow: 'hidden' }}>
-                            <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '4px 0', gap: 8 }}>
-                              <Text type="secondary" style={{ fontSize: 12, flex: 1, lineHeight: '32px' }}>
-                                {r.rows?.length ?? 0} 行 · {r.duration}ms
-                              </Text>
-                              <Dropdown menu={{
-                                items: [
-                                  { key: 'csv', label: '导出为 CSV', onClick: () => exportResultSet(r.columns ?? [], r.rows ?? [], 'csv', displayLabel) },
-                                  { key: 'json', label: '导出为 JSON', onClick: () => exportResultSet(r.columns ?? [], r.rows ?? [], 'json', displayLabel) },
-                                ],
-                              }}>
-                                <Button size="small" icon={<DownloadOutlined />}>导出</Button>
-                              </Dropdown>
-                            </div>
-                            <Table
-                              columns={cols}
-                              dataSource={r.rows?.map((row, i) => ({ ...row, _key: i }))}
-                              rowKey="_key"
-                              pagination={{ defaultPageSize: 50, showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100], size: 'small' }}
-                              size="small"
-                              scroll={{ x: 'max-content', y: 'calc(100vh - 570px)' }}
-                            />
-                          </div>
+                          <SqlResultPanel
+                            result={r}
+                            displayLabel={displayLabel}
+                            tableHeight={resultTableHeight}
+                            loadMoreKey={`${activeEditorTab.key}-${idx}`}
+                            currentLoadKey={loadingMoreKey}
+                            onLoadMore={r.preview && r.hasMore ? () => handleLoadMore(idx) : undefined}
+                            onResultMetaChange={(patch) => handleResultMetaChange(idx, patch)}
+                          />
                         )
                       }
                     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -529,7 +580,7 @@ export const SqlEditorPage: React.FC = () => {
                       key: 'messages',
                       label: `消息${results.length > 0 ? ` (${results.length})` : ''}`,
                       children: (
-                        <div style={{ padding: 12, overflow: 'auto', height: 'calc(100vh - 400px)' }}>
+                        <div style={{ padding: 12, overflow: 'auto', height: `calc(100vh - ${editorHeight + 150}px)` }}>
                           {results.map((r, i) => (
                             <div key={i} style={{
                               padding: '4px 0',
@@ -543,7 +594,9 @@ export const SqlEditorPage: React.FC = () => {
                               {r.type === 'error'
                                 ? `❌ ${r.error}`
                                 : r.type === 'query'
-                                  ? `✅ 查询返回 ${r.rows?.length ?? 0} 行 (${r.duration}ms)`
+                                  ? r.preview
+                                    ? `✅ 预览加载 ${r.loadedRows ?? r.rows?.length ?? 0} 行${r.hasMore ? '（还有更多）' : ''} (${r.duration}ms)`
+                                    : `✅ 查询返回 ${r.rows?.length ?? 0} 行 (${r.duration}ms)`
                                   : `✅ 影响 ${r.affectedRows} 行 (${r.duration}ms)`
                               }
                             </div>
@@ -557,12 +610,33 @@ export const SqlEditorPage: React.FC = () => {
                   ]}
                 />
               </Content>
-            </>
-          )}
           </>
           )}
         </Layout.Content>
       </Layout>
+
+      {/* 收藏脚本弹窗 */}
+      {activeEditorTab && (
+        <SaveScriptModal
+          open={saveModalOpen}
+          initialSql={activeEditorTab.sql}
+          database={activeEditorTab.database}
+          onCancel={() => setSaveModalOpen(false)}
+          onSuccess={() => {
+            setSaveModalOpen(false)
+          }}
+        />
+      )}
+      <SavedScriptsModal
+        open={listModalOpen}
+        onCancel={() => setListModalOpen(false)}
+        onSelect={(script) => {
+          if (activeTabKey) {
+            updateTabSql(activeTabKey, script.content)
+            toast.success('已应用收藏脚本到当前编辑区')
+          }
+        }}
+      />
     </Layout>
   )
 }

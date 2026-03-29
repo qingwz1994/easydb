@@ -16,32 +16,27 @@
  */
 import React, { useEffect, useState, useCallback } from 'react'
 import {
-  Typography, Button, Table, Space, Input, Tooltip, Dropdown,
-  theme, Tag, Layout, Card, Statistic, Row, Col, Select, Descriptions,
+  Typography, Button, Space, Input, Dropdown, Menu, Layout, Card, Statistic, Row, Col, Select, Modal
 } from 'antd'
 import {
-  ApiOutlined, PlusOutlined, SearchOutlined,
-  PlayCircleOutlined, EditOutlined, DeleteOutlined,
-  EllipsisOutlined, ReloadOutlined, DisconnectOutlined,
-  CheckCircleOutlined, ExclamationCircleOutlined,
-  ThunderboltOutlined,
+  ApiOutlined, PlusOutlined, SearchOutlined, FolderOutlined,
+  ReloadOutlined, CheckCircleOutlined, ExclamationCircleOutlined,
+  DisconnectOutlined, EllipsisOutlined
 } from '@ant-design/icons'
-import type { ColumnsType } from 'antd/es/table'
-import type { ConnectionConfig, ConnectionStatus } from '@/types'
+import type { ConnectionConfig, ConnectionGroup } from '@/types'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useWorkbenchStore } from '@/stores/workbenchStore'
-import { connectionApi } from '@/services/api'
-import { ConnectionStatusTag } from '@/components/StatusTag'
+import { connectionApi, groupApi } from '@/services/api'
 import { confirmDanger } from '@/components/confirmDanger'
 import { toast, handleApiError } from '@/utils/notification'
 import { ConnectionModal } from './ConnectionModal'
 import { EmptyState } from '@/components/EmptyState'
 import { useNavigate } from 'react-router-dom'
+import { ConnectionCard } from './ConnectionCard'
 
 const { Title, Text } = Typography
 
 export const ConnectionPage: React.FC = () => {
-  const { token } = theme.useToken()
   const navigate = useNavigate()
 
   // Store
@@ -50,34 +45,47 @@ export const ConnectionPage: React.FC = () => {
   const addConnection = useConnectionStore((s) => s.addConnection)
   const updateConnection = useConnectionStore((s) => s.updateConnection)
   const removeConnection = useConnectionStore((s) => s.removeConnection)
+  
+  const groups = useConnectionStore((s) => s.groups)
+  const setGroups = useConnectionStore((s) => s.setGroups)
+
   const addOpenConnection = useWorkbenchStore((s) => s.addOpenConnection)
 
   // Local state
   const [loading, setLoading] = useState(false)
   const [searchText, setSearchText] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
+  const [selectedGroup, setSelectedGroup] = useState<string>('all')
   const [modalOpen, setModalOpen] = useState(false)
   const [editingConn, setEditingConn] = useState<ConnectionConfig | null>(null)
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
-  const [testResult, setTestResult] = useState<{ connected: boolean; message: string } | null>(null)
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
   const [selectedConn, setSelectedConn] = useState<ConnectionConfig | null>(null)
-  const [batchTesting, setBatchTesting] = useState(false)
+  
+  // Group Model State
+  const [groupModalOpen, setGroupModalOpen] = useState(false)
+  const [editingGroup, setEditingGroup] = useState<ConnectionGroup | null>(null)
+  const [groupNameInput, setGroupNameInput] = useState('')
 
-  // 加载连接列表
-  const loadConnections = useCallback(async () => {
+  // 加载连接与分组列表
+  const loadAll = useCallback(async () => {
     setLoading(true)
     try {
-      const list = await connectionApi.list() as ConnectionConfig[]
-      setConnections(list)
+      const [connList, groupList] = await Promise.all([
+        connectionApi.list(),
+        groupApi.list()
+      ])
+      setConnections(connList as ConnectionConfig[])
+      setGroups(groupList as ConnectionGroup[])
     } catch (e) {
-      handleApiError(e, '加载连接列表失败')
+      handleApiError(e, '加载列表失败')
     } finally {
       setLoading(false)
     }
-  }, [setConnections])
+  }, [setConnections, setGroups])
 
-  useEffect(() => { loadConnections() }, [loadConnections])
+  useEffect(() => { loadAll() }, [loadAll])
 
   // 统计数据
   const stats = {
@@ -87,29 +95,31 @@ export const ConnectionPage: React.FC = () => {
     error: connections.filter((c) => c.status === 'error').length,
   }
 
-  // 搜索 + 状态过滤
+  // 搜索 + 状态过滤 + 分组过滤
   const filteredConnections = connections.filter((c) => {
     const matchSearch = c.name.toLowerCase().includes(searchText.toLowerCase()) ||
       c.host.toLowerCase().includes(searchText.toLowerCase())
     const matchStatus = statusFilter === 'all' || c.status === statusFilter
-    return matchSearch && matchStatus
+    const matchGroup = selectedGroup === 'all' || (selectedGroup === 'ungrouped' ? !c.groupId : c.groupId === selectedGroup)
+    
+    return matchSearch && matchStatus && matchGroup
   })
 
-  // 新建
+  // 新建连接
   const handleCreate = () => {
     setEditingConn(null)
     setTestResult(null)
     setModalOpen(true)
   }
 
-  // 编辑
+  // 编辑连接
   const handleEdit = (conn: ConnectionConfig) => {
     setEditingConn(conn)
     setTestResult(null)
     setModalOpen(true)
   }
 
-  // 保存
+  // 保存连接
   const handleSave = async (values: Partial<ConnectionConfig>) => {
     setSaving(true)
     try {
@@ -130,21 +140,21 @@ export const ConnectionPage: React.FC = () => {
     }
   }
 
-  // 测试连接
+  // 测试连接配置
   const handleTest = async (values: Partial<ConnectionConfig>) => {
     setTesting(true)
     setTestResult(null)
     try {
-      const result = await connectionApi.test(values) as { connected: boolean; message: string }
+      const result = await connectionApi.test(values) as { success: boolean; message: string }
       setTestResult(result)
     } catch (e) {
-      setTestResult({ connected: false, message: e instanceof Error ? e.message : '测试失败' })
+      setTestResult({ success: false, message: e instanceof Error ? e.message : '测试失败' })
     } finally {
       setTesting(false)
     }
   }
 
-  // 删除
+  // 删除连接
   const handleDelete = (conn: ConnectionConfig) => {
     confirmDanger({
       title: '确认删除',
@@ -158,20 +168,50 @@ export const ConnectionPage: React.FC = () => {
     })
   }
 
-  // 打开连接 → 跳转工作台
+  // ─── 分组操作 ───────────────────────────────────────────
+  const handleGroupSave = async () => {
+    if (!groupNameInput.trim()) return
+    try {
+      if (editingGroup) {
+         await groupApi.update(editingGroup.id, { ...editingGroup, name: groupNameInput })
+         toast.success('分组重命名成功')
+      } else {
+         await groupApi.create({ name: groupNameInput, sortOrder: groups.length })
+         toast.success('分组创建成功')
+      }
+      loadAll()
+      setGroupModalOpen(false)
+    } catch(e) { handleApiError(e) }
+  }
+
+  const handleDeleteGroup = (g: ConnectionGroup) => {
+    confirmDanger({
+      title: '删除分组',
+      content: `确定删除分组「${g.name}」吗？\n该操作仅删除分组本身，其包含的连接将被移至「未分组」。`,
+      onOk: async () => {
+        await groupApi.delete(g.id)
+        if (selectedGroup === g.id) setSelectedGroup('all')
+        
+        // 当一个组被删除，后端仅删除了Group，此时前如果还挂载原id会导致显示异常
+        // 我们可以在前端把包含该group的配置强制修改为 null 或者从后台重新全量拉取。
+        loadAll()
+        toast.success('分组删除成功')
+      }
+    })
+  }
+
+  // ─── END ───────────────────────────────────────────
+
   const handleOpen = async (conn: ConnectionConfig) => {
     try {
       await connectionApi.open(conn.id)
       updateConnection(conn.id, { status: 'connected' })
-      addOpenConnection(conn.id, conn.name)
       toast.success(`已连接到「${conn.name}」`)
-      navigate('/workbench')
     } catch (e) {
       handleApiError(e, '打开连接失败')
     }
   }
 
-  // 关闭连接
   const handleClose = async (conn: ConnectionConfig) => {
     try {
       await connectionApi.close(conn.id)
@@ -182,11 +222,15 @@ export const ConnectionPage: React.FC = () => {
     }
   }
 
-  // 行内测试连接
+  const handleEnterWorkbench = (conn: ConnectionConfig) => {
+    addOpenConnection(conn.id, conn.name)
+    navigate('/workbench')
+  }
+
   const handleTestInline = async (conn: ConnectionConfig) => {
     try {
-      const result = await connectionApi.test(conn) as { connected: boolean; message: string }
-      if (result.connected) {
+      const result = await connectionApi.test(conn) as { success: boolean; message: string }
+      if (result.success) {
         toast.success(`「${conn.name}」连接测试成功`)
       } else {
         toast.error(`「${conn.name}」连接测试失败：${result.message}`)
@@ -196,133 +240,73 @@ export const ConnectionPage: React.FC = () => {
     }
   }
 
-  // 批量测试未测试的连接
-  const handleBatchTest = async () => {
-    const untested = connections.filter((c) => c.status === 'disconnected')
-    if (untested.length === 0) {
-      toast.info('没有需要测试的连接')
-      return
-    }
-    setBatchTesting(true)
-    let successCount = 0
-    let failCount = 0
-    for (const conn of untested) {
-      try {
-        const result = await connectionApi.test(conn) as { connected: boolean; message: string }
-        if (result.connected) successCount++
-        else failCount++
-      } catch {
-        failCount++
-      }
-    }
-    setBatchTesting(false)
-    toast.success(`批量测试完成：${successCount} 成功，${failCount} 失败`)
-  }
-
-  // 表格列
-  const columns: ColumnsType<ConnectionConfig> = [
-    {
-      title: '连接名称',
-      dataIndex: 'name',
-      key: 'name',
-      render: (name: string, record) => (
-        <Space>
-          <ApiOutlined style={{ color: token.colorPrimary }} />
-          <a onClick={() => handleOpen(record)}>{name}</a>
-        </Space>
-      ),
-    },
-    {
-      title: '主机',
-      key: 'host',
-      render: (_, r) => `${r.host}:${r.port}`,
-      width: 200,
-    },
-    {
-      title: '用户名',
-      dataIndex: 'username',
-      key: 'username',
-      width: 120,
-    },
-    {
-      title: '数据库类型',
-      dataIndex: 'dbType',
-      key: 'dbType',
-      width: 100,
-      render: (type: string) => <Tag>{type.toUpperCase()}</Tag>,
-    },
-    {
-      title: '默认库',
-      dataIndex: 'database',
-      key: 'database',
-      width: 120,
-      render: (db: string) => db || <Text type="secondary">-</Text>,
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      key: 'status',
-      width: 100,
-      render: (status: ConnectionStatus) => <ConnectionStatusTag status={status} />,
-    },
-    {
-      title: '最近使用',
-      dataIndex: 'lastUsedAt',
-      key: 'lastUsedAt',
-      width: 140,
-      render: (v: string) => v ? <Text type="secondary" style={{ fontSize: 12 }}>{v}</Text> : <Text type="secondary">-</Text>,
-    },
-    {
-      title: '操作',
-      key: 'actions',
-      width: 160,
-      render: (_, record) => (
-        <Space size={4}>
-          {record.status === 'connected' ? (
-            <Tooltip title="关闭连接">
-              <Button type="text" size="small" icon={<DisconnectOutlined />} onClick={() => handleClose(record)} />
-            </Tooltip>
-          ) : (
-            <Tooltip title="打开连接">
-              <Button type="text" size="small" icon={<PlayCircleOutlined />} onClick={() => handleOpen(record)} />
-            </Tooltip>
-          )}
-          <Tooltip title="编辑">
-            <Button type="text" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)} />
-          </Tooltip>
-          <Dropdown menu={{
-            items: [
-              { key: 'test', label: '测试连接', icon: <ThunderboltOutlined /> },
-              { type: 'divider' },
-              { key: 'delete', label: '删除', danger: true, icon: <DeleteOutlined /> },
-            ],
-            onClick: ({ key }) => {
-              if (key === 'delete') handleDelete(record)
-              if (key === 'test') handleTestInline(record)
-            },
-          }}>
-            <Button type="text" size="small" icon={<EllipsisOutlined />} />
-          </Dropdown>
-        </Space>
-      ),
-    },
-  ]
-
   return (
     <Layout style={{ height: '100%' }}>
+      {/* 左侧分组导航 */}
+      <Layout.Sider
+        width={220}
+        theme="light"
+        style={{
+          borderRight: '1px solid var(--color-border)',
+          overflow: 'auto',
+          background: 'var(--color-bg-container)'
+        }}
+      >
+        <div style={{ padding: '24px 16px 8px 16px', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>连接分组</span>
+          <Button 
+            type="text" 
+            size="small" 
+            icon={<PlusOutlined />} 
+            onClick={() => { setEditingGroup(null); setGroupNameInput(''); setGroupModalOpen(true); }}
+            style={{ color: 'var(--color-primary)' }}
+          />
+        </div>
+        <Menu
+          mode="inline"
+          selectedKeys={[selectedGroup]}
+          style={{ borderRight: 'none', background: 'transparent' }}
+          onClick={(e) => setSelectedGroup(e.key)}
+          items={[
+            { key: 'all', icon: <ApiOutlined />, label: '所有连接' },
+            ...groups.map(g => ({
+              key: g.id, 
+              icon: <FolderOutlined />, 
+              label: (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
+                  <Dropdown menu={{
+                    items: [
+                      { key: 'edit', label: '重命名', onClick: (e) => { e.domEvent.stopPropagation(); setEditingGroup(g); setGroupNameInput(g.name); setGroupModalOpen(true); } },
+                      { key: 'delete', danger: true, label: '删除', onClick: (e) => { e.domEvent.stopPropagation(); handleDeleteGroup(g); } }
+                    ]
+                  }} trigger={['hover', 'click']}>
+                    <div onClick={e => e.stopPropagation()} style={{ padding: '0 4px', visibility: selectedGroup === g.id ? 'visible' : undefined }}>
+                      <EllipsisOutlined style={{ color: 'var(--color-text-secondary)', fontSize: 16 }} />
+                    </div>
+                  </Dropdown>
+                </div>
+              )
+            })),
+            { key: 'ungrouped', icon: <FolderOutlined />, label: '未分组' }
+          ]}
+        />
+      </Layout.Sider>
+
+      {/* 右侧主内容区 */}
       <Layout.Content style={{ overflow: 'auto', padding: 24 }}>
-        {/* 头部 */}
+        {/* 头部操作区 */}
         <div style={{
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          marginBottom: 16,
+          marginBottom: 24,
         }}>
           <Title level={4} style={{ margin: 0 }}>
-            <ApiOutlined style={{ marginRight: 8 }} />
-            连接管理
+            {selectedGroup === 'all' ? '所有连接' : selectedGroup === 'ungrouped' ? '未分组连接' : groups.find(g => g.id === selectedGroup)?.name || selectedGroup} 
+            <Text type="secondary" style={{ fontSize: 16, marginLeft: 8 }}>({filteredConnections.length})</Text>
           </Title>
           <Space>
             <Input
-              placeholder="搜索连接..."
+              placeholder="搜索主机或名称..."
               prefix={<SearchOutlined />}
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
@@ -340,87 +324,67 @@ export const ConnectionPage: React.FC = () => {
                 { value: 'error', label: '异常' },
               ]}
             />
-            <Button icon={<ReloadOutlined />} onClick={loadConnections} />
-            <Button onClick={handleBatchTest} loading={batchTesting}>
-              批量测试
-            </Button>
+            <Button icon={<ReloadOutlined />} onClick={loadAll} />
             <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
               新建连接
             </Button>
           </Space>
         </div>
 
-        {/* 概览卡片 */}
-        <Row gutter={16} style={{ marginBottom: 16 }}>
-          <Col span={6}>
-            <Card size="small">
-              <Statistic title="连接总数" value={stats.total} prefix={<ApiOutlined />} />
-            </Card>
-          </Col>
-          <Col span={6}>
-            <Card size="small">
-              <Statistic
-                title="已连接"
-                value={stats.connected}
-                valueStyle={{ color: token.colorSuccess }}
-                prefix={<CheckCircleOutlined />}
-              />
-            </Card>
-          </Col>
-          <Col span={6}>
-            <Card size="small">
-              <Statistic
-                title="未连接"
-                value={stats.disconnected}
-                valueStyle={{ color: token.colorTextSecondary }}
-                prefix={<DisconnectOutlined />}
-              />
-            </Card>
-          </Col>
-          <Col span={6}>
-            <Card size="small">
-              <Statistic
-                title="异常"
-                value={stats.error}
-                valueStyle={{ color: token.colorError }}
-                prefix={<ExclamationCircleOutlined />}
-              />
-            </Card>
-          </Col>
-        </Row>
+        {/* 概览统计 */}
+        {selectedGroup === 'all' && (
+          <Row gutter={16} style={{ marginBottom: 24 }}>
+            <Col span={6}>
+              <Card size="small" bordered={false} style={{ background: 'var(--color-bg-elevated)', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
+                <Statistic title="连接总数" value={stats.total} prefix={<ApiOutlined />} />
+              </Card>
+            </Col>
+            <Col span={6}>
+              <Card size="small" bordered={false} style={{ background: 'var(--color-bg-elevated)', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
+                <Statistic title="已连接" value={stats.connected} valueStyle={{ color: 'var(--color-success)' }} prefix={<CheckCircleOutlined />} />
+              </Card>
+            </Col>
+            <Col span={6}>
+              <Card size="small" bordered={false} style={{ background: 'var(--color-bg-elevated)', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
+                <Statistic title="未连接" value={stats.disconnected} valueStyle={{ color: 'var(--color-text-secondary)' }} prefix={<DisconnectOutlined />} />
+              </Card>
+            </Col>
+            <Col span={6}>
+              <Card size="small" bordered={false} style={{ background: 'var(--color-bg-elevated)', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
+                <Statistic title="异常" value={stats.error} valueStyle={{ color: 'var(--color-error)' }} prefix={<ExclamationCircleOutlined />} />
+              </Card>
+            </Col>
+          </Row>
+        )}
 
-        {/* 连接表格 */}
-        {connections.length === 0 && !loading ? (
+        {/* CSS Grid 连接卡片区 */}
+        {filteredConnections.length === 0 && !loading ? (
           <EmptyState
-            description="暂无连接，点击「新建连接」开始"
+            description={searchText || statusFilter !== 'all' ? '没有匹配的连接' : '暂无连接，点击「新建连接」开始'}
             actionText="新建连接"
             onAction={handleCreate}
           />
         ) : (
-          <Table
-            columns={columns}
-            dataSource={filteredConnections}
-            rowKey="id"
-            loading={loading}
-            pagination={false}
-            size="middle"
-            onRow={(record) => ({
-              onClick: () => setSelectedConn(record),
-              style: {
-                cursor: 'pointer',
-                background: selectedConn?.id === record.id ? token.colorPrimaryBg : undefined,
-              },
-            })}
-            locale={{
-              emptyText: searchText || statusFilter !== 'all'
-                ? '没有匹配的连接'
-                : '暂无连接',
-            }}
-            style={{
-              background: token.colorBgContainer,
-              borderRadius: token.borderRadius,
-            }}
-          />
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+            gap: 16
+          }}>
+            {filteredConnections.map((conn) => (
+              <ConnectionCard
+                key={conn.id}
+                connection={conn}
+                selected={selectedConn?.id === conn.id}
+                onClick={() => setSelectedConn(conn)}
+                onOpen={() => handleOpen(conn)}
+                onClose={() => handleClose(conn)}
+                onEnterWorkbench={() => handleEnterWorkbench(conn)}
+                onEdit={() => handleEdit(conn)}
+                onDelete={() => handleDelete(conn)}
+                onTest={() => handleTestInline(conn)}
+              />
+            ))}
+          </div>
         )}
 
         {/* 新建/编辑弹窗 */}
@@ -428,69 +392,34 @@ export const ConnectionPage: React.FC = () => {
           open={modalOpen}
           editingConnection={editingConn}
           confirmLoading={saving}
+          existingGroups={groups}
           onSave={handleSave}
           onCancel={() => setModalOpen(false)}
           onTest={handleTest}
           testResult={testResult}
           testing={testing}
         />
-      </Layout.Content>
-
-      {/* 右侧摘要区 */}
-      {selectedConn && (
-        <Layout.Sider
-          width={240}
-          style={{
-            background: token.colorBgContainer,
-            borderLeft: `1px solid ${token.colorBorderSecondary}`,
-            overflow: 'auto',
-            padding: 16,
-          }}
+        
+        {/* 新增/编辑 分组弹窗 */}
+        <Modal
+           title={editingGroup ? "重命名分组" : "新建分组"}
+           open={groupModalOpen}
+           onOk={handleGroupSave}
+           onCancel={() => setGroupModalOpen(false)}
+           okText="保存"
+           cancelText="取消"
+           destroyOnClose
+           width={400}
         >
-          <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            <Text strong style={{ fontSize: 14 }}>
-              <ApiOutlined style={{ marginRight: 4 }} />
-              {selectedConn.name}
-            </Text>
-
-            <Descriptions column={1} size="small">
-              <Descriptions.Item label="主机">{selectedConn.host}:{selectedConn.port}</Descriptions.Item>
-              <Descriptions.Item label="用户名">{selectedConn.username}</Descriptions.Item>
-              <Descriptions.Item label="数据库类型">{selectedConn.dbType.toUpperCase()}</Descriptions.Item>
-              <Descriptions.Item label="默认库">{selectedConn.database || '-'}</Descriptions.Item>
-              <Descriptions.Item label="状态"><ConnectionStatusTag status={selectedConn.status} /></Descriptions.Item>
-              <Descriptions.Item label="最近使用">{selectedConn.lastUsedAt || '-'}</Descriptions.Item>
-            </Descriptions>
-
-            <Space direction="vertical" size={8} style={{ width: '100%' }}>
-              <Text strong style={{ fontSize: 12 }}>推荐操作</Text>
-              {selectedConn.status === 'connected' ? (
-                <>
-                  <Button block size="small" type="primary" onClick={() => {
-                    addOpenConnection(selectedConn.id, selectedConn.name)
-                    navigate('/workbench')
-                  }}>
-                    进入工作台
-                  </Button>
-                  <Button block size="small" onClick={() => handleClose(selectedConn)}>
-                    关闭连接
-                  </Button>
-                </>
-              ) : (
-                <Button block size="small" type="primary" onClick={() => handleOpen(selectedConn)}>
-                  打开连接
-                </Button>
-              )}
-              <Button block size="small" onClick={() => handleEdit(selectedConn)}>
-                编辑连接
-              </Button>
-              <Button block size="small" onClick={() => handleTestInline(selectedConn)}>
-                测试连接
-              </Button>
-            </Space>
-          </Space>
-        </Layout.Sider>
-      )}
+           <Input 
+              value={groupNameInput} 
+              onChange={e => setGroupNameInput(e.target.value)} 
+              placeholder="请输入分组名称"
+              onPressEnter={handleGroupSave}
+              autoFocus
+           />
+        </Modal>
+      </Layout.Content>
     </Layout>
   )
 }

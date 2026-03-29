@@ -14,7 +14,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-import React from 'react'
+import React, { useEffect } from 'react'
 import { Layout, Menu, theme, Typography, Space, Breadcrumb } from 'antd'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
@@ -28,9 +28,14 @@ import {
   SettingOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  PlayCircleOutlined,
+  BgColorsOutlined,
 } from '@ant-design/icons'
 import { useWorkbenchStore } from '@/stores/workbenchStore'
+import { useCommandStore } from '@/stores/commandStore'
+import { useThemeStore } from '@/stores/themeStore'
 import { ConnectionStatusTag } from '@/components/StatusTag'
+import { CommandPalette } from '@/components/CommandPalette'
 
 const { Sider, Content, Header } = Layout
 const { Text } = Typography
@@ -66,18 +71,47 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   const location = useLocation()
   const { token } = theme.useToken()
 
+  const themeMode = useThemeStore((s) => s.themeMode)
+  const setThemeMode = useThemeStore((s) => s.setThemeMode)
+  const registerCommand = useCommandStore((s) => s.registerCommand)
+  const unregisterCommand = useCommandStore((s) => s.unregisterCommand)
+
   const activeConnectionName = useWorkbenchStore((s) => s.activeConnectionName)
   const activeDatabase = useWorkbenchStore((s) => s.activeDatabase)
   const siderCollapsed = useWorkbenchStore((s) => s.siderCollapsed)
   const setSiderCollapsed = useWorkbenchStore((s) => s.setSiderCollapsed)
 
   const currentTitle = pageTitle[location.pathname] ?? ''
+  const isSqlEditor = location.pathname === '/sql-editor'
 
-  // 面包屑项
+  useEffect(() => {
+    const defaultCommands = [
+      { id: 'nav-conn', title: '前往 连接管理', category: 'Navigation', icon: <ApiOutlined />, action: () => navigate('/connection') },
+      { id: 'nav-wb', title: '前往 工作台', category: 'Navigation', icon: <DatabaseOutlined />, action: () => navigate('/workbench') },
+      { id: 'nav-sql', title: '前往 SQL 编辑器', category: 'Navigation', icon: <CodeOutlined />, action: () => navigate('/sql-editor') },
+      { id: 'nav-mig', title: '前往 数据迁移', category: 'Navigation', icon: <SwapOutlined />, action: () => navigate('/migration') },
+      { id: 'nav-sync', title: '前往 数据同步', category: 'Navigation', icon: <SyncOutlined />, action: () => navigate('/sync') },
+      { id: 'nav-comp', title: '前往 结构对比', category: 'Navigation', icon: <DiffOutlined />, action: () => navigate('/structure-compare') },
+      { id: 'nav-task', title: '前往 任务中心', category: 'Navigation', icon: <UnorderedListOutlined />, action: () => navigate('/task-center') },
+      { id: 'nav-sett', title: '前往 设置', category: 'Navigation', icon: <SettingOutlined />, action: () => navigate('/settings') },
+      { id: 'theme-toggle', title: '切换 深色/浅色 主题', category: 'Preferences', icon: <BgColorsOutlined />, action: () => setThemeMode(themeMode === 'dark' ? 'light' : 'dark') },
+      { id: 'run-sql', title: '执行选中的 SQL (如果可用)', category: 'Editor', icon: <PlayCircleOutlined />, shortcut: ['Cmd', 'Enter'], action: () => {
+          document.dispatchEvent(new CustomEvent('easydb-run-sql'))
+      }}
+    ]
+
+    defaultCommands.forEach(registerCommand)
+    
+    return () => {
+      defaultCommands.forEach(c => unregisterCommand(c.id))
+    }
+  }, [navigate, themeMode, setThemeMode, registerCommand, unregisterCommand])
+
+  // 面包屑项（SQL 编辑器内部有自己的上下文，不显示全局上下文）
   const breadcrumbItems = [
     { title: currentTitle },
-    ...(activeConnectionName ? [{ title: activeConnectionName }] : []),
-    ...(activeDatabase ? [{ title: activeDatabase }] : []),
+    ...(!isSqlEditor && activeConnectionName ? [{ title: activeConnectionName }] : []),
+    ...(!isSqlEditor && activeDatabase ? [{ title: activeDatabase }] : []),
   ]
 
   return (
@@ -157,7 +191,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
 
           {/* 右侧：当前连接状态 */}
           <Space size={12}>
-            {activeConnectionName ? (
+            {!isSqlEditor && activeConnectionName ? (
               <>
                 <Text type="secondary" style={{ fontSize: 13 }}>
                   <DatabaseOutlined style={{ marginRight: 4 }} />
@@ -166,11 +200,11 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                 </Text>
                 <ConnectionStatusTag status="connected" />
               </>
-            ) : (
+            ) : !isSqlEditor ? (
               <Text type="secondary" style={{ fontSize: 13 }}>
                 未连接
               </Text>
-            )}
+            ) : null}
           </Space>
         </Header>
 
@@ -185,6 +219,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
           {children}
         </Content>
       </Layout>
+      <CommandPalette />
     </Layout>
   )
 }

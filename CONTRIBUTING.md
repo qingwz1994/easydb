@@ -65,7 +65,7 @@ fix(连接管理): 修复连接断开后状态未更新
 3. 提交代码，确保通过编译检查：
    - 前端：`cd apps/desktop-ui && npx tsc --noEmit`
    - 后端：`cd kernel && ./gradlew build -x test`
-4. 提交 PR 到 `dev/v1.2` 分支
+4. 提交 PR 到 `dev/v1.3.0` 分支
 5. 等待代码审核
 
 ## 许可证

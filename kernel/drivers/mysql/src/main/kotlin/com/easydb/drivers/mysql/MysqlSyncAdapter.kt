@@ -1,6 +1,11 @@
 package com.easydb.drivers.mysql
 
 import com.easydb.common.*
+import java.sql.ResultSet
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.Dispatchers
 
 /**
  * MySQL 同步适配器
@@ -239,10 +244,6 @@ class MysqlSyncAdapter : SyncAdapter {
         }
     }
 
-    /**
-     * 同步表数据
-     * @param useInsert true=INSERT INTO（首次导入），false=INSERT ON DUPLICATE KEY UPDATE（增量）
-     */
     private fun syncTableData(
         sourceConn: java.sql.Connection,
         targetConn: java.sql.Connection,
@@ -258,65 +259,110 @@ class MysqlSyncAdapter : SyncAdapter {
         val fullTargetTable = "$targetPrefix$quotedTable"
         var totalRows = 0L
 
+        // 获取列元数据
+        val columns = mutableListOf<String>()
+        val timeColumns = mutableSetOf<Int>()
+        var columnCount = 0
+
         sourceConn.createStatement().use { stmt ->
-            stmt.fetchSize = batchSize // 按批次拉取，避免全量加载到内存
-            stmt.executeQuery("SELECT * FROM $fullSourceTable").use { rs ->
+            stmt.executeQuery("SELECT * FROM $fullSourceTable LIMIT 0").use { rs ->
                 val meta = rs.metaData
-                val columnCount = meta.columnCount
-                val columns = (1..columnCount).map { meta.getColumnName(it) }
-
-                if (columns.isEmpty()) return 0L
-
-                // 识别 TIME 类型列，绕过 JDBC Time 解析（修复 24:00:00 等超范围值）
-                val timeColumns = (1..columnCount).filter {
-                    meta.getColumnType(it) == java.sql.Types.TIME
-                }.toSet()
-
-                val cols = columns.joinToString(", ") { dialect.quoteIdentifier(it) }
-                val placeholders = columns.joinToString(", ") { "?" }
-
-                // 根据策略生成 SQL
-                val sql = if (useInsert) {
-                    "INSERT INTO $fullTargetTable ($cols) VALUES ($placeholders)"
-                } else {
-                    // INSERT ... ON DUPLICATE KEY UPDATE
-                    val updateCols = columns.joinToString(", ") {
-                        val quoted = dialect.quoteIdentifier(it)
-                        "$quoted = VALUES($quoted)"
+                columnCount = meta.columnCount
+                for (i in 1..columnCount) {
+                    columns.add(meta.getColumnName(i))
+                    if (meta.getColumnType(i) == java.sql.Types.TIME) {
+                        timeColumns.add(i)
                     }
-                    "INSERT INTO $fullTargetTable ($cols) VALUES ($placeholders) ON DUPLICATE KEY UPDATE $updateCols"
                 }
+            }
+        }
 
+        if (columns.isEmpty()) return 0L
+
+        val colsStr = columns.joinToString(", ") { dialect.quoteIdentifier(it) }
+        val placeholders = columns.joinToString(", ") { "?" }
+
+        // 根据策略生成 SQL
+        val sql = if (useInsert) {
+            "INSERT INTO $fullTargetTable ($colsStr) VALUES ($placeholders)"
+        } else {
+            val updateCols = columns.joinToString(", ") {
+                val quoted = dialect.quoteIdentifier(it)
+                "$quoted = VALUES($quoted)"
+            }
+            "INSERT INTO $fullTargetTable ($colsStr) VALUES ($placeholders) ON DUPLICATE KEY UPDATE $updateCols"
+        }
+
+        // 引入协程 Channel 构建背压管道 (容量=2 意味着内存最多缓冲 2 个批次的数据)
+        val channel = Channel<List<Array<Any?>>>(capacity = 2)
+
+        runBlocking {
+            // 消费者协程：负责不断从 Channel 取数据并写入目标库
+            launch(Dispatchers.IO) {
                 targetConn.autoCommit = false
                 try {
                     targetConn.prepareStatement(sql).use { ps ->
-                        while (rs.next()) {
-                            for (i in 1..columnCount) {
-                                if (i in timeColumns) {
-                                    ps.setString(i, rs.getString(i))
-                                } else {
-                                    ps.setObject(i, rs.getObject(i))
+                        for (batch in channel) {
+                            for (row in batch) {
+                                for (i in 0 until columnCount) {
+                                    if ((i + 1) in timeColumns && row[i] is String) {
+                                        ps.setString(i + 1, row[i] as String)
+                                    } else {
+                                        ps.setObject(i + 1, row[i])
+                                    }
                                 }
+                                ps.addBatch()
+                                totalRows++
                             }
-                            ps.addBatch()
-                            totalRows++
-
-                            if (totalRows % batchSize == 0L) {
-                                ps.executeBatch()
-                                targetConn.commit()
-                                // 大数据量定期报告进度
-                                if (totalRows % (batchSize * 10) == 0L) {
-                                    reporter.onLog("INFO", "[$tableName] 已同步 $totalRows 行...")
-                                }
+                            ps.executeBatch()
+                            targetConn.commit()
+                            
+                            // 大数据量定期报告进度
+                            if (totalRows % (batchSize * 10) == 0L) {
+                                reporter.onLog("INFO", "[$tableName] 已同步 $totalRows 行...")
                             }
                         }
-                        // 提交剩余
-                        ps.executeBatch()
-                        targetConn.commit()
                     }
                 } finally {
                     targetConn.autoCommit = true
                 }
+            }
+
+            // 生产者：当前线程作为生产者，流式读取源库并填入 Channel
+            try {
+                sourceConn.createStatement(
+                    java.sql.ResultSet.TYPE_FORWARD_ONLY,
+                    java.sql.ResultSet.CONCUR_READ_ONLY
+                ).use { stmt ->
+                    // MySQL 核心机制：强制触发真正的流式传输而不是全部装入 JVM 内存！
+                    stmt.fetchSize = Integer.MIN_VALUE
+                    stmt.executeQuery("SELECT * FROM $fullSourceTable").use { rs ->
+                        var currentBatch = ArrayList<Array<Any?>>(batchSize)
+                        while (rs.next()) {
+                            val row = Array<Any?>(columnCount) { null }
+                            for (i in 1..columnCount) {
+                                if (i in timeColumns) {
+                                    row[i - 1] = rs.getString(i)
+                                } else {
+                                    row[i - 1] = rs.getObject(i)
+                                }
+                            }
+                            currentBatch.add(row)
+
+                            if (currentBatch.size >= batchSize) {
+                                // 背压阻塞点：如果消费者较慢，Channel 满时挂起协程，停止向 MySQL 请求新数据
+                                channel.send(currentBatch)
+                                currentBatch = ArrayList(batchSize)
+                            }
+                        }
+                        // 发送最后遗留的批次
+                        if (currentBatch.isNotEmpty()) {
+                            channel.send(currentBatch)
+                        }
+                    }
+                }
+            } finally {
+                channel.close() // 读取完毕，关闭管道通知消费者终止循环
             }
         }
 

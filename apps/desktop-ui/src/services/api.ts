@@ -89,6 +89,17 @@ export const connectionApi = {
     request(`/api/connection/${id}/close`, { method: 'POST' }),
 }
 
+// ─── 连接分组 ───────────────────────────────────────────
+export const groupApi = {
+  list: () => request('/api/groups/list'),
+  create: (data: unknown) =>
+    request('/api/groups/create', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: unknown) =>
+    request(`/api/groups/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (id: string) =>
+    request(`/api/groups/${id}`, { method: 'DELETE' }),
+}
+
 // ─── 元数据 ─────────────────────────────────────────────
 export const metadataApi = {
   databases: (connectionId: string) =>
@@ -153,6 +164,31 @@ export const sqlApi = {
       method: 'POST',
       body: JSON.stringify({ connectionId, database, sql }),
     }),
+  querySessionStart: (config: { connectionId: string; database: string; sql: string; pageSize?: number; maxCellChars?: number }) =>
+    request('/api/sql/query-session/start', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    }),
+  querySessionFetch: (config: { querySessionId: string; pageSize?: number; maxCellChars?: number }) =>
+    request('/api/sql/query-session/fetch', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    }),
+  querySessionStatus: (querySessionId: string) =>
+    request('/api/sql/query-session/status', {
+      method: 'POST',
+      body: JSON.stringify({ querySessionId }),
+    }),
+  querySessionClose: (querySessionId: string) =>
+    request('/api/sql/query-session/close', {
+      method: 'POST',
+      body: JSON.stringify({ querySessionId }),
+    }),
+  importFileStart: (config: { connectionId: string; database: string; filePath: string; fileName?: string }) =>
+    request('/api/sql/import-file/start', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    }),
   historyList: (connectionId: string) =>
     request(`/api/sql/history?connectionId=${connectionId}`),
 }
@@ -177,14 +213,22 @@ export const syncApi = {
     request('/api/sync/start', { method: 'POST', body: JSON.stringify(config) }),
 }
 
+// ─── 数据库导出 ────────────────────────────────────────────
+export const exportApi = {
+  estimate: (config: unknown) =>
+    request('/api/export/estimate', { method: 'POST', body: JSON.stringify(config) }),
+  start: (config: unknown) =>
+    request('/api/export/start', { method: 'POST', body: JSON.stringify(config) }),
+}
+
 // ─── 任务中心 ────────────────────────────────────────────
 export const taskApi = {
   list: (status?: string) =>
     request(`/api/task/list${status ? `?status=${status}` : ''}`),
   detail: (taskId: string) =>
-    request(`/api/task/${taskId}`),
+    request(`/api/task/${taskId}`, { cache: 'no-store' }),
   logs: (taskId: string) =>
-    request(`/api/task/${taskId}/logs`),
+    request(`/api/task/${taskId}/logs`, { cache: 'no-store' }),
   steps: (taskId: string) =>
     request(`/api/task/${taskId}/steps`),
   cancel: (taskId: string) =>
@@ -199,4 +243,23 @@ export const taskApi = {
 export const compareApi = {
   execute: (config: unknown) =>
     request('/api/compare/execute', { method: 'POST', body: JSON.stringify(config) }),
+}
+
+// ─── 脚本收藏 ────────────────────────────────────────────
+export const scriptApi = {
+  list: () => request('/api/scripts/list'),
+  save: (data: { id?: string; name: string; content: string; database?: string }) =>
+    request('/api/scripts/save', { method: 'POST', body: JSON.stringify(data) }),
+  delete: (id: string) =>
+    request(`/api/scripts/${id}`, { method: 'DELETE' }),
+}
+
+// ─── 存储管理 ────────────────────────────────────────────
+export const storageApi = {
+  info: () => request('/api/storage/info'),
+  cleanup: (target: string, mode: string, days?: number) =>
+    request('/api/storage/cleanup', {
+      method: 'POST',
+      body: JSON.stringify({ target, mode, days: days ?? 3 }),
+    }),
 }

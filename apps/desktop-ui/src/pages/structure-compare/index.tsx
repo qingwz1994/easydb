@@ -17,13 +17,13 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import {
   Layout, Select, Button, Space, Typography, Checkbox, Table, Tabs, Tag,
-  Card, List, Alert, Divider, theme, Spin,
+  Card, List, Alert, Divider, theme, Spin, Popover
 } from 'antd'
 import {
   DiffOutlined, PlayCircleOutlined, CopyOutlined,
   WarningOutlined, CheckCircleOutlined, SendOutlined,
   DownloadOutlined, ReloadOutlined,
-  ApiOutlined, DatabaseOutlined, SettingOutlined,
+  SwapRightOutlined, DatabaseOutlined, SettingOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import type { ColumnsType } from 'antd/es/table'
@@ -275,86 +275,103 @@ export const StructureComparePage: React.FC = () => {
     { title: '差异说明', dataIndex: 'details', key: 'details', ellipsis: true, render: (v: string) => v || '一致' },
   ]
 
+  const optionsContent = (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 200, padding: '8px 4px' }}>
+      <Checkbox checked={options.ignoreComment} onChange={(e) => setOptions({ ...options, ignoreComment: e.target.checked })}>
+        忽略表注释 (Ignore Comment)
+      </Checkbox>
+      <Checkbox checked={options.ignoreAutoIncrement} onChange={(e) => setOptions({ ...options, ignoreAutoIncrement: e.target.checked })}>
+        忽略自增初始值 (Ignore AUTO_INCREMENT)
+      </Checkbox>
+      <Checkbox checked={options.ignoreCharset} onChange={(e) => setOptions({ ...options, ignoreCharset: e.target.checked })}>
+        忽略字符集 (Ignore Charset)
+      </Checkbox>
+      <Checkbox checked={options.ignoreCollation} onChange={(e) => setOptions({ ...options, ignoreCollation: e.target.checked })}>
+        忽略排序规则 (Ignore Collation)
+      </Checkbox>
+      <Divider style={{ margin: '4px 0' }} />
+      <Checkbox checked={options.includeDropStatements} onChange={(e) => setOptions({ ...options, includeDropStatements: e.target.checked })}>
+        <Text type={options.includeDropStatements ? 'danger' : undefined}>
+          包含删除语句 (Include Drop Statements)
+        </Text>
+      </Checkbox>
+    </div>
+  )
+
   return (
     <Layout style={{ height: '100%' }}>
-      {/* 顶部配置栏 */}
+      {/* 顶部配置栏 (迷你双屏) */}
       <div style={{
-        padding: '12px 16px',
+        padding: '16px 24px',
         background: token.colorBgContainer,
         borderBottom: `1px solid ${token.colorBorderSecondary}`,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.02)',
+        zIndex: 10
       }}>
-        <Space size={16} wrap>
-          <Space size={4}>
-            <ApiOutlined />
-            <Text type="secondary">源连接</Text>
+        <div style={{ display: 'flex', alignItems: 'center', flex: 1, gap: 16 }}>
+          {/* 左侧：源端 */}
+          <div style={{ 
+            display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', 
+            background: token.colorBgLayout, borderRadius: 8, 
+            border: `1px solid ${sourceConnId ? token.colorPrimaryBorder : token.colorBorderSecondary}` 
+          }}>
+            <Text strong type="secondary" style={{ width: 45, color: token.colorPrimary }}><DatabaseOutlined style={{ marginRight: 4 }}/>源端:</Text>
             <Select
-              size="small" style={{ width: 180 }} placeholder="选择源连接"
+              style={{ width: 180 }} placeholder="选择源连接"
               value={sourceConnId} onChange={(v) => handleConnectionSelect(v, 'source')}
-              options={connOptions} listHeight={320}
+              options={connOptions} listHeight={320} bordered={false}
             />
-          </Space>
-          <Space size={4}>
-            <DatabaseOutlined />
-            <Text type="secondary">源数据库</Text>
+            <Divider type="vertical" />
             <Select
-              size="small" style={{ width: 140 }} placeholder="选择数据库"
+              style={{ width: 150 }} placeholder="源数据库"
               value={sourceDb} onChange={setSourceDb}
               options={sourceDbs.map((d) => ({ label: d, value: d }))}
-              disabled={!sourceConnId} showSearch
+              disabled={!sourceConnId} showSearch bordered={false}
             />
-          </Space>
-          <Divider type="vertical" />
-          <Space size={4}>
-            <ApiOutlined />
-            <Text type="secondary">目标连接</Text>
+          </div>
+
+          <div style={{ padding: '0 8px', background: token.colorBgContainer, borderRadius: '50%', boxShadow: '0 2px 6px rgba(0,0,0,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32 }}>
+            <SwapRightOutlined style={{ fontSize: 18, color: token.colorPrimary }} />
+          </div>
+
+          {/* 右侧：目标端 */}
+          <div style={{ 
+            display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', 
+            background: token.colorBgLayout, borderRadius: 8, 
+            border: `1px solid ${targetConnId ? token.colorSuccessBorder : token.colorBorderSecondary}` 
+          }}>
+            <Text strong type="secondary" style={{ width: 45, color: token.colorSuccess }}><DatabaseOutlined style={{ marginRight: 4 }}/>目标:</Text>
             <Select
-              size="small" style={{ width: 180 }} placeholder="选择目标连接"
+              style={{ width: 180 }} placeholder="选择目标连接"
               value={targetConnId} onChange={(v) => handleConnectionSelect(v, 'target')}
-              options={connOptions} listHeight={320}
+              options={connOptions} listHeight={320} bordered={false}
             />
-          </Space>
-          <Space size={4}>
-            <DatabaseOutlined />
-            <Text type="secondary">目标数据库</Text>
+            <Divider type="vertical" />
             <Select
-              size="small" style={{ width: 140 }} placeholder="选择数据库"
+              style={{ width: 150 }} placeholder="目标数据库"
               value={targetDb} onChange={setTargetDb}
               options={targetDbs.map((d) => ({ label: d, value: d }))}
-              disabled={!targetConnId} showSearch
+              disabled={!targetConnId} showSearch bordered={false}
             />
-          </Space>
+          </div>
+        </div>
+
+        <Space size="middle">
+          <Popover content={optionsContent} title="对比高级设置" trigger="click" placement="bottomRight">
+            <Button size="large" icon={<SettingOutlined />}>高级选项</Button>
+          </Popover>
           <Button
-            type="primary" size="small" icon={<PlayCircleOutlined />}
+            type="primary" size="large" icon={<PlayCircleOutlined />}
             onClick={handleCompare} loading={comparing}
             disabled={!sourceConnId || !targetConnId || !sourceDb || !targetDb}
+            style={{ paddingLeft: 32, paddingRight: 32 }}
           >
-            开始对比
+            执行结构对比
           </Button>
         </Space>
-
-        {/* 对比选项 */}
-        <div style={{ marginTop: 8 }}>
-          <Space size={16}>
-            <SettingOutlined style={{ color: token.colorTextSecondary }} />
-            <Checkbox checked={options.ignoreComment} onChange={(e) => setOptions({ ...options, ignoreComment: e.target.checked })}>
-              忽略表注释
-            </Checkbox>
-            <Checkbox checked={options.ignoreAutoIncrement} onChange={(e) => setOptions({ ...options, ignoreAutoIncrement: e.target.checked })}>
-              忽略 AUTO_INCREMENT
-            </Checkbox>
-            <Checkbox checked={options.ignoreCharset} onChange={(e) => setOptions({ ...options, ignoreCharset: e.target.checked })}>
-              忽略字符集
-            </Checkbox>
-            <Checkbox checked={options.ignoreCollation} onChange={(e) => setOptions({ ...options, ignoreCollation: e.target.checked })}>
-              忽略排序规则
-            </Checkbox>
-            <Checkbox checked={options.includeDropStatements} onChange={(e) => setOptions({ ...options, includeDropStatements: e.target.checked })}>
-              <Text type={options.includeDropStatements ? 'danger' : undefined}>
-                包含删除类 SQL
-              </Text>
-            </Checkbox>
-          </Space>
-        </div>
       </div>
 
       {/* 主体区域 */}

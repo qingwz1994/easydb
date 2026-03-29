@@ -1,6 +1,6 @@
-// launcher 模块：HTTP 服务器，暴露给前端消费
 plugins {
     kotlin("jvm")
+    kotlin("plugin.serialization")
     id("com.github.johnrengelman.shadow") version "8.1.1"
     application
 }

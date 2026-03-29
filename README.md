@@ -5,53 +5,71 @@
 <h1 align="center">EasyDB</h1>
 
 <p align="center">
-  <strong>开源、跨平台的数据库管理工具</strong><br>
-  连接管理 · 对象浏览 · SQL 编辑器 · 数据迁移 · 数据同步 · 任务中心
+  <strong>Open-source, cross-platform database management tool</strong><br>
+  Connection Management · Object Browser · SQL Editor · Data Migration · Data Sync · Data Export · Task Center · Storage Management
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="Platform">
   <img src="https://img.shields.io/badge/database-MySQL-4479A1?logo=mysql&logoColor=white" alt="MySQL">
-  <img src="https://img.shields.io/badge/version-1.2.0-green" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.3.0-green" alt="Version">
+</p>
+
+<p align="center">
+  <a href="README.zh-CN.md">🇨🇳 中文文档</a>
 </p>
 
 ---
 
-## ✨ 功能特性
+## ✨ Features
 
-### 🔌 连接管理
-- 支持 MySQL 连接的创建、编辑、测试、分组、搜索
-- SSH 隧道连接支持
+### 🔌 Connection Management
+- Create, edit, test, group, and search MySQL connections
+- SSH tunnel support
 
-### 🗂️ 数据库工作台
-- 对象树浏览（数据库 → 表 → 列/索引）
-- 数据预览（支持 WHERE 筛选 + 列排序 + 字段自动补全）
-- 表结构查看、DDL 查看
+### 🗂️ Database Workbench
+- Object tree browser (Database → Table → Columns / Indexes)
+- Data preview with WHERE filter, column sorting, and field auto-completion
+- Table structure and DDL viewer
 
-### ✏️ SQL 编辑器
-- 基于 Monaco Editor，支持语法高亮
-- **智能补全**：表名、字段名、SQL 关键字、MySQL 函数
-- 上下文感知：自动识别 FROM/JOIN 子句中的表并提示字段
-- 支持选中部分执行、`⌘+Enter` 快捷执行
+### ✏️ SQL Editor
+- Powered by Monaco Editor with syntax highlighting
+- **Smart auto-completion**: table names, column names, SQL keywords, MySQL functions
+- Context-aware: auto-detects tables in FROM/JOIN clauses and suggests columns
+- Execute selected text or full script with `⌘+Enter`
 
-### 🚀 数据迁移
-- 向导式操作：选择连接 → 选择对象 → 配置策略 → 确认执行
-- 支持结构迁移 + 数据迁移
+### 🚀 Data Migration
+- Wizard-style workflow: Select Connection → Select Objects → Configure Strategy → Execute
+- Supports both schema migration and data migration
 
-### 🔄 数据同步
-- 表级实时同步，支持 INSERT / UPSERT 策略
-- **性能优化**：190 万行同步 48 分 → 5 分 25 秒（9 倍提速）
-  - `rewriteBatchedStatements` 批量写入
-  - 同步期间关闭 `unique_checks` / `foreign_key_checks`
-  - 动态 batch size（普通表 5000，大表 10000）
+### 🔄 Data Sync
+- Table-level real-time sync with INSERT / UPSERT strategies
+- **Performance optimized**: 1.9M rows sync reduced from 48 min → 5 min 25 sec (9x faster)
+  - `rewriteBatchedStatements` for batch writes
+  - Disables `unique_checks` / `foreign_key_checks` during sync
+  - Dynamic batch size (5,000 for regular tables, 10,000 for large tables)
 
-### 📋 任务中心
-- 迁移/同步任务统一管理
-- 实时进度、耗时、日志查看
-- 任务取消、筛选、历史记录
+### 📤 Data Export
+- Export entire database as a ZIP archive (with CREATE TABLE SQL + INSERT data)
+- Supports export cancellation with automatic cleanup of incomplete files
+- Download exported files directly
 
-## 🛠️ 技术架构
+### 📥 SQL File Import
+- Upload and execute `.sql` files
+- Import progress tracking and mid-process cancellation
+
+### 📋 Task Center
+- Unified management for migration, sync, export, and import tasks
+- Real-time progress, elapsed time, and log viewer
+- Task cancellation, filtering, and history
+
+### ⚙️ Settings
+- Dark / Light / System theme switching
+- Storage management: disk usage visualization, categorized cleanup (exports / logs / task records)
+- Auto-update check
+
+## 🛠️ Tech Stack
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -61,109 +79,109 @@
 │              Kernel (Kotlin / JVM 21)            │
 │  ┌──────────┐  ┌────────────┐  ┌──────────────┐ │
 │  │ Launcher │  │   Common   │  │   Drivers    │ │
-│  │  (Ktor)  │  │  接口 + 模型 │  │ MySQL (SPI) │ │
+│  │  (Ktor)  │  │ Interfaces │  │ MySQL (SPI)  │ │
 │  └──────────┘  └────────────┘  └──────────────┘ │
 └─────────────────────────────────────────────────┘
          │                           │
     ┌────┴────┐                ┌─────┴─────┐
     │~/.easydb│                │  MySQL DB  │
-    │本地持久化│                │           │
+    │ Local   │                │           │
     └─────────┘                └───────────┘
 ```
 
-| 层 | 技术 |
-|----|------|
-| 前端 | React 19 · TypeScript · Ant Design 6 · Monaco Editor · Zustand · Vite |
-| 后端 | Kotlin · Ktor · kotlinx.serialization · JVM 21 |
-| 桌面 | Tauri 2 (Rust) |
-| 构建 | Gradle (Kotlin DSL) · npm workspace |
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React 19 · TypeScript · Ant Design 6 · Monaco Editor · Zustand · Vite |
+| Backend | Kotlin · Ktor · kotlinx.serialization · JVM 21 |
+| Desktop | Tauri 2 (Rust) |
+| Build | Gradle (Kotlin DSL) · npm workspace |
 
-## 🚀 快速开始
+## 🚀 Getting Started
 
-### 环境要求
+### Prerequisites
 
 - JDK 21+
 - Node.js 18+
-- Rust (latest stable，Tauri 需要)
+- Rust (latest stable, required by Tauri)
 
-### 安装与启动
+### Installation
 
 ```bash
-# 克隆仓库
+# Clone the repository
 git clone https://github.com/qingwz1994/easydb.git
 cd easydb
 
-# 安装前端依赖
+# Install frontend dependencies
 npm install
 
-# 一键启动开发环境（内核 + 前端）
+# Start development environment (kernel + frontend)
 ./dev.sh start
 ```
 
-启动后访问 http://localhost:5173
+Open http://localhost:5173 after startup.
 
-### 常用命令
+### Common Commands
 
-| 命令 | 说明 |
-|------|------|
-| `./dev.sh start` | 启动内核 + 前端 |
-| `./dev.sh stop` | 停止全部 |
-| `./dev.sh restart` | 重启全部 |
-| `./dev.sh rebuild` | 构建 + 重启（改完 Kotlin 代码后用这个） |
-| `./dev.sh status` | 查看运行状态 |
-| `./dev.sh logs` | 查看内核日志 |
+| Command | Description |
+|---------|-------------|
+| `./dev.sh start` | Start kernel + frontend |
+| `./dev.sh stop` | Stop all services |
+| `./dev.sh restart` | Restart all services |
+| `./dev.sh rebuild` | Build + restart (use after modifying Kotlin code) |
+| `./dev.sh status` | Check running status |
+| `./dev.sh logs` | View kernel logs |
 
-### 打包构建
+### Production Build
 
 ```bash
-# 构建桌面应用（会生成 .app / .dmg / .exe）
+# Build desktop app (generates .app / .dmg / .exe)
 cd apps/desktop-ui && npx tauri build
 ```
 
-## 📁 项目结构
+## 📁 Project Structure
 
 ```
 easydb/
-├── apps/desktop-ui/         # 前端（React + Tauri）
+├── apps/desktop-ui/         # Frontend (React + Tauri)
 │   ├── src/
-│   │   ├── components/      # 通用组件
-│   │   ├── pages/           # 页面模块（7 个功能页）
-│   │   ├── services/        # API 封装
-│   │   ├── stores/          # Zustand 状态管理
-│   │   └── utils/           # 工具函数
-│   └── src-tauri/           # Tauri 配置与原生层
-├── kernel/                  # 后端内核（Kotlin 多模块）
-│   ├── common/              # 接口定义 + 核心服务
-│   ├── drivers/mysql/       # MySQL 驱动（连接/元数据/迁移/同步）
-│   ├── launcher/            # HTTP 服务入口（Ktor）
-│   ├── tunnel/              # SSH 隧道
-│   └── api/                 # 协议定义
-├── scripts/                 # 构建脚本
-└── docs/                    # 项目文档
+│   │   ├── components/      # Shared components
+│   │   ├── pages/           # Page modules
+│   │   ├── services/        # API layer
+│   │   ├── stores/          # Zustand state management
+│   │   └── utils/           # Utilities
+│   └── src-tauri/           # Tauri config & native layer
+├── kernel/                  # Backend kernel (Kotlin multi-module)
+│   ├── common/              # Interfaces + core services
+│   ├── drivers/mysql/       # MySQL driver (connection/metadata/migration/sync)
+│   ├── launcher/            # HTTP server entry (Ktor)
+│   ├── tunnel/              # SSH tunnel
+│   └── api/                 # Protocol definitions
+├── scripts/                 # Build scripts
+└── docs/                    # Documentation
 ```
 
-## 🗺️ 产品路线
+## 🗺️ Roadmap
 
-| 版本 | 状态 | 目标 |
-|------|------|------|
-| v1.0 | ✅ 已完成 | MySQL 连接管理 → 工作台 → SQL 编辑器 → 数据迁移 → 同步 → 任务中心 |
-| v1.1 | ✅ 已完成 | 连接搜索/筛选、数据导出、任务日志优化 |
-| v1.2 | ✅ 已完成 | 数据预览筛选/排序/分页、行内编辑、结构对比、自动更新检查 |
-| **v1.3** | 🚧 进行中 | 深色模式、多标签页、连接分组/收藏、SQL 文件导入执行 |
-| v1.4 | 📋 规划中 | 查询收藏、快捷键体系、视图/存储过程/函数浏览 |
-| v1.5 | 📋 规划中 | 数据库备份恢复、慢查询分析、国际化 (i18n) |
+| Version | Status | Goals |
+|---------|--------|-------|
+| v1.0 | ✅ Released | MySQL connection → Workbench → SQL Editor → Migration → Sync → Task Center |
+| v1.1.0 | ✅ Released | Connection search/filter, data export, task log improvements |
+| v1.2.0 | ✅ Released | Data preview filter/sort/pagination, inline editing, schema diff, multi-tab |
+| **v1.3.0** | 🚧 In Progress | Dark mode, SQL file import, storage management, query favorites, keyboard shortcuts, export cancellation, auto-update |
+| v1.4.0 | 📋 Planned | View/procedure/function browser, database backup & restore |
+| v1.5.0 | 📋 Planned | Slow query analysis, i18n, performance monitoring |
 
-## 🤝 参与贡献
+## 🤝 Contributing
 
-欢迎提交 Issue 和 Pull Request！请先阅读 [贡献指南](CONTRIBUTING.md)。
+Issues and Pull Requests are welcome! Please read the [Contributing Guide](CONTRIBUTING.md) first.
 
-## 📄 许可证
+## 📄 License
 
-本项目基于 [GNU Affero General Public License v3.0](LICENSE) 开源。
+This project is licensed under the [GNU Affero General Public License v3.0](LICENSE).
 
-- ✅ 允许个人使用、学习、修改
-- ✅ 允许商业使用，但衍生作品必须以相同许可证开源
-- ✅ 即使作为 SaaS 服务提供，也必须开源修改后的代码
+- ✅ Free for personal use, study, and modification
+- ✅ Commercial use allowed, but derivative works must be open-sourced under the same license
+- ✅ SaaS deployment requires open-sourcing modified code
 
 ```
 Copyright (c) 2024-2026 EasyDB Contributors

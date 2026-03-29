@@ -60,6 +60,25 @@ fun Application.configureRoutes() {
             route("/compare") {
                 compareRoutes()
             }
+
+            // 脚本收藏夹
+            route("/scripts") {
+                scriptRoutes()
+            }
+
+            route("/export") {
+                exportRoutes()
+            }
+
+            // 存储管理
+            route("/storage") {
+                storageRoutes()
+            }
+
+            // 连接分组
+            route("/groups") {
+                groupRoutes()
+            }
         }
     }
 }

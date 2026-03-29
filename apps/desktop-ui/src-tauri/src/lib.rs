@@ -2,6 +2,7 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Child, Stdio};
 use std::sync::Mutex;
+use serde::Serialize;
 use tauri::Manager;
 
 #[cfg(target_os = "windows")]
@@ -9,6 +10,13 @@ use std::os::windows::process::CommandExt;
 
 /// 全局持有内核子进程，应用退出时自动杀掉
 static KERNEL_PROCESS: Mutex<Option<Child>> = Mutex::new(None);
+
+#[derive(Serialize)]
+struct SelectedSqlFile {
+    path: String,
+    name: String,
+    size: u64,
+}
 
 /// Windows 路径规范化：去掉 UNC 前缀 \\?\
 /// Java 无法处理 \\?\ 开头的路径
@@ -66,9 +74,34 @@ fn shutdown_kernel() {
     }
 }
 
+#[tauri::command]
+fn pick_sql_file() -> Result<Option<SelectedSqlFile>, String> {
+    let picked = rfd::FileDialog::new()
+        .add_filter("SQL", &["sql"])
+        .set_title("选择要导入的 SQL 文件")
+        .pick_file();
+
+    let Some(path) = picked else {
+        return Ok(None);
+    };
+
+    let metadata = std::fs::metadata(&path)
+        .map_err(|e| format!("读取文件信息失败: {}", e))?;
+
+    Ok(Some(SelectedSqlFile {
+        path: path.to_string_lossy().to_string(),
+        name: path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| "unknown.sql".to_string()),
+        size: metadata.len(),
+    }))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![pick_sql_file])
         .plugin(tauri_plugin_shell::init())
         .plugin(
             tauri_plugin_log::Builder::default()

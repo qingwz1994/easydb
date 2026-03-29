@@ -27,7 +27,7 @@ assignees: ''
 ## 环境信息
 
 - 操作系统：[如 macOS 15.0 / Windows 11 / Ubuntu 24.04]
-- EasyDB 版本：[如 v1.2.0]
+- EasyDB 版本：[如 v1.3.0]
 - 数据库类型及版本：[如 MySQL 8.0.35]
 
 ## 截图或日志
