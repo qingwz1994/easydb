@@ -30,23 +30,32 @@ class MysqlSyncAdapter : SyncAdapter {
     }
 
     override fun preview(config: SyncConfig, sessions: SessionPair): SyncPreview {
-        val sourceTables = metadata.listTables(sessions.source, config.sourceDatabase)
-            .filter { it.type == "table" }
+        val allObjects = getAllSyncObjects(sessions.source, config.sourceDatabase)
             .filter { config.tables.isEmpty() || config.tables.contains(it.name) }
 
         val targetTableNames = try {
             metadata.listTables(sessions.target, config.targetDatabase).map { it.name }
         } catch (_: Exception) { emptyList() }
 
-        val previews = sourceTables.map { table ->
-            val existsInTarget = targetTableNames.contains(table.name)
-            SyncTablePreview(
-                tableName = table.name,
-                insertCount = if (!existsInTarget) (table.rowCount?.toInt() ?: 0) else 0,
-                updateCount = if (existsInTarget) (table.rowCount?.toInt() ?: 0) else 0,
-                canSync = true,
-                reason = if (!existsInTarget) "目标表不存在，将自动创建" else null
-            )
+        val previews = allObjects.map { obj ->
+            if (obj.type == "table") {
+                val existsInTarget = targetTableNames.contains(obj.name)
+                SyncTablePreview(
+                    tableName = obj.name,
+                    insertCount = if (!existsInTarget) (obj.rowCount?.toInt() ?: 0) else 0,
+                    updateCount = if (existsInTarget) (obj.rowCount?.toInt() ?: 0) else 0,
+                    canSync = true,
+                    reason = if (!existsInTarget) "目标表不存在，将自动创建" else null
+                )
+            } else {
+                SyncTablePreview(
+                    tableName = obj.name,
+                    insertCount = 0,
+                    updateCount = 0,
+                    canSync = true,
+                    reason = "${getTypeLabel(obj.type)}：覆盖式同步定义"
+                )
+            }
         }
 
         val warnings = previews.filter { it.reason != null }.map { "${it.tableName}：${it.reason}" }
@@ -68,30 +77,31 @@ class MysqlSyncAdapter : SyncAdapter {
         val sourceConn = sourceSession.connection
         val targetConn = targetSession.connection
 
-        val tables = metadata.listTables(sessions.source, config.sourceDatabase)
-            .filter { it.type == "table" }
+        val allObjects = getAllSyncObjects(sessions.source, config.sourceDatabase)
             .filter { config.tables.isEmpty() || config.tables.contains(it.name) }
+        val tables = allObjects.filter { it.type == "table" }
+        val nonTableObjects = allObjects.filter { it.type != "table" }
 
-        if (tables.isEmpty()) {
+        if (allObjects.isEmpty()) {
             return TaskResult(success = true, successCount = 0)
         }
 
         var successCount = 0
         var failureCount = 0
-        val totalTables = tables.size
-        val tableRowCounts = mutableMapOf<String, Long>()  // 表名 → 实际写入行数
-        val tableErrors = mutableMapOf<String, String>()    // 表名 → 失败原因
+        val totalObjects = allObjects.size
+        val tableRowCounts = mutableMapOf<String, Long>()
+        val tableErrors = mutableMapOf<String, String>()
 
-        // 全限定前缀
         val sourcePrefix = "${dialect.quoteIdentifier(config.sourceDatabase)}."
         val targetPrefix = "${dialect.quoteIdentifier(config.targetDatabase)}."
 
-        reporter.onLog("INFO", "开始同步：${config.sourceDatabase} → ${config.targetDatabase}，共 $totalTables 张表")
+        reporter.onLog("INFO", "开始同步：${config.sourceDatabase} → ${config.targetDatabase}，共 $totalObjects 个对象（表 ${tables.size} / 其他 ${nonTableObjects.size}）")
 
         // ─── 会话级 bulk load 优化 ─────────────────────────────
         applyBulkLoadSettings(targetConn, reporter)
 
         try {
+            // 先同步表数据
             for ((index, table) in tables.withIndex()) {
                 if (reporter.isCancelled()) {
                     reporter.onLog("WARN", "同步已被取消")
@@ -99,16 +109,14 @@ class MysqlSyncAdapter : SyncAdapter {
                 }
 
                 val tableName = table.name
-                val progress = ((index.toDouble() / totalTables) * 100).toInt().coerceAtMost(99)
-                reporter.onProgress(progress, "同步表 $tableName (${index + 1}/$totalTables)")
+                val progress = ((index.toDouble() / totalObjects) * 100).toInt().coerceAtMost(99)
+                reporter.onProgress(progress, "同步表 $tableName (${index + 1}/$totalObjects)")
 
                 try {
                     reporter.onStep(tableName, TaskStatus.RUNNING, "同步中")
 
-                    // 确保目标表存在，不存在则从源复制结构
                     val tableCreated = ensureTargetTable(sourceConn, targetConn, sourcePrefix, targetPrefix, tableName)
 
-                    // 判断写入策略
                     val isLargeTable = (table.rowCount ?: 0) > LARGE_TABLE_ROW_THRESHOLD
                     val batchSize = if (isLargeTable) LARGE_TABLE_BATCH_SIZE else DEFAULT_BATCH_SIZE
                     val useInsert = tableCreated || isTargetTableEmpty(targetConn, targetPrefix, tableName)
@@ -117,7 +125,6 @@ class MysqlSyncAdapter : SyncAdapter {
                         reporter.onLog("INFO", "[$tableName] 大表模式：预估 ${table.rowCount} 行，batch=$batchSize")
                     }
 
-                    // 执行同步
                     val rowCount = syncTableData(
                         sourceConn, targetConn,
                         sourcePrefix, targetPrefix,
@@ -134,6 +141,26 @@ class MysqlSyncAdapter : SyncAdapter {
                     failureCount++
                     reporter.onStep(tableName, TaskStatus.FAILED, e.message)
                     reporter.onLog("ERROR", "[$tableName] 同步失败：${e.message}")
+                }
+            }
+
+            // 再同步非表对象（覆盖式：DROP IF EXISTS + CREATE）
+            for ((idx, obj) in nonTableObjects.withIndex()) {
+                if (reporter.isCancelled()) break
+                val objName = obj.name
+                val progress = (((tables.size + idx + 1).toDouble() / totalObjects) * 100).toInt().coerceAtMost(99)
+                reporter.onProgress(progress, "同步${getTypeLabel(obj.type)} $objName")
+                try {
+                    reporter.onStep(objName, TaskStatus.RUNNING, "同步${getTypeLabel(obj.type)}定义")
+                    syncNonTableObject(sessions.source, targetConn, config.sourceDatabase, config.targetDatabase, objName, obj.type)
+                    reporter.onStep(objName, TaskStatus.COMPLETED, "定义已同步")
+                    reporter.onLog("INFO", "[$objName] ${getTypeLabel(obj.type)}定义同步完成")
+                    successCount++
+                } catch (e: Exception) {
+                    failureCount++
+                    tableErrors[objName] = e.message ?: "未知错误"
+                    reporter.onStep(objName, TaskStatus.FAILED, e.message)
+                    reporter.onLog("ERROR", "[$objName] 同步失败：${e.message}")
                 }
             }
         } finally {
@@ -158,12 +185,84 @@ class MysqlSyncAdapter : SyncAdapter {
             success = failureCount == 0,
             successCount = successCount,
             failureCount = failureCount,
-            errorMessage = if (failureCount > 0) "部分表同步失败" else null,
+            errorMessage = if (failureCount > 0) "部分对象同步失败" else null,
             verification = verification
         )
     }
 
     // ─── 私有方法 ─────────────────────────────────────────────
+
+    /**
+     * 获取全部可同步对象（表+视图+存储过程+函数+触发器）
+     */
+    private fun getAllSyncObjects(session: DatabaseSession, database: String): List<TableInfo> {
+        val tables = metadata.listTables(session, database)
+        val routines = metadata.listRoutines(session, database)
+        val triggers = metadata.listTriggers(session, database)
+
+        val routineInfos = routines.map { r ->
+            TableInfo(name = r.name, schema = database, type = r.type.lowercase(), comment = r.comment)
+        }
+        val triggerInfos = triggers.map { t ->
+            TableInfo(name = t.name, schema = database, type = "trigger", comment = "${t.timing} ${t.event} ON ${t.table}")
+        }
+
+        return tables + routineInfos + triggerInfos
+    }
+
+    /**
+     * 同步非表对象：DROP IF EXISTS + 重建 DDL
+     */
+    private fun syncNonTableObject(
+        sourceSession: DatabaseSession,
+        targetConn: java.sql.Connection,
+        sourceDatabase: String,
+        targetDatabase: String,
+        name: String,
+        type: String
+    ) {
+        val ddl = metadata.getObjectDdl(sourceSession, sourceDatabase, name, type)
+        if (ddl.isBlank()) throw Exception("无法获取 $name 的 DDL")
+
+        val quotedName = dialect.quoteIdentifier(name)
+        val targetDbQuoted = dialect.quoteIdentifier(targetDatabase)
+
+        targetConn.createStatement().use { it.execute("USE $targetDbQuoted") }
+
+        val dropSql = when (type) {
+            "view" -> "DROP VIEW IF EXISTS $quotedName"
+            "procedure" -> "DROP PROCEDURE IF EXISTS $quotedName"
+            "function" -> "DROP FUNCTION IF EXISTS $quotedName"
+            "trigger" -> "DROP TRIGGER IF EXISTS $quotedName"
+            else -> throw Exception("不支持的对象类型：$type")
+        }
+        targetConn.createStatement().use { it.execute(dropSql) }
+
+        var cleanedDdl = ddl
+            .replace(Regex("""DEFINER\s*=\s*`[^`]*`@`[^`]*`\s*"""), "")
+            .replace("`$sourceDatabase`.", "`$targetDatabase`.")
+
+        if (type in listOf("trigger", "procedure", "function")) {
+            cleanedDdl = cleanedDdl
+                .replace(Regex("""/\*!\d+\s*"""), "")
+                .replace(Regex("""\s*\*/"""), "")
+            val createIdx = cleanedDdl.indexOf("CREATE", ignoreCase = true)
+            if (createIdx > 0) {
+                cleanedDdl = cleanedDdl.substring(createIdx)
+            }
+        }
+
+        targetConn.createStatement().use { it.execute(cleanedDdl) }
+    }
+
+    private fun getTypeLabel(type: String): String = when (type) {
+        "table" -> "表"
+        "view" -> "视图"
+        "procedure" -> "存储过程"
+        "function" -> "函数"
+        "trigger" -> "触发器"
+        else -> type
+    }
 
     /**
      * 启用 bulk load 会话优化

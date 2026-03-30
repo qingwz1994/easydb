@@ -17,13 +17,22 @@
 import React, { useState, useEffect } from 'react'
 import {
   Typography, Select, Button, Alert, Card,
-  theme, Row, Col, Table, Space
+  theme, Row, Col, Table, Space, Tag
 } from 'antd'
 import {
   SwapRightOutlined, PlayCircleOutlined,
   WarningOutlined, DatabaseOutlined, ApiOutlined,
-  TableOutlined
+  TableOutlined, EyeOutlined, ThunderboltOutlined,
+  FunctionOutlined, SettingOutlined
 } from '@ant-design/icons'
+
+const typeConfig: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
+  table: { label: '表', color: 'blue', icon: <TableOutlined /> },
+  view: { label: '视图', color: 'cyan', icon: <EyeOutlined /> },
+  procedure: { label: '存储过程', color: 'purple', icon: <SettingOutlined /> },
+  function: { label: '函数', color: 'orange', icon: <FunctionOutlined /> },
+  trigger: { label: '触发器', color: 'magenta', icon: <ThunderboltOutlined /> },
+}
 import { useConnectionStore } from '@/stores/connectionStore'
 import { syncApi, metadataApi, connectionApi } from '@/services/api'
 import { toast, handleApiError } from '@/utils/notification'
@@ -313,8 +322,15 @@ export const SyncPage: React.FC = () => {
                 onChange: (keys) => setSelectedTables(keys)
               }}
               columns={[
-                { title: '对象名称', dataIndex: 'name', key: 'name', width: 250, render: (t) => <Text strong>{t}</Text> },
-                { title: '类型', dataIndex: 'type', key: 'type', width: 120 },
+                { title: '对象名称', dataIndex: 'name', key: 'name', width: 250, render: (t: string) => <Text strong>{t}</Text> },
+                { title: '类型', dataIndex: 'type', key: 'type', width: 140,
+                  filters: Object.entries(typeConfig).map(([k, v]) => ({ text: v.label, value: k })),
+                  onFilter: (value: unknown, record: {type: string}) => record.type === value,
+                  render: (t: string) => {
+                    const cfg = typeConfig[t] || { label: t, color: 'default', icon: null }
+                    return <Tag icon={cfg.icon} color={cfg.color}>{cfg.label}</Tag>
+                  }
+                },
                 { title: '注释', dataIndex: 'comment', key: 'comment', ellipsis: true },
               ]}
             />
@@ -335,7 +351,7 @@ export const SyncPage: React.FC = () => {
         <Space size="large">
           <Alert
             message="操作确认提示"
-            description="执行数据同步将会对目标表中已存在的同行数据（依据主键）进行覆盖更新 (Upsert)，请谨慎操作。"
+            description="表数据将按主键覆盖更新 (Upsert)，视图/存储过程/函数/触发器将覆盖式同步定义 (DROP + CREATE)。"
             type="warning"
             showIcon
             icon={<WarningOutlined />}

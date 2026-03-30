@@ -287,6 +287,37 @@ class MysqlMetadataAdapter : MetadataAdapter {
         return ""
     }
 
+    /**
+     * 根据已知对象类型精确获取 DDL（供迁移/同步使用）
+     * @param objectType: table, view, procedure, function, trigger
+     * 注意：SHOW CREATE TRIGGER 返回列为 (Trigger, sql_mode, SQL Original Statement, ...)
+     */
+    fun getObjectDdl(session: DatabaseSession, database: String, name: String, objectType: String): String {
+        val conn = (session as MysqlDatabaseSession).connection
+        val cmd = when (objectType) {
+            "view" -> "SHOW CREATE VIEW `$database`.`$name`"
+            "procedure" -> "SHOW CREATE PROCEDURE `$database`.`$name`"
+            "function" -> "SHOW CREATE FUNCTION `$database`.`$name`"
+            "trigger" -> "SHOW CREATE TRIGGER `$database`.`$name`"
+            else -> "SHOW CREATE TABLE `$database`.`$name`"
+        }
+        // TABLE/VIEW: DDL 在第 2 列
+        // PROCEDURE/FUNCTION/TRIGGER: DDL 在第 3 列（第 2 列是 sql_mode）
+        val ddlColumnIndex = when (objectType) {
+            "procedure", "function", "trigger" -> 3
+            else -> 2
+        }
+        return try {
+            conn.createStatement().use { stmt ->
+                stmt.executeQuery(cmd).use { rs ->
+                    if (rs.next()) rs.getString(ddlColumnIndex) else ""
+                }
+            }
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
     override fun createDatabase(session: DatabaseSession, name: String, charset: String, collation: String) {
         val conn = (session as MysqlDatabaseSession).connection
         conn.createStatement().use { stmt ->

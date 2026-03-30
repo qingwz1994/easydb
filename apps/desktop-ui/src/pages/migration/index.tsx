@@ -17,13 +17,22 @@
 import React, { useState, useEffect } from 'react'
 import {
   Typography, Select, Button, Alert, Card,
-  theme, Row, Col, Table, Space, Radio
+  theme, Row, Col, Table, Space, Radio, Tag
 } from 'antd'
 import {
   SwapRightOutlined, PlayCircleOutlined,
   DatabaseOutlined, ApiOutlined,
-  TableOutlined
+  TableOutlined, EyeOutlined, ThunderboltOutlined,
+  FunctionOutlined, SettingOutlined
 } from '@ant-design/icons'
+
+const typeConfig: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
+  table: { label: '表', color: 'blue', icon: <TableOutlined /> },
+  view: { label: '视图', color: 'cyan', icon: <EyeOutlined /> },
+  procedure: { label: '存储过程', color: 'purple', icon: <SettingOutlined /> },
+  function: { label: '函数', color: 'orange', icon: <FunctionOutlined /> },
+  trigger: { label: '触发器', color: 'magenta', icon: <ThunderboltOutlined /> },
+}
 import { useConnectionStore } from '@/stores/connectionStore'
 import { migrationApi, metadataApi, connectionApi } from '@/services/api'
 import { toast, handleApiError } from '@/utils/notification'
@@ -315,8 +324,15 @@ export const MigrationPage: React.FC = () => {
                 onChange: (keys) => setSelectedTables(keys)
               }}
               columns={[
-                { title: '对象名称', dataIndex: 'name', key: 'name', width: 250, render: (t) => <Text strong>{t}</Text> },
-                { title: '类型', dataIndex: 'type', key: 'type', width: 120 },
+                { title: '对象名称', dataIndex: 'name', key: 'name', width: 250, render: (t: string) => <Text strong>{t}</Text> },
+                { title: '类型', dataIndex: 'type', key: 'type', width: 140,
+                  filters: Object.entries(typeConfig).map(([k, v]) => ({ text: v.label, value: k })),
+                  onFilter: (value: unknown, record: {type: string}) => record.type === value,
+                  render: (t: string) => {
+                    const cfg = typeConfig[t] || { label: t, color: 'default', icon: null }
+                    return <Tag icon={cfg.icon} color={cfg.color}>{cfg.label}</Tag>
+                  }
+                },
                 { title: '注释', dataIndex: 'comment', key: 'comment', ellipsis: true },
               ]}
             />
@@ -344,8 +360,11 @@ export const MigrationPage: React.FC = () => {
             </Radio.Group>
           </div>
           <Alert
-            message="警告：目标库中同名表将被无情覆盖，请三思而后行。"
-            type="warning"
+            message={mode === 'data_only' && selectedTables.some(k => {
+              const obj = sourceObjects.find(o => o.name === k)
+              return obj && obj.type !== 'table'
+            }) ? '仅数据模式下，视图/存储过程/函数/触发器将被自动跳过' : '警告：目标库中同名对象将被覆盖，请三思而后行。'}
+            type={mode === 'data_only' ? 'info' : 'warning'}
             showIcon
             style={{ padding: '4px 12px', border: 'none' }}
           />
@@ -360,7 +379,7 @@ export const MigrationPage: React.FC = () => {
           onClick={handleStart}
           style={{ paddingLeft: 32, paddingRight: 32 }}
         >
-          开始执行数据同步 ({selectedTables.length})
+          开始执行迁移 ({selectedTables.length})
         </Button>
       </div>
     </div>
