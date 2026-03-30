@@ -51,6 +51,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # --- 自动注入版本号（从 tag 提取） ---
+      - name: Inject version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "📦 Detected version: $VERSION"
+          # Update tauri.conf.json
+          sed -i.bak "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" apps/desktop-ui/src-tauri/tauri.conf.json
+          # Update Cargo.toml (only first occurrence)
+          sed -i.bak "0,/^version = .*/s//version = \"$VERSION\"/" apps/desktop-ui/src-tauri/Cargo.toml
+          rm -f apps/desktop-ui/src-tauri/tauri.conf.json.bak apps/desktop-ui/src-tauri/Cargo.toml.bak
+          echo "✅ Version set to $VERSION"
+
       # --- Linux 系统依赖 ---
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
