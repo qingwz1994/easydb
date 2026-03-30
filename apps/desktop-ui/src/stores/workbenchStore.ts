@@ -37,6 +37,8 @@ export interface TableTabState {
   connectionName: string
   database: string
   tableName: string
+  /** 数据库对象类型：决定显示哪些标签页 */
+  objectType: 'table' | 'view' | 'procedure' | 'function' | 'trigger'
   columns: ColumnInfo[]
   indexes: IndexInfo[]
   ddl: string
@@ -59,7 +61,7 @@ export interface CategoryListTabState {
   connectionId: string
   connectionName: string
   database: string
-  category: string // 'tables' | 'views' | 'triggers'
+  category: string // 'tables' | 'views' | 'procedures' | 'functions' | 'triggers'
   categorySearch?: string
 }
 

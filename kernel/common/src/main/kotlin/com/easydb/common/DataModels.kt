@@ -41,6 +41,16 @@ data class TriggerInfo(
 )
 
 @Serializable
+data class RoutineInfo(
+    val name: String,
+    val type: String,              // PROCEDURE | FUNCTION
+    val definer: String? = null,
+    val created: String? = null,
+    val modified: String? = null,
+    val comment: String? = null
+)
+
+@Serializable
 data class ColumnInfo(
     val name: String,
     val type: String,

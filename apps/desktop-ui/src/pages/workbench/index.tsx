@@ -27,7 +27,7 @@ import {
 } from '@ant-design/icons'
 import type { DataNode } from 'antd/es/tree'
 import {
-  FileText, Table2, Activity, Zap, Eye, KeyRound, Search, Plus, Database,
+  FileText, Table2, Activity, Zap, Eye, KeyRound, Search, Plus, Database, Cog, FunctionSquare,
 } from 'lucide-react'
 import type { TableInfo, ColumnInfo, ConnectionConfig, SavedScript, DatabaseInfo } from '@/types'
 import { useWorkbenchStore, type TableTabState, type WorkbenchTab } from '@/stores/workbenchStore'
@@ -417,7 +417,7 @@ export const WorkbenchPage: React.FC = () => {
   }, [openTableTabs, updateTabState])
 
   // 打开或激活一个表 Tab
-  const openOrActivateTab = useCallback((connId: string, connName: string, dbName: string, tableName: string) => {
+  const openOrActivateTab = useCallback((connId: string, connName: string, dbName: string, tableName: string, defaultTab: 'data' | 'ddl' | 'design' = 'data', objectType: 'table' | 'view' | 'procedure' | 'function' | 'trigger' = 'table') => {
     const tabKey = `table:${connId}::${dbName}::${tableName}`
     const existing = openTableTabs[tabKey]
     if (!existing) {
@@ -427,11 +427,12 @@ export const WorkbenchPage: React.FC = () => {
         connectionName: connName,
         database: dbName,
         tableName,
+        objectType,
         columns: [],
         indexes: [],
         ddl: '',
         previewRows: [],
-        detailTab: 'data',
+        detailTab: defaultTab,
         loadedTabs: [],
       }
       batchUpdate({
@@ -443,7 +444,7 @@ export const WorkbenchPage: React.FC = () => {
         activeDatabase: dbName,
         activeTable: tableName,
       })
-      loadTabDataForTab(tabKey, connId, dbName, tableName, 'data')
+      loadTabDataForTab(tabKey, connId, dbName, tableName, defaultTab)
     } else {
       batchUpdate({
         activeTableTabKey: tabKey,
@@ -602,7 +603,7 @@ export const WorkbenchPage: React.FC = () => {
       const key = `table:${connId}::${db}::${tableName}`
       const existing = openTableTabs[key]
       if (!existing) {
-        openOrActivateTab(connId, connName, db, tableName)
+        openOrActivateTab(connId, connName, db, tableName, 'design', 'table')
         // Set the active tab to design right after initialization
         setTimeout(() => {
           updateTabState(key, () => ({ detailTab: 'design' }))
@@ -638,11 +639,15 @@ export const WorkbenchPage: React.FC = () => {
   const objectCategories = useMemo(() => [
     { key: 'tables', label: '表', types: ['table'], icon: <Table2 size={16} /> },
     { key: 'views', label: '视图', types: ['view'], icon: <Eye size={16} /> },
+    { key: 'procedures', label: '存储过程', types: ['procedure'], icon: <Cog size={16} /> },
+    { key: 'functions', label: '函数', types: ['function'], icon: <FunctionSquare size={16} /> },
     { key: 'triggers', label: '触发器', types: ['trigger'], icon: <Zap size={16} /> },
   ], [])
   // --- 高性能图标缓存 ---
   const iconTable = useMemo(() => <Table2 size={14} color={token.colorPrimary} />, [token.colorPrimary])
   const iconView = useMemo(() => <Eye size={14} color="#3B82F6" />, [])
+  const iconProcedure = useMemo(() => <Cog size={14} color="#8B5CF6" />, [])
+  const iconFunction = useMemo(() => <FunctionSquare size={14} color="#EC4899" />, [])
   const iconTrigger = useMemo(() => <Zap size={14} color="#F59E0B" />, [])
   const iconDb = useMemo(() => <Database size={16} color={token.colorTextSecondary} />, [token.colorTextSecondary])
   const iconConn = useMemo(() => <Activity size={16} color={token.colorPrimary} />, [token.colorPrimary])
@@ -770,7 +775,7 @@ export const WorkbenchPage: React.FC = () => {
               children: items.map((t) => ({
                 key: `obj:${conn.id}:${db.name}:${t.name}`,
                 title: t.name,
-                icon: t.type === 'view' ? iconView : t.type === 'trigger' ? iconTrigger : iconTable,
+                icon: t.type === 'view' ? iconView : t.type === 'trigger' ? iconTrigger : t.type === 'procedure' ? iconProcedure : t.type === 'function' ? iconFunction : iconTable,
                 isLeaf: true,
               })),
             } as DataNode
@@ -810,7 +815,7 @@ export const WorkbenchPage: React.FC = () => {
   })
 
   return [scriptsNode, ...connNodes]
-  }, [deferTree, openConnections, databasesMap, objectsMap, loadingConns, deferredSearch, objectCategories, token, handleRemoveConnection, iconConn, iconDb, iconTable, iconTrigger, iconView, savedScripts])
+  }, [deferTree, openConnections, databasesMap, objectsMap, loadingConns, deferredSearch, objectCategories, token, handleRemoveConnection, iconConn, iconDb, iconTable, iconTrigger, iconView, iconProcedure, iconFunction, savedScripts])
 
   // --- 搜索时自动展开所有匹配的节点 ---
   const prevExpandedRef = useRef<React.Key[]>([])
@@ -1040,12 +1045,41 @@ export const WorkbenchPage: React.FC = () => {
       })
       return items
     }
-    // 表/对象节点：删除表 / 清空表
+    // 表/对象节点
     if (nodeKey.startsWith('obj:')) {
       const parts = nodeKey.slice(4).split(':')
       const connId = parts[0]
       const dbName = parts[1]
       const objName = parts.slice(2).join(':')
+
+      // 查找对象类型
+      const objKey = `${connId}::${dbName}`
+      const dbObjects = objectsMap[objKey] || []
+      const objInfo = dbObjects.find(o => o.name === objName)
+      const objType = objInfo?.type ?? 'table'
+
+      // 非表对象（视图/存储过程/函数/触发器）：仅提供查看 DDL
+      if (objType !== 'table') {
+        return [
+          {
+            key: 'view-ddl',
+            icon: <FileText size={14} />,
+            label: '查看定义 (DDL)',
+            onClick: () => {
+              const conn = openConnections.find((c) => c.id === connId)
+              openOrActivateTab(connId, conn?.name ?? '', dbName, objName, 'ddl', objType as 'table' | 'view' | 'procedure' | 'function' | 'trigger')
+            },
+          },
+          {
+            key: 'refresh-obj',
+            icon: <ReloadOutlined />,
+            label: '刷新',
+            onClick: () => loadTables(connId, dbName),
+          },
+        ]
+      }
+
+      // 表对象：完整菜单
       return [
         {
           key: 'design-table',
@@ -1162,7 +1196,7 @@ export const WorkbenchPage: React.FC = () => {
       ]
     }
     return []
-  }, [openConnections, loadDatabases, loadTables, selectedCtx, setSelectedCtx, handleTableExport, setCreateDbModal, setEditDbModal, setImportSqlModal, setExportModal, openTableDesignerTab])
+  }, [openConnections, loadDatabases, loadTables, selectedCtx, setSelectedCtx, handleTableExport, setCreateDbModal, setEditDbModal, setImportSqlModal, setExportModal, openTableDesignerTab, objectsMap, openOrActivateTab, updateTabState, loadTabDataForTab])
 
   // ctxMenuItems 缓存（必须在 getContextMenuItems 之后）
   const ctxMenuItems = useMemo(() => ctxMenu ? getContextMenuItems(ctxMenu.nodeKey) : [], [ctxMenu, getContextMenuItems])
@@ -1302,7 +1336,20 @@ export const WorkbenchPage: React.FC = () => {
                     const dbName = parts[1]
                     const objName = parts.slice(2).join(':')
                     const conn = openConnections.find((c) => c.id === connId)
-                    openOrActivateTab(connId, conn?.name ?? '', dbName, objName)
+
+                    // 检查对象类型
+                    const objKey = `${connId}::${dbName}`
+                    const dbObjects = objectsMap[objKey] || []
+                    const objInfo = dbObjects.find(o => o.name === objName)
+                    const objType = objInfo?.type ?? 'table'
+
+                    if (objType === 'table' || objType === 'view') {
+                      // 表和视图：打开数据预览
+                      openOrActivateTab(connId, conn?.name ?? '', dbName, objName, 'data', objType as 'table' | 'view')
+                    } else {
+                      // 存储过程/函数/触发器：打开 DDL 标签页
+                      openOrActivateTab(connId, conn?.name ?? '', dbName, objName, 'ddl', objType as 'procedure' | 'function' | 'trigger')
+                    }
                   } else if (key.startsWith('script:')) {
                     const scriptId = key.slice(7)
                     const s = savedScripts.find(x => x.id === scriptId)
@@ -1636,16 +1683,19 @@ export const WorkbenchPage: React.FC = () => {
                       style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '0 16px' }}
                       tabBarStyle={{ flexShrink: 0, marginBottom: 0 }}
                       items={[
-                        {
+                        // 数据标签：表和视图可用
+                        (t.objectType === 'table' || t.objectType === 'view') ? {
                           key: 'data',
                           label: `数据${t.previewRows.length > 0 ? ` (${t.previewRows.length})` : ''}`,
                           children: (
                             <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8, padding: '0 2px', flexShrink: 0 }}>
                                 <Text type="secondary" style={{ fontSize: 12, flex: 1 }}>
-                                  {t.columns.length > 0 && t.columns.some((c: ColumnInfo) => c.isPrimaryKey)
-                                    ? `可编辑 · 主键：${t.columns.filter((c: ColumnInfo) => c.isPrimaryKey).map((c: ColumnInfo) => c.name).join(', ')}`
-                                    : '当前表无主键，数据编辑功能不可用'}
+                                  {t.objectType === 'view'
+                                    ? '视图数据（只读）'
+                                    : t.columns.length > 0 && t.columns.some((c: ColumnInfo) => c.isPrimaryKey)
+                                      ? `可编辑 · 主键：${t.columns.filter((c: ColumnInfo) => c.isPrimaryKey).map((c: ColumnInfo) => c.name).join(', ')}`
+                                      : '当前表无主键，数据编辑功能不可用'}
                                 </Text>
                                 <Space size={8}>
                                   <Text type="secondary" style={{ fontSize: 12 }}>
@@ -1693,8 +1743,9 @@ export const WorkbenchPage: React.FC = () => {
                               </div>
                             </div>
                           ),
-                        },
-                        {
+                        } : null,
+                        // 设计标签：仅表可用
+                        t.objectType === 'table' ? {
                           key: 'design',
                           label: '设计',
                           children: (
@@ -1718,7 +1769,8 @@ export const WorkbenchPage: React.FC = () => {
                               />
                             </div>
                           ),
-                        },
+                        } : null,
+                        // DDL 标签：所有对象都有
                         {
                           key: 'ddl',
                           label: 'DDL',
@@ -1731,7 +1783,7 @@ export const WorkbenchPage: React.FC = () => {
                             </pre>
                           ),
                         },
-                      ]}
+                      ].filter(Boolean) as NonNullable<typeof Tabs.prototype>[]}
                     />
                   </div>
                 )
@@ -1836,7 +1888,13 @@ export const WorkbenchPage: React.FC = () => {
                         }))
                       }}
                       onSelectObject={(name) => {
-                        openOrActivateTab(activeTab.connectionId, activeTab.connectionName, activeTab.database, name)
+                        // 在概览页中查找对象类型
+                        const oKey = `${activeTab.connectionId}::${activeTab.database}`
+                        const oList = objectsMap[oKey] || []
+                        const oInfo = oList.find(o => o.name === name)
+                        const oType = (oInfo?.type ?? 'table') as 'table' | 'view' | 'procedure' | 'function' | 'trigger'
+                        const oDefaultTab = (oType === 'table' || oType === 'view') ? 'data' : 'ddl'
+                        openOrActivateTab(activeTab.connectionId, activeTab.connectionName, activeTab.database, name, oDefaultTab, oType)
                       }}
                     />
                   </div>

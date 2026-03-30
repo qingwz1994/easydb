@@ -70,7 +70,7 @@ export interface DatabaseInfo {
 export interface TableInfo {
   name: string
   schema?: string
-  type: 'table' | 'view' | 'trigger'
+  type: 'table' | 'view' | 'trigger' | 'procedure' | 'function'
   rowCount?: number
   comment?: string
   dataLength?: number
