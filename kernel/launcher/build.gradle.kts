@@ -23,7 +23,11 @@ dependencies {
     implementation("io.ktor:ktor-server-content-negotiation:$ktorVersion")
     implementation("io.ktor:ktor-serialization-kotlinx-json:$ktorVersion")
     implementation("io.ktor:ktor-server-cors:$ktorVersion")
+    implementation("io.ktor:ktor-server-status-pages:$ktorVersion")
     implementation("io.ktor:ktor-server-call-logging:$ktorVersion")
+
+    // MySQL Binlog CDC
+    implementation("com.zendesk:mysql-binlog-connector-java:0.30.3")
 
     // Logging
     implementation("ch.qos.logback:logback-classic:1.4.14")

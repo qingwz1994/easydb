@@ -30,6 +30,7 @@ import {
   MenuUnfoldOutlined,
   PlayCircleOutlined,
   BgColorsOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons'
 import { useWorkbenchStore } from '@/stores/workbenchStore'
 import { useCommandStore } from '@/stores/commandStore'
@@ -48,6 +49,7 @@ const menuItems = [
   { key: '/sync', icon: <SyncOutlined />, label: '数据同步' },
   { key: '/structure-compare', icon: <DiffOutlined />, label: '结构对比' },
   { key: '/task-center', icon: <UnorderedListOutlined />, label: '任务中心' },
+  { key: '/data-tracker', icon: <ThunderboltOutlined />, label: '数据追踪' },
   { key: '/settings', icon: <SettingOutlined />, label: '设置' },
 ]
 
@@ -59,6 +61,7 @@ const pageTitle: Record<string, string> = {
   '/sync': '数据同步',
   '/structure-compare': '结构对比',
   '/task-center': '任务中心',
+  '/data-tracker': '数据追踪',
   '/settings': '设置',
 }
 
@@ -93,6 +96,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
       { id: 'nav-sync', title: '前往 数据同步', category: 'Navigation', icon: <SyncOutlined />, action: () => navigate('/sync') },
       { id: 'nav-comp', title: '前往 结构对比', category: 'Navigation', icon: <DiffOutlined />, action: () => navigate('/structure-compare') },
       { id: 'nav-task', title: '前往 任务中心', category: 'Navigation', icon: <UnorderedListOutlined />, action: () => navigate('/task-center') },
+      { id: 'nav-tracker', title: '前往 数据追踪', category: 'Navigation', icon: <ThunderboltOutlined />, action: () => navigate('/data-tracker') },
       { id: 'nav-sett', title: '前往 设置', category: 'Navigation', icon: <SettingOutlined />, action: () => navigate('/settings') },
       { id: 'theme-toggle', title: '切换 深色/浅色 主题', category: 'Preferences', icon: <BgColorsOutlined />, action: () => setThemeMode(themeMode === 'dark' ? 'light' : 'dark') },
       { id: 'run-sql', title: '执行选中的 SQL (如果可用)', category: 'Editor', icon: <PlayCircleOutlined />, shortcut: ['Cmd', 'Enter'], action: () => {

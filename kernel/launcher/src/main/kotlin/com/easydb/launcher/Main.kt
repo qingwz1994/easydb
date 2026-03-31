@@ -22,8 +22,16 @@ import io.ktor.server.engine.*
 import io.ktor.server.netty.*
 import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.server.plugins.cors.routing.*
+import io.ktor.server.plugins.statuspages.*
+import io.ktor.server.response.*
 import io.ktor.serialization.kotlinx.json.*
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
+import org.slf4j.LoggerFactory
+
+private val logger = LoggerFactory.getLogger("EasyDB")
 
 fun main() {
     embeddedServer(Netty, port = 18080, host = "127.0.0.1") {
@@ -43,6 +51,23 @@ fun main() {
             allowMethod(HttpMethod.Put)
             allowMethod(HttpMethod.Delete)
             allowMethod(HttpMethod.Options)
+        }
+        install(StatusPages) {
+            exception<Throwable> { call, cause ->
+                logger.error("Unhandled exception: ${cause.message}", cause)
+                val response = buildJsonObject {
+                    put("success", false)
+                    putJsonObject("error") {
+                        put("code", "INTERNAL_ERROR")
+                        put("message", cause.message ?: "Internal server error")
+                    }
+                }
+                call.respondText(
+                    response.toString(),
+                    ContentType.Application.Json,
+                    HttpStatusCode.OK  // 保持 200 以匹配前端解析逻辑
+                )
+            }
         }
         configureRoutes()
     }.start(wait = true)

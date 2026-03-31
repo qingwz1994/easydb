@@ -17,4 +17,5 @@ object ServiceRegistry {
     val taskManager = TaskManager()
     val sqlHistoryStore = SqlHistoryStore()
     val scriptManager = ScriptManager()
+    val changeTracker: ChangeTracker = MysqlBinlogTracker()
 }
