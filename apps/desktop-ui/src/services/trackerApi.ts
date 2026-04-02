@@ -96,6 +96,13 @@ export const trackerApi = {
       body: JSON.stringify(req),
     }),
 
+  /** 生成正向重放 SQL */
+  forwardSql: (req: RollbackSqlRequest) =>
+    request<RollbackSqlResult>('/forward-sql', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+
   /** 列出 binlog 文件 */
   listBinlogFiles: (connectionId: string) =>
     request<BinlogFileInfo[]>(`/binlog-files?connectionId=${connectionId}`),

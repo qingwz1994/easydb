@@ -73,6 +73,18 @@ export const DataTrackerPage: React.FC = () => {
   const [rollbackSummary, setRollbackSummary] = useState<{ tables: number; rows: number; insertCount: number; updateCount: number; deleteCount: number } | null>(null)
   const [rollbackWarnings, setRollbackWarnings] = useState<string[]>([])
 
+  // 正向重放 SQL
+  const [forwardModal, setForwardModal] = useState(false)
+  const [forwardSql, setForwardSql] = useState<string[]>([])
+  const [forwardSummary, setForwardSummary] = useState<{ tables: number; rows: number; insertCount: number; updateCount: number; deleteCount: number } | null>(null)
+  const [forwardWarnings, setForwardWarnings] = useState<string[]>([])
+
+  // 字段级 Diff 模式：仅显示变更列
+  const [diffOnlyMode, setDiffOnlyMode] = useState(false)
+
+  // 事务分组视图
+  const [groupByTx, setGroupByTx] = useState(false)
+
   // 事件详情面板
   const [selectedEvent, setSelectedEvent] = useState<ChangeEvent | null>(null)
 
@@ -84,6 +96,9 @@ export const DataTrackerPage: React.FC = () => {
   const [endFile, setEndFile] = useState<string | undefined>()
   const [endPosition, setEndPosition] = useState<number | undefined>()
   const [loadingFiles, setLoadingFiles] = useState(false)
+
+  // 内核级表白名单（targetTables）
+  const [targetTables, setTargetTables] = useState<string[]>([])
 
   const eventSourceRef = useRef<EventSource | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -231,8 +246,9 @@ export const DataTrackerPage: React.FC = () => {
 
   // (定时刷新已依据用户要求移除，避免状态竞争导致数据错乱)
   // 当系统首次接收到数据且当前列表为空时，自动拉取第一页（仅触发一次，解决启动时看不到数据的问题）
+  // 注意：sseStatus === 'completed' 时不触发（回放完成后由 SSE completed 回调统一加载，避免重复 fetch）
   useEffect(() => {
-    if (totalCount > 0 && currentPageData.length === 0 && currentPage === 1 && !loadingPage) {
+    if (totalCount > 0 && currentPageData.length === 0 && currentPage === 1 && !loadingPage && sseStatus !== 'completed') {
       fetchPageRef.current(1, pageSize)
     }
   }, [totalCount]) // 仅监听 totalCount 变化
@@ -244,14 +260,21 @@ export const DataTrackerPage: React.FC = () => {
     }
   }, [totalCount, filterType, filterTable, timeRange])
 
-  // 筛选条件或状态变化时重新加载第一页
+  // 筛选条件变化时重新加载第一页
+  // 注意：sseStatus 不在依赖列表中 — 状态变更（如 receiving->completed）不应触发重新加载，
+  // 回放完成后的数据加载由 SSE completed 回调的 setTimeout 统一处理，避免多路竞争导致重复渲染
+  const prevSseStatusRef = useRef(sseStatus)
   useEffect(() => {
-    if (sessionId && (sseStatus === 'completed' || sseStatus === 'receiving')) {
-      setCurrentPageData([]) // Explicitly clear arrays to prevent ghost DOM cache
+    prevSseStatusRef.current = sseStatus
+  }, [sseStatus])
+
+  useEffect(() => {
+    if (sessionId && (prevSseStatusRef.current === 'completed' || prevSseStatusRef.current === 'receiving')) {
+      setCurrentPageData([])
       setCurrentPage(1)
       fetchPage(1, pageSize)
     }
-  }, [filterType, filterTable, timeRange, sessionId, sseStatus, pageSize])
+  }, [filterType, filterTable, timeRange, pageSize]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── 启动/停止追踪 ─────────────────────────────────────────
 
@@ -260,6 +283,7 @@ export const DataTrackerPage: React.FC = () => {
     setStarting(true)
     try {
       const config: any = { connectionId: selectedConnId, mode }
+      if (targetTables.length > 0) config.targetTables = targetTables
       if (mode === 'replay') {
         config.startFile = startFile
         config.startPosition = startPosition
@@ -340,6 +364,29 @@ export const DataTrackerPage: React.FC = () => {
     } catch (e: any) {
       message.error(`停止失败: ${e.message}`)
     }
+  }
+
+  // 重置会话状态，允许用户重新开始（不需要刷新页面）
+  const handleReset = () => {
+    // 清除后台资源
+    eventSourceRef.current?.close()
+    eventSourceRef.current = null
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+    if (refreshTimerRef.current) { clearInterval(refreshTimerRef.current); refreshTimerRef.current = null }
+    if (abortControllerRef.current) { abortControllerRef.current.abort(); abortControllerRef.current = null }
+    // 重置所有会话状态
+    setSessionId(null)
+    setSessionStatus(null)
+    setSseStatus('idle')
+    setTotalCount(0)
+    setRate(0)
+    setCurrentPageData([])
+    setPageTotal(0)
+    setCurrentPage(1)
+    setStats(null)
+    setSelectedEventIds(new Set())
+    setSelectedEvent(null)
+    requestTrackerRef.current = 0
   }
 
   // ─── 回滚 SQL ─────────────────────────────────────────────
@@ -460,6 +507,109 @@ export const DataTrackerPage: React.FC = () => {
     message.success('SQL 文件已下载')
   }
 
+  const handleGenerateForward = () => {
+    if (selectedEventIds.size === 0) {
+      message.warning('请先选择要重放的事件')
+      return
+    }
+    const selectedEvents = currentPageData
+      .filter(e => selectedEventIds.has(e.id))
+      .sort((a, b) => a.timestamp - b.timestamp) // 正序排列
+
+    if (selectedEvents.length === 0) {
+      message.warning('选中的事件不在当前页')
+      return
+    }
+
+    const sqlStatements: string[] = []
+    const warnings: string[] = []
+
+    sqlStatements.push('-- ====== EasyDB 正向重放 SQL ======')
+    sqlStatements.push(`-- 生成时间: ${new Date().toLocaleString('zh-CN', { hour12: false })}`)
+    sqlStatements.push(`-- 事件数量: ${selectedEvents.length}`)
+    sqlStatements.push('-- 请仔细核对后在事务中执行')
+    sqlStatements.push('')
+    sqlStatements.push('BEGIN;')
+    sqlStatements.push('')
+
+    let insertCount = 0, updateCount = 0, deleteCount = 0
+    const tableSet = new Set<string>()
+    let totalRows = 0
+
+    for (const event of selectedEvents) {
+      const db = event.database
+      const table = event.table
+      tableSet.add(`${db}.${table}`)
+      sqlStatements.push(`-- 重放 ${event.eventType} ${db}.${table} (${new Date(event.timestamp).toLocaleString('zh-CN', { hour12: false })})`)
+
+      if (event.eventType === 'INSERT') {
+        const rows = event.rowsAfter || []
+        for (const row of rows) {
+          const cols = Object.keys(row).map(k => `\`${k}\``).join(', ')
+          const vals = Object.values(row).map(v => escapeValue(v)).join(', ')
+          sqlStatements.push(`INSERT INTO \`${db}\`.\`${table}\` (${cols}) VALUES (${vals});`)
+          insertCount++; totalRows++
+        }
+      } else if (event.eventType === 'DELETE') {
+        const rows = event.rowsBefore || []
+        for (const row of rows) {
+          const where = Object.entries(row)
+            .map(([k, v]) => v === null ? `\`${k}\` IS NULL` : `\`${k}\` = ${escapeValue(v)}`)
+            .join(' AND ')
+          if (where) {
+            sqlStatements.push(`DELETE FROM \`${db}\`.\`${table}\` WHERE ${where} LIMIT 1;`)
+            deleteCount++; totalRows++
+          }
+        }
+      } else if (event.eventType === 'UPDATE') {
+        const beforeRows = event.rowsBefore || []
+        const afterRows = event.rowsAfter || []
+        for (let i = 0; i < Math.min(beforeRows.length, afterRows.length); i++) {
+          const before = beforeRows[i]
+          const after = afterRows[i]
+          const changed = Object.entries(after).filter(([k, v]) => before[k] !== v)
+          if (changed.length === 0) continue
+          const setClause = changed.map(([k, v]) => `\`${k}\` = ${escapeValue(v)}`).join(', ')
+          const where = Object.entries(before)
+            .map(([k, v]) => v === null ? `\`${k}\` IS NULL` : `\`${k}\` = ${escapeValue(v)}`)
+            .join(' AND ')
+          if (where) {
+            sqlStatements.push(`UPDATE \`${db}\`.\`${table}\` SET ${setClause} WHERE ${where} LIMIT 1;`)
+            updateCount++; totalRows++
+          }
+        }
+      }
+      sqlStatements.push('')
+    }
+    sqlStatements.push('COMMIT;')
+
+    setForwardSql(sqlStatements)
+    setForwardSummary({ tables: tableSet.size, rows: totalRows, insertCount, updateCount, deleteCount })
+    setForwardWarnings(warnings)
+    setForwardModal(true)
+    if (totalRows > 0) message.success(`已生成 ${totalRows} 条重放 SQL`)
+  }
+
+  const handleCopyForwardSql = () => {
+    navigator.clipboard.writeText(forwardSql.join('\n')).then(() => {
+      message.success('已复制到剪贴板')
+    })
+  }
+
+  const handleDownloadForwardSql = () => {
+    const content = forwardSql.join('\n')
+    const blob = new Blob([content], { type: 'text/sql;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `forward_${dayjs().format('YYYYMMDD_HHmmss')}.sql`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    message.success('SQL 文件已下载')
+  }
+
   // ─── UI 辅助 ───────────────────────────────────────────────
 
   const formatSize = (bytes: number) => {
@@ -567,6 +717,16 @@ export const DataTrackerPage: React.FC = () => {
         </Text>
       ),
     },
+    {
+      title: 'TxID',
+      dataIndex: 'transactionId',
+      width: 90,
+      render: (txId: string | undefined) => txId ? (
+        <Tag style={{ fontSize: 10, fontFamily: 'monospace', opacity: 0.8 }} color="purple">
+          {txId}
+        </Tag>
+      ) : null,
+    },
   ]
 
   // ─── 详情面板 ────────────────────────────────────────────────
@@ -602,56 +762,106 @@ export const DataTrackerPage: React.FC = () => {
     )
 
     if (record.eventType === 'UPDATE' && record.rowsBefore?.length && record.rowsAfter?.length) {
+      // 计算有多少列发生了变化（取第一行作为代表）
+      const firstBefore = record.rowsBefore[0]
+      const firstAfter = record.rowsAfter?.[0] || {}
+      const changedCols = cols.filter(col => firstBefore[col] !== firstAfter[col])
+      const changedColSet = new Set(changedCols)
+
       return (
         <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
           {header}
+          {/* 变更列统计 + 切换控件 */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8, padding: '6px 14px',
+            borderBottom: `1px solid ${diffColors.border}`,
+            background: isDark ? '#141414' : '#fafafa', flexWrap: 'wrap',
+          }}>
+            <Badge
+              count={changedCols.length}
+              style={{ backgroundColor: token.colorWarning, fontSize: 10 }}
+            />
+            <Text style={{ fontSize: 11, color: diffColors.muted }}>
+              列发生变更（共 {cols.length} 列）
+            </Text>
+            <div style={{ marginLeft: 'auto' }}>
+              <Segmented
+                size="small"
+                value={diffOnlyMode}
+                onChange={(v) => setDiffOnlyMode(v as boolean)}
+                options={[
+                  { label: '全部列', value: false },
+                  { label: '仅变更列', value: true },
+                ]}
+              />
+            </div>
+          </div>
           <div style={{ flex: 1, overflow: 'auto', padding: 0 }}>
             {record.rowsBefore.map((before, rowIdx) => {
               const after = record.rowsAfter?.[rowIdx] || {}
+              const displayCols = diffOnlyMode
+                ? cols.filter(col => before[col] !== after[col])
+                : cols
               return (
-                <div key={rowIdx}>
+                <div key={record.id + '-' + rowIdx}>
                   {rowIdx > 0 && <Divider style={{ margin: 0 }} />}
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr>
-                        <th style={{ ...thStyle, width: 120 }}>列名</th>
-                        <th style={thStyle}>变更前</th>
-                        <th style={thStyle}>变更后</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {cols.map(col => {
-                        const isChanged = before[col] !== after[col]
-                        return (
-                          <tr key={col} style={{ opacity: isChanged ? 1 : 0.5 }}>
-                            <td style={{ ...tdStyle, fontWeight: isChanged ? 600 : 400,
-                              color: isChanged ? (isDark ? '#d9d9d9' : '#262626') : diffColors.muted, width: 120,
-                              fontFamily: 'inherit', cursor: 'default' }}>
-                              {col}
-                            </td>
-                            <Tooltip title="点击复制" mouseEnterDelay={0.5}>
-                              <td style={{ ...tdStyle,
-                                background: isChanged ? diffColors.deleteBg : 'transparent',
-                                color: isChanged ? diffColors.deleteText : diffColors.muted,
-                              }}
-                              onClick={() => copyCell(before[col])}>
-                                {before[col] ?? <span style={{ color: '#d9d9d9', fontStyle: 'italic' }}>NULL</span>}
+                  {displayCols.length === 0 ? (
+                    <div style={{ padding: '12px 14px' }}>
+                      <Text type="secondary" style={{ fontSize: 12 }}>该行无字段变更</Text>
+                    </div>
+                  ) : (
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr>
+                          <th style={{ ...thStyle, width: 140 }}>列名</th>
+                          <th style={thStyle}>变更前</th>
+                          <th style={thStyle}>变更后</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {displayCols.map(col => {
+                          const isChanged = changedColSet.has(col)
+                          const accentColor = isChanged ? token.colorWarning : 'transparent'
+                          return (
+                            <tr key={col}>
+                              <td style={{
+                                ...tdStyle, width: 140,
+                                fontWeight: isChanged ? 700 : 400,
+                                color: isChanged ? (isDark ? '#e8e8e8' : '#1a1a1a') : diffColors.muted,
+                                fontFamily: 'inherit', cursor: 'default',
+                                borderLeft: `3px solid ${accentColor}`,
+                                paddingLeft: isChanged ? 7 : 10,
+                              }}>
+                                {col}
                               </td>
-                            </Tooltip>
-                            <Tooltip title="点击复制" mouseEnterDelay={0.5}>
-                              <td style={{ ...tdStyle,
-                                background: isChanged ? diffColors.insertBg : 'transparent',
-                                color: isChanged ? diffColors.insertText : diffColors.muted,
-                              }}
-                              onClick={() => copyCell(after[col])}>
-                                {after[col] ?? <span style={{ color: '#d9d9d9', fontStyle: 'italic' }}>NULL</span>}
-                              </td>
-                            </Tooltip>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
+                              <Tooltip title="点击复制" mouseEnterDelay={0.5}>
+                                <td style={{
+                                  ...tdStyle,
+                                  background: isChanged ? diffColors.deleteBg : 'transparent',
+                                  color: isChanged ? diffColors.deleteText : diffColors.muted,
+                                  borderLeft: isChanged ? `2px solid ${diffColors.deleteText}40` : undefined,
+                                }}
+                                onClick={() => copyCell(before[col])}>
+                                  {before[col] ?? <span style={{ color: isDark ? '#595959' : '#d9d9d9', fontStyle: 'italic' }}>NULL</span>}
+                                </td>
+                              </Tooltip>
+                              <Tooltip title="点击复制" mouseEnterDelay={0.5}>
+                                <td style={{
+                                  ...tdStyle,
+                                  background: isChanged ? diffColors.insertBg : 'transparent',
+                                  color: isChanged ? diffColors.insertText : diffColors.muted,
+                                  borderLeft: isChanged ? `2px solid ${diffColors.insertText}40` : undefined,
+                                }}
+                                onClick={() => copyCell(after[col])}>
+                                  {after[col] ?? <span style={{ color: isDark ? '#595959' : '#d9d9d9', fontStyle: 'italic' }}>NULL</span>}
+                                </td>
+                              </Tooltip>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
               )
             })}
@@ -735,6 +945,21 @@ export const DataTrackerPage: React.FC = () => {
               disabled={isRunning}
             />
 
+            {/* 内核级表白名单配置 */}
+            {!isRunning && (
+              <Select
+                mode="tags"
+                style={{ minWidth: 160, maxWidth: 300 }}
+                size="small"
+                placeholder="白名单表（默认全部）"
+                value={targetTables}
+                onChange={setTargetTables}
+                options={(stats?.tables || []).map(t => ({ value: t, label: t }))}
+                maxTagCount={2}
+                tokenSeparators={[',', ' ']}
+              />
+            )}
+
             {!isRunning && !isCompleted ? (
               <Button
                 type="primary"
@@ -745,14 +970,29 @@ export const DataTrackerPage: React.FC = () => {
               >
                 {mode === 'realtime' ? '开始追踪' : '开始回放'}
               </Button>
+            ) : isCompleted ? (
+              <Space size={8}>
+                <Button
+                  disabled
+                  icon={<CheckCircleOutlined />}
+                >
+                  {sseStatus === 'completed' && sessionStatus?.status !== 'stopped' ? '回放完成' : '已停止'}
+                </Button>
+                <Button
+                  type="primary"
+                  icon={<ReloadOutlined />}
+                  onClick={handleReset}
+                >
+                  重新开始
+                </Button>
+              </Space>
             ) : (
               <Button
                 danger
                 icon={<PauseCircleOutlined />}
                 onClick={handleStop}
-                disabled={isCompleted}
               >
-                {isCompleted ? '回放完成' : '停止追踪'}
+                停止追踪
               </Button>
             )}
 
@@ -796,6 +1036,20 @@ export const DataTrackerPage: React.FC = () => {
                   完成 · 共 <Text strong>{totalCount.toLocaleString()}</Text> 条
                 </Text>
               } />
+            )}
+            {/* 事务分组切换 */}
+            {currentPageData.length > 0 && (
+              <Tooltip title={groupByTx ? '切换到平铺视图' : '按事务分组显示'}>
+                <Button
+                  size="small"
+                  type={groupByTx ? 'primary' : 'default'}
+                  icon={<DatabaseOutlined />}
+                  onClick={() => setGroupByTx(v => !v)}
+                  style={{ fontSize: 11 }}
+                >
+                  {groupByTx ? '事务分组 ON' : '事务分组'}
+                </Button>
+              </Tooltip>
             )}
           </Space>
         </div>
@@ -923,6 +1177,96 @@ export const DataTrackerPage: React.FC = () => {
             placeholder={['开始', '结束']}
           />
 
+          {/* 时间轴热力图（Timeline Minimap） */}
+          {stats?.timeRange && stats.timeRange[0] > 0 && currentPageData.length > 0 && (() => {
+            const minTs = stats.timeRange[0]
+            const maxTs = stats.timeRange[1]
+            const duration = maxTs - minTs || 1
+            const BUCKETS = 60
+            const bucketSize = duration / BUCKETS
+
+            // 统计每个桶中各类型事件数量
+            type Bucket = { INSERT: number; UPDATE: number; DELETE: number }
+            const buckets: Bucket[] = Array.from({ length: BUCKETS }, () => ({ INSERT: 0, UPDATE: 0, DELETE: 0 }))
+            for (const ev of currentPageData) {
+              const idx = Math.min(BUCKETS - 1, Math.floor((ev.timestamp - minTs) / bucketSize))
+              if (idx >= 0 && idx < BUCKETS) {
+                buckets[idx][ev.eventType as keyof Bucket] = (buckets[idx][ev.eventType as keyof Bucket] || 0) + 1
+              }
+            }
+            const maxCount = Math.max(1, ...buckets.map(b => b.INSERT + b.UPDATE + b.DELETE))
+
+            // 当前选中事件在热力图上的位置
+            const highlightIdx = selectedEvent
+              ? Math.min(BUCKETS - 1, Math.floor((selectedEvent.timestamp - minTs) / bucketSize))
+              : -1
+
+            const barW = 176 / BUCKETS
+            const chartH = 40
+
+            const colors = {
+              INSERT: isDark ? '#52c41a' : '#389e0d',
+              UPDATE: isDark ? '#fa8c16' : '#d46b08',
+              DELETE: isDark ? '#ff4d4f' : '#cf1322',
+            }
+
+            return (
+              <div style={{ marginTop: 12 }}>
+                <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>时间轴</Text>
+                <Tooltip title="显示当前页事件的时间分布" mouseEnterDelay={0.5}>
+                  <div style={{
+                    width: 176, height: chartH + 2,
+                    background: isDark ? '#1a1a1a' : '#f5f5f5',
+                    borderRadius: 4, overflow: 'hidden',
+                    border: `1px solid ${isDark ? '#303030' : '#e8e8e8'}`,
+                    cursor: 'crosshair', position: 'relative',
+                  }}>
+                    <svg width={176} height={chartH} style={{ display: 'block' }}>
+                      {buckets.map((b, i) => {
+                        const total = b.INSERT + b.UPDATE + b.DELETE
+                        const totalH = (total / maxCount) * chartH
+                        const insertH = (b.INSERT / maxCount) * chartH
+                        const updateH = (b.UPDATE / maxCount) * chartH
+                        const deleteH = (b.DELETE / maxCount) * chartH
+                        const x = i * barW
+                        const isHighlight = i === highlightIdx
+                        return (
+                          <g key={'bucket-' + i}>
+                            {/* DELETE (bottom) */}
+                            {deleteH > 0 && <rect x={x} y={chartH - totalH} width={barW - 0.5} height={deleteH} fill={colors.DELETE} opacity={isHighlight ? 1 : 0.75} />}
+                            {/* UPDATE (middle) */}
+                            {updateH > 0 && <rect x={x} y={chartH - totalH + deleteH} width={barW - 0.5} height={updateH} fill={colors.UPDATE} opacity={isHighlight ? 1 : 0.75} />}
+                            {/* INSERT (top) */}
+                            {insertH > 0 && <rect x={x} y={chartH - totalH + deleteH + updateH} width={barW - 0.5} height={insertH} fill={colors.INSERT} opacity={isHighlight ? 1 : 0.75} />}
+                            {/* Highlight cursor */}
+                            {isHighlight && <rect x={x} y={0} width={barW > 1 ? barW : 2} height={chartH} fill="white" opacity={0.25} />}
+                          </g>
+                        )
+                      })}
+                    </svg>
+                  </div>
+                </Tooltip>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
+                  <Text style={{ fontSize: 9, color: diffColors.muted }}>
+                    {new Date(minTs).toLocaleTimeString('zh-CN', { hour12: false })}
+                  </Text>
+                  <Text style={{ fontSize: 9, color: diffColors.muted }}>
+                    {new Date(maxTs).toLocaleTimeString('zh-CN', { hour12: false })}
+                  </Text>
+                </div>
+                {/* 图例 */}
+                <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                  {(['INSERT', 'UPDATE', 'DELETE'] as const).map(type => (
+                    <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: 2, background: colors[type] }} />
+                      <Text style={{ fontSize: 9, color: diffColors.muted }}>{type}</Text>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
+
 
 
           <Divider style={{ margin: '16px 0' }} />
@@ -937,6 +1281,15 @@ export const DataTrackerPage: React.FC = () => {
               disabled={selectedEventIds.size === 0}
             >
               生成回滚 SQL ({selectedEventIds.size})
+            </Button>
+            <Button
+              icon={<PlayCircleOutlined />}
+              size="small"
+              block
+              onClick={handleGenerateForward}
+              disabled={selectedEventIds.size === 0}
+            >
+              生成重放 SQL ({selectedEventIds.size})
             </Button>
             <Button
               icon={<FileTextOutlined />}
@@ -1031,6 +1384,138 @@ export const DataTrackerPage: React.FC = () => {
             </div>
           ) : (
             <div style={{ position: 'relative', flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              {groupByTx ? (() => {
+                // 事务分组视图：按 transactionId 聚合
+                type TxGroup = {
+                  _isTxGroup: true
+                  transactionId: string
+                  events: ChangeEvent[]
+                  timestamp: number   // 最早事件时间
+                  tables: string[]    // 涉及的表（去重）
+                  eventTypes: string[] // 涉及的操作类型（去重）
+                  totalRows: number
+                }
+                type FlatRow = ChangeEvent & { _isTxGroup?: false }
+                type TableRow = TxGroup | FlatRow
+
+                const grouped: TableRow[] = []
+                const txMap = new Map<string, TxGroup>()
+
+                for (const ev of currentPageData) {
+                  if (ev.transactionId) {
+                    if (!txMap.has(ev.transactionId)) {
+                      const g: TxGroup = {
+                        _isTxGroup: true,
+                        transactionId: ev.transactionId,
+                        events: [],
+                        timestamp: ev.timestamp,
+                        tables: [],
+                        eventTypes: [],
+                        totalRows: 0,
+                      }
+                      txMap.set(ev.transactionId, g)
+                      grouped.push(g)
+                    }
+                    const g = txMap.get(ev.transactionId)!
+                    g.events.push(ev)
+                    g.totalRows += ev.rowCount
+                    if (!g.tables.includes(ev.table)) g.tables.push(ev.table)
+                    if (!g.eventTypes.includes(ev.eventType)) g.eventTypes.push(ev.eventType)
+                    if (ev.timestamp < g.timestamp) g.timestamp = ev.timestamp
+                  } else {
+                    grouped.push(ev)
+                  }
+                }
+
+                const txColumns = [
+                  {
+                    title: '时间', width: 200,
+                    render: (_: any, row: TableRow) => {
+                      const ts = row.timestamp
+                      const d = new Date(ts)
+                      return <Text style={{ fontSize: 12, fontFamily: 'monospace' }}>
+                        {d.getFullYear()}-{String(d.getMonth()+1).padStart(2,'0')}-{String(d.getDate()).padStart(2,'0')} {d.toLocaleTimeString('zh-CN',{hour12:false})}
+                      </Text>
+                    },
+                  },
+                  {
+                    title: '事务 / 操作', width: 200,
+                    render: (_: any, row: TableRow) => {
+                      if (row._isTxGroup) {
+                        return <Space size={4}>
+                          <Tag color="purple" style={{ fontFamily: 'monospace', fontSize: 11 }}>
+                            TX {(row as TxGroup).transactionId}
+                          </Tag>
+                          {(row as TxGroup).eventTypes.map(t => {
+                            const cfg = eventTypeConfig[t]
+                            return <Tag key={t} color={cfg?.color} style={{ fontSize: 10 }}>{cfg?.label || t}</Tag>
+                          })}
+                        </Space>
+                      }
+                      const cfg = eventTypeConfig[(row as ChangeEvent).eventType]
+                      return <Tag color={cfg?.color} style={{ fontWeight: 600, fontSize: 11 }}>{cfg?.label}</Tag>
+                    },
+                  },
+                  {
+                    title: '表', width: 200,
+                    render: (_: any, row: TableRow) => {
+                      if (row._isTxGroup) {
+                        return <Space size={2} wrap>{(row as TxGroup).tables.map(t => <Tag key={t} style={{ fontSize: 11 }}>{t}</Tag>)}</Space>
+                      }
+                      return <Text strong style={{ fontSize: 13 }}>{(row as ChangeEvent).table}</Text>
+                    },
+                  },
+                  {
+                    title: '事件/行数', width: 120,
+                    render: (_: any, row: TableRow) => {
+                      if (row._isTxGroup) {
+                        const g = row as TxGroup
+                        return <Space size={4}>
+                          <Tag>{g.events.length} 事件</Tag>
+                          <Tag>{g.totalRows} 行</Tag>
+                        </Space>
+                      }
+                      return <Tag>{(row as ChangeEvent).rowCount} 行</Tag>
+                    },
+                  },
+                ]
+
+                return <Table<TableRow>
+                  dataSource={grouped as TableRow[]}
+                  columns={txColumns as any}
+                  rowKey={(r) => (r as any)._isTxGroup ? `tx-${(r as TxGroup).transactionId}` : (r as ChangeEvent).id}
+                  size="small"
+                  loading={loadingPage}
+                  expandable={{
+                    expandedRowRender: (row) => {
+                      if (!(row as TxGroup)._isTxGroup) return null
+                      const g = row as TxGroup
+                      return <Table
+                        dataSource={g.events}
+                        columns={columns as any}
+                        rowKey="id"
+                        size="small"
+                        pagination={false}
+                        onRow={(ev) => ({ onClick: () => setSelectedEvent(ev), style: { cursor: 'pointer' } })}
+                        style={{ margin: '0 8px 8px 8px', borderRadius: 6, overflow: 'hidden' }}
+                      />
+                    },
+                    rowExpandable: (row) => !!(row as TxGroup)._isTxGroup,
+                    expandRowByClick: true,
+                  }}
+                  pagination={{
+                    pageSize: 50, showSizeChanger: false,
+                    showTotal: (t) => `共 ${t} 条（${txMap.size} 个事务）`,
+                  }}
+                  scroll={{ y: 'calc(100vh - 380px)' }}
+                  onRow={(row) => ({
+                    onClick: () => {
+                      if (!(row as TxGroup)._isTxGroup) setSelectedEvent(row as ChangeEvent)
+                    },
+                    style: { cursor: 'pointer' },
+                  })}
+                />
+              })() : (
               <Table
                 key={String(filterType) + String(filterTable)} // 强制彻底销毁与重建，根治底层复用导致的幻影DOM行
                 dataSource={currentPageData}
@@ -1064,6 +1549,7 @@ export const DataTrackerPage: React.FC = () => {
                   return classes.join(' ')
                 }}
               />
+              )}
 
               {/* 实时模式刷新提示 */}
               {isRunning && mode === 'realtime' && (
@@ -1164,6 +1650,72 @@ export const DataTrackerPage: React.FC = () => {
 
             <Input.TextArea
               value={rollbackSql.join('\n')}
+              readOnly
+              rows={16}
+              style={{ fontFamily: 'monospace', fontSize: 12 }}
+            />
+          </div>
+        )}
+      </Modal>
+
+      {/* 正向重放 SQL Modal */}
+      <Modal
+        title={<Space><PlayCircleOutlined /> 重放 SQL 预览</Space>}
+        open={forwardModal}
+        onCancel={() => setForwardModal(false)}
+        width={720}
+        styles={{ body: { maxHeight: '65vh', overflow: 'auto' } }}
+        footer={[
+          <Button key="close" onClick={() => setForwardModal(false)}>关闭</Button>,
+          <Button key="download" icon={<DownloadOutlined />} onClick={handleDownloadForwardSql}
+            disabled={forwardSql.length === 0}>
+            下载 SQL
+          </Button>,
+          <Button key="copy" type="primary"
+            icon={<CopyOutlined />} onClick={handleCopyForwardSql}
+            disabled={forwardSql.length === 0}>
+            复制 SQL
+          </Button>,
+        ]}
+      >
+        {forwardSql.length === 0 ? (
+          <Empty description="无可生成的重放 SQL" />
+        ) : (
+          <div>
+            {forwardSummary && (
+              <div style={{
+                display: 'flex', gap: 16, padding: '8px 12px', marginBottom: 12,
+                background: isDark ? '#1a1a1a' : '#fafafa', borderRadius: 6, fontSize: 12,
+                border: `1px solid ${diffColors.border}`, flexWrap: 'wrap', alignItems: 'center',
+              }}>
+                <span>涉及 <Text strong>{forwardSummary.tables}</Text> 张表</span>
+                <Divider type="vertical" />
+                <span>共 <Text strong>{forwardSummary.rows.toLocaleString()}</Text> 条语句</span>
+                <Divider type="vertical" />
+                {forwardSummary.insertCount > 0 && <Tag color="green" style={{ fontSize: 11 }}>INSERT ×{forwardSummary.insertCount}</Tag>}
+                {forwardSummary.updateCount > 0 && <Tag color="blue" style={{ fontSize: 11 }}>UPDATE ×{forwardSummary.updateCount}</Tag>}
+                {forwardSummary.deleteCount > 0 && <Tag color="red" style={{ fontSize: 11 }}>DELETE ×{forwardSummary.deleteCount}</Tag>}
+              </div>
+            )}
+
+            {forwardWarnings.length > 0 && (
+              <Alert type="warning" showIcon icon={<ExclamationCircleOutlined />} message="注意事项"
+                description={
+                  <ul style={{ margin: '4px 0', paddingLeft: 20, fontSize: 12 }}>
+                    {forwardWarnings.map((w, i) => <li key={i}>{w}</li>)}
+                  </ul>
+                }
+                style={{ marginBottom: 12 }}
+              />
+            )}
+
+            <Alert type="success" showIcon
+              message="正向 SQL 按原始时间正序生成，可用于将变更同步到其他环境（如测试库）"
+              style={{ marginBottom: 12, fontSize: 12 }}
+            />
+
+            <Input.TextArea
+              value={forwardSql.join('\n')}
               readOnly
               rows={16}
               style={{ fontFamily: 'monospace', fontSize: 12 }}

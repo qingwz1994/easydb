@@ -76,3 +76,10 @@ test/
 docs/*.csv
 icon-new.png
 icon-squircle.png
+# Temp test scripts
+.tmp_*
+
+# Runtime files
+.current-task
+connections.json
+test-api.sh

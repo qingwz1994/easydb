@@ -378,6 +378,7 @@ export interface ChangeEvent {
     position?: number
     serverId?: number
   }
+  transactionId?: string  // 事务 ID，来自 QUERY:BEGIN / XID 事件
 }
 
 export interface TrackerSessionConfig {
@@ -390,6 +391,7 @@ export interface TrackerSessionConfig {
   endPosition?: number
   filterTables?: string[]
   filterTypes?: string[]
+  targetTables?: string[]  // 内核级白名单，在 TABLE_MAP 阶段过滤
 }
 
 export interface TrackerSessionStatus {

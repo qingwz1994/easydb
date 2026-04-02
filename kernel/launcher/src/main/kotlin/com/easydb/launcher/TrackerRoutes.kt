@@ -162,4 +162,22 @@ fun Route.trackerRoutes() {
         val result = tracker.generateRollbackSql(trackerSessionId, request.eventIds, session, request.database)
         call.ok(result)
     }
+
+    // 生成正向重放 SQL
+    post("/forward-sql") {
+        val request = call.receive<RollbackSqlRequest>()
+
+        val connConfig = store.getById(request.connectionId)
+            ?: return@post call.fail("NOT_FOUND", "Connection not found")
+
+        val session = connMgr.getSession(request.connectionId)
+            ?: connMgr.openSession(adapter.connectionAdapter(), connConfig)
+
+        val activeSessions = tracker.getActiveSessions()
+        val trackerSessionId = activeSessions.find { it.connectionId == request.connectionId }?.sessionId
+            ?: return@post call.fail("NOT_FOUND", "No active tracker session for this connection")
+
+        val result = tracker.generateForwardSql(trackerSessionId, request.eventIds, session, request.database)
+        call.ok(result)
+    }
 }

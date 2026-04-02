@@ -28,7 +28,8 @@ data class ChangeEvent(
     val rowsBefore: List<Map<String, String?>>? = null, // UPDATE/DELETE 的旧值
     val rowsAfter: List<Map<String, String?>>? = null,  // INSERT/UPDATE 的新值
     val rowCount: Int = 0,                             // 影响行数
-    val sourceInfo: ChangeEventSource? = null           // 来源信息（binlog 位点等）
+    val sourceInfo: ChangeEventSource? = null,          // 来源信息（binlog 位点等）
+    val transactionId: String? = null                  // 事务 ID（来自 XID 事件，用于事务分组）
 )
 
 @Serializable
@@ -51,8 +52,9 @@ data class TrackerSessionConfig(
     val startPosition: Long? = null,                   // 起始位置
     val endFile: String? = null,                       // replay 模式：截止 binlog 文件（null=到当前末尾）
     val endPosition: Long? = null,                     // replay 模式：截止位置
-    val filterTables: List<String> = emptyList(),       // 空=全部表
-    val filterTypes: List<String> = emptyList()         // 空=全部类型 (INSERT/UPDATE/DELETE)
+    val filterTables: List<String> = emptyList(),       // 空=全部表（后处理筛选，已解析后再过滤）
+    val filterTypes: List<String> = emptyList(),        // 空=全部类型 (INSERT/UPDATE/DELETE)
+    val targetTables: List<String> = emptyList()        // 内核级表白名单：在 TABLE_MAP 阶段即拦截，空=不限制
 )
 
 /**

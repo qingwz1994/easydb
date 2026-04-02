@@ -47,7 +47,7 @@ class MysqlBinlogTracker : ChangeTracker {
         val connectionId: String,
         val config: TrackerSessionConfig,
         val client: BinaryLogClient,
-        val thread: Thread,
+        @Volatile var thread: Thread? = null,
         val eventStore: EventStore,
         val tickFlow: MutableSharedFlow<SseTick>,
         val tickTimer: Timer,
@@ -64,7 +64,14 @@ class MysqlBinlogTracker : ChangeTracker {
         // 列名缓存: "database.table" -> List<String>
         val columnCache: ConcurrentHashMap<String, List<String>> = ConcurrentHashMap(),
         // 用于查询列名的 session
-        val dbSession: DatabaseSession
+        val dbSession: DatabaseSession,
+        // replay 模式：追踪是否已到达截止文件（用于只指定 endFile 的场景）
+        @Volatile var reachedEndFile: Boolean = false,
+        // 事务追踪：当前活跃事务的 ID（QUERY:BEGIN 时设置，XID 提交后清空）
+        @Volatile var currentTransactionId: String? = null,
+        // 追踪最后实际处理的位点，用于防止 client 在 ROTATE 后虚报进度
+        @Volatile var lastProcessedFile: String? = null,
+        @Volatile var lastProcessedPosition: Long = 0L
     )
 
     /**
@@ -81,8 +88,11 @@ class MysqlBinlogTracker : ChangeTracker {
         private var minTimestamp = Long.MAX_VALUE
         private var maxTimestamp = Long.MIN_VALUE
 
+        /**
+         * 添加事件到存储，返回是否实际存储成功
+         */
         @Synchronized
-        fun add(event: ChangeEvent) {
+        fun add(event: ChangeEvent): Boolean {
             events.add(event)
             // 增量更新统计
             when (event.eventType) {
@@ -93,6 +103,7 @@ class MysqlBinlogTracker : ChangeTracker {
             tableSet.add(event.table)
             if (event.timestamp < minTimestamp) minTimestamp = event.timestamp
             if (event.timestamp > maxTimestamp) maxTimestamp = event.timestamp
+            return true
         }
 
         @Synchronized
@@ -142,10 +153,14 @@ class MysqlBinlogTracker : ChangeTracker {
             // 倒序（最新的在前面）
             val reversed = filtered.asReversed()
 
-            // 分页
+            // 分页 — 必须用 toList() 做防御性复制！
+            // 因为 asReversed() 和 subList() 只是原始 events 的视图引用，
+            // 一旦 query() 返回后（synchronized 锁释放），在 JSON 序列化期间
+            // 如果有并发 add() 修改 events，会导致 ConcurrentModificationException
+            // 或更隐蔽地产生重复/错位数据 — 这是页面重复显示的根本原因。
             val start = page * pageSize
             val items = if (start >= reversed.size) emptyList()
-                else reversed.subList(start, minOf(start + pageSize, reversed.size))
+                else reversed.subList(start, minOf(start + pageSize, reversed.size)).toList()
 
             // 统计（基于全量数据，不受筛选影响）
             val stats = getStats()
@@ -225,7 +240,6 @@ class MysqlBinlogTracker : ChangeTracker {
             connectionId = config.connectionId,
             config = config,
             client = client,
-            thread = Thread.currentThread(), // placeholder, will be replaced
             eventStore = eventStore,
             tickFlow = tickFlow,
             tickTimer = tickTimer,
@@ -295,11 +309,10 @@ class MysqlBinlogTracker : ChangeTracker {
             }
         }, "binlog-tracker-$sessionId")
         thread.isDaemon = true
+        trackerSession.thread = thread
         thread.start()
 
-        // 更新 session 里的 thread 引用
-        val finalSession = trackerSession.copy(thread = thread)
-        sessions[sessionId] = finalSession
+        sessions[sessionId] = trackerSession
 
         logger.info("[Tracker:$sessionId] Started for connection ${config.connectionId}")
         return sessionId
@@ -310,7 +323,7 @@ class MysqlBinlogTracker : ChangeTracker {
         try {
             session.tickTimer.cancel()
             session.client.disconnect()
-            session.thread.interrupt()
+            session.thread?.interrupt()
             session.status = "stopped"
             logger.info("[Tracker:$sessionId] Stopped")
         } catch (e: Exception) {
@@ -324,8 +337,8 @@ class MysqlBinlogTracker : ChangeTracker {
             sessionId = session.sessionId,
             connectionId = session.connectionId,
             status = session.status,
-            currentFile = session.client.binlogFilename,
-            currentPosition = session.client.binlogPosition,
+            currentFile = session.lastProcessedFile ?: session.client.binlogFilename,
+            currentPosition = if (session.lastProcessedPosition > 0) session.lastProcessedPosition else session.client.binlogPosition,
             eventCount = session.eventCount.get(),
             startedAt = session.startedAt,
             errorMessage = session.errorMessage,
@@ -369,6 +382,23 @@ class MysqlBinlogTracker : ChangeTracker {
         }
 
         return RollbackGenerator.generate(events, database)
+    }
+
+    override fun generateForwardSql(
+        sessionId: String,
+        eventIds: List<String>,
+        session: DatabaseSession,
+        database: String
+    ): RollbackSqlResult {
+        val trackerSession = sessions[sessionId]
+            ?: return RollbackSqlResult(emptyList(), emptyList(), 0, listOf("Session not found"))
+
+        val events = trackerSession.eventStore.findByIds(eventIds)
+        if (events.isEmpty()) {
+            return RollbackSqlResult(emptyList(), emptyList(), 0, listOf("No matching events found"))
+        }
+
+        return ForwardSqlGenerator.generate(events, database)
     }
 
     override fun checkServerCompatibility(session: DatabaseSession): TrackerServerCheck {
@@ -465,8 +495,8 @@ class MysqlBinlogTracker : ChangeTracker {
                 sessionId = session.sessionId,
                 connectionId = session.connectionId,
                 status = session.status,
-                currentFile = session.client.binlogFilename,
-                currentPosition = session.client.binlogPosition,
+                currentFile = session.lastProcessedFile ?: session.client.binlogFilename,
+                currentPosition = if (session.lastProcessedPosition > 0) session.lastProcessedPosition else session.client.binlogPosition,
                 eventCount = session.eventCount.get(),
                 startedAt = session.startedAt,
                 errorMessage = session.errorMessage,
@@ -512,44 +542,72 @@ class MysqlBinlogTracker : ChangeTracker {
     // ─── 内部事件处理 ────────────────────────────────────────
 
     private fun handleBinlogEvent(event: Event, session: TrackerSession) {
+        if (session.status != "running") return // 防止 client 关闭后继续推送幽灵事件
+
         val header = event.getHeader<EventHeaderV4>()
+        val currentFile = session.client.binlogFilename
 
         // Replay 模式：检查是否已达截止位点
         if (session.config.mode == "replay") {
-            val endFile = session.config.endFile
-            val endPos = session.config.endPosition
-            val currentFile = session.client.binlogFilename
-            val currentPos = header.position
-
-            if (endFile != null && endPos != null) {
-                // 比较文件名和位置
-                val fileCmp = compareBinlogFiles(currentFile, endFile)
-                if (fileCmp > 0 || (fileCmp == 0 && currentPos >= endPos)) {
-                    logger.info("[Tracker:${session.sessionId}] Replay reached end position $endFile:$endPos, stopping")
+            val endFile = session.config.endFile            // 如果已经标记为到达截止文件，但当前文件被重置（可能发生了文件切换），立即停止
+            if (session.reachedEndFile) {
+                val fileCmp = compareBinlogFiles(currentFile, session.config.endFile)
+                if (fileCmp != 0) {
+                    logger.info("[Tracker:${session.sessionId}] Replay completed, file switched from ${session.config.endFile} to $currentFile, stopping")
                     session.status = "completed"
-                    // 立即发送一次 completed tick
-                    session.tickFlow.tryEmit(SseTick(
-                        type = "completed",
-                        totalCount = session.eventCount.get(),
-                        rate = 0,
-                        latestId = session.latestEventId,
-                        message = "回放完成，共 ${session.eventCount.get()} 条事件"
-                    ))
-                    Thread {
-                        try { session.client.disconnect() } catch (_: Exception) {}
-                    }.start()
+                    emitCompletionAndDisconnect(session)
                     return
                 }
-            } else if (endFile == null) {
-                // 未指定截止位点：如果已追上当前实时位置，继续监听即可
-                // （自然过渡为实时模式）
             }
+
+            // 如果指定了截止文件，进行判断
+            if (endFile != null) {
+                val fileCmp = compareBinlogFiles(currentFile, endFile)
+
+                when {
+                    // 当前文件已超过截止文件：立即停止
+                    fileCmp > 0 -> {
+                        logger.info("[Tracker:${session.sessionId}] Replay passed end file $endFile (current: $currentFile), stopping")
+                        session.status = "completed"
+                        emitCompletionAndDisconnect(session)
+                        return
+                    }
+                    // 当前文件等于截止文件：检查位置或标记已达截止文件
+                    fileCmp == 0 -> {
+                        session.reachedEndFile = true  // 标记已达到截止文件
+
+                        val endPos = session.config.endPosition
+                        val currentPos = header.position
+                        if (endPos != null) {
+                            if (currentPos >= endPos) {
+                                logger.info("[Tracker:${session.sessionId}] Replay reached end position $endFile:$endPos (current: $currentPos), stopping")
+                                session.status = "completed"
+                                emitCompletionAndDisconnect(session)
+                                return
+                            }
+                        }
+                        // 未指定 endPosition 的情况：继续处理该文件的所有事件
+                        // 当下一个事件到来时，如果文件切换，会在上面的 reachedEndFile 检测中停止
+                    }
+                    // 当前文件小于截止文件：继续正常处理
+                    else -> { /* continue */ }
+                }
+            }
+            // endFile == null：未指定截止位点，继续（实时模式）
         }
 
         when (header.eventType) {
             // TABLE_MAP: 建立 tableId <-> tableName 映射
             EventType.TABLE_MAP -> {
                 val data = event.getData<TableMapEventData>()
+
+                // 内核级白名单过滤（最早阶段）：targetTables 非空时，只登记白名单内的表。
+                // 未登记的表在后续 ROW 事件中 tableMapCache[tableId] 返回 null 直接 return，零解析开销。
+                val targetTables = session.config.targetTables
+                if (targetTables.isNotEmpty() && data.table !in targetTables) {
+                    return  // 不记录此表的 tableId，后续 ROW 事件自动丢弃
+                }
+
                 session.tableMapCache[data.tableId] = Pair(data.database, data.table)
                 // 预加载列名
                 val key = "${data.database}.${data.table}"
@@ -579,12 +637,14 @@ class MysqlBinlogTracker : ChangeTracker {
                     rowCount = rows.size,
                     sourceInfo = ChangeEventSource(
                         type = "mysql_binlog",
-                        file = session.client.binlogFilename,
+                        file = currentFile,
                         position = header.position,
                         serverId = header.serverId
                     )
                 )
 
+                session.lastProcessedFile = currentFile
+                session.lastProcessedPosition = header.position
                 emitEvent(session, changeEvent)
             }
 
@@ -610,12 +670,14 @@ class MysqlBinlogTracker : ChangeTracker {
                     rowCount = data.rows.size,
                     sourceInfo = ChangeEventSource(
                         type = "mysql_binlog",
-                        file = session.client.binlogFilename,
+                        file = currentFile,
                         position = header.position,
                         serverId = header.serverId
                     )
                 )
 
+                session.lastProcessedFile = currentFile
+                session.lastProcessedPosition = header.position
                 emitEvent(session, changeEvent)
             }
 
@@ -640,13 +702,32 @@ class MysqlBinlogTracker : ChangeTracker {
                     rowCount = rows.size,
                     sourceInfo = ChangeEventSource(
                         type = "mysql_binlog",
-                        file = session.client.binlogFilename,
+                        file = currentFile,
                         position = header.position,
                         serverId = header.serverId
                     )
                 )
 
+                session.lastProcessedFile = currentFile
+                session.lastProcessedPosition = header.position
                 emitEvent(session, changeEvent)
+            }
+
+            // XID: 事务提交（DML 事务的结束标志）
+            EventType.XID -> {
+                // XID 事件标志事务已提交，清除当前事务 ID
+                session.currentTransactionId = null
+            }
+
+            // QUERY: DDL 或事务边界
+            EventType.QUERY -> {
+                val data = event.getData<QueryEventData>()
+                val sql = data.sql?.trim()?.uppercase()
+                if (sql == "BEGIN") {
+                    // 新事务开始，生成一个新的事务 ID
+                    session.currentTransactionId = UUID.randomUUID().toString().substring(0, 8)
+                }
+                // 其他 DDL 语句（CREATE/ALTER/DROP 等）暂不处理
             }
 
             else -> { /* 忽略其他事件类型 */ }
@@ -666,19 +747,43 @@ class MysqlBinlogTracker : ChangeTracker {
 
     private fun emitEvent(session: TrackerSession, event: ChangeEvent) {
         // 裁剪行数据：每条事件最多保留 10 行详情，减少内存占用
-        val trimmed = if (event.rowCount > MAX_ROWS_PER_EVENT) {
+        var trimmed = if (event.rowCount > MAX_ROWS_PER_EVENT) {
             event.copy(
                 rowsBefore = event.rowsBefore?.take(MAX_ROWS_PER_EVENT),
                 rowsAfter = event.rowsAfter?.take(MAX_ROWS_PER_EVENT)
             )
         } else event
 
+        // 注入事务 ID
+        val txId = session.currentTransactionId
+        if (txId != null) {
+            trimmed = trimmed.copy(transactionId = txId)
+        }
+
         // 存入全量存储（不再推送完整事件到 SSE）
-        session.eventStore.add(trimmed)
-        session.eventCount.incrementAndGet()
-        session.rateCounter.incrementAndGet()
-        session.latestEventId = trimmed.id
+        val stored = session.eventStore.add(trimmed)
+        if (stored) {
+            session.eventCount.incrementAndGet()
+            session.rateCounter.incrementAndGet()
+            session.latestEventId = trimmed.id
+        }
         // tick 通知由定时器每秒发送，此处无需操作
+    }
+
+    /**
+     * 发送完成通知并断开连接
+     */
+    private fun emitCompletionAndDisconnect(session: TrackerSession) {
+        session.tickFlow.tryEmit(SseTick(
+            type = "completed",
+            totalCount = session.eventCount.get(),
+            rate = 0,
+            latestId = session.latestEventId,
+            message = "回放完成，共 ${session.eventCount.get()} 条事件"
+        ))
+        Thread {
+            try { session.client.disconnect() } catch (_: Exception) {}
+        }.start()
     }
 
     companion object {

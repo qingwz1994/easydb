@@ -64,6 +64,16 @@ interface ChangeTracker {
     ): RollbackSqlResult
 
     /**
+     * 根据事件 ID 列表生成正向重放 SQL（还原原始操作）
+     */
+    fun generateForwardSql(
+        sessionId: String,
+        eventIds: List<String>,
+        session: DatabaseSession,
+        database: String
+    ): RollbackSqlResult
+
+    /**
      * 检查服务端兼容性（binlog 是否开启、权限等）
      */
     fun checkServerCompatibility(session: DatabaseSession): TrackerServerCheck
