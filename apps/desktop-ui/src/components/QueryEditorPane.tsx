@@ -168,7 +168,6 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
     }
 
     if (!execSql || !activeEditorTab?.connectionId || !activeEditorTab?.database) return
-    const normalizedSql = normalizeExecutableSql(execSql)
     setExecuting(true)
     try {
       const previousSessionIds = collectSqlQuerySessionIds(activeEditorTab.currentBatch, activeEditorTab.results)
@@ -176,15 +175,36 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
         await Promise.allSettled(previousSessionIds.map((querySessionId) => sqlApi.querySessionClose(querySessionId)))
       }
 
-      const resultList = isPreviewableSql(normalizedSql)
-        ? [await sqlApi.querySessionStart({
-          connectionId: activeEditorTab.connectionId,
-          database: activeEditorTab.database,
-          sql: normalizedSql,
-          pageSize: DEFAULT_SQL_PREVIEW_PAGE_SIZE,
-          maxCellChars: MAX_SQL_PREVIEW_CELL_CHARS,
-        }) as SqlResult]
-        : await sqlApi.execute(activeEditorTab.connectionId, activeEditorTab.database, execSql) as SqlResult[]
+      // 拆分多条 SQL，每条 SELECT 走 querySession 流式分页（类似 DBeaver），非 SELECT 走 execute
+      const statements = execSql
+        .split(/;(?=(?:[^']*'[^']*')*[^']*$)/) // 按分号拆分，但忽略引号内的分号
+        .map(s => s.trim())
+        .filter(s => s.length > 0)
+
+      const resultList: SqlResult[] = []
+      for (const stmt of statements) {
+        const normalized = normalizeExecutableSql(stmt)
+        if (!normalized) continue
+
+        if (isPreviewableSql(normalized)) {
+          // SELECT / SHOW / DESC 等查询：走 querySession 流式分页，首次只加载 200 行
+          const result = await sqlApi.querySessionStart({
+            connectionId: activeEditorTab.connectionId,
+            database: activeEditorTab.database,
+            sql: normalized,
+            pageSize: DEFAULT_SQL_PREVIEW_PAGE_SIZE,
+            maxCellChars: MAX_SQL_PREVIEW_CELL_CHARS,
+          }) as SqlResult
+          resultList.push(result)
+        } else {
+          // DML / DDL：走一次性执行
+          const results = await sqlApi.execute(
+            activeEditorTab.connectionId, activeEditorTab.database, stmt
+          ) as SqlResult[]
+          resultList.push(...results)
+        }
+      }
+
       const newResults = [...[...resultList].reverse(), ...(activeEditorTab.results || [])]
 
       const hasError = resultList.some((r) => r.type === 'error')
@@ -224,7 +244,13 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
       }) as SqlResult
 
       if (next.type === 'error') {
-        toast.error(next.error ?? '加载更多失败')
+        // 会话已过期/关闭时，标记加载完毕而不是报错（可能是竞态：数据已全部加载）
+        updateActiveTab({
+          currentBatch: (activeEditorTab.currentBatch ?? []).map((result, idx) => {
+            if (idx !== batchIndex) return result
+            return { ...result, hasMore: false }
+          }),
+        })
         return
       }
 
@@ -262,7 +288,6 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
   const totalDuration = currentBatch.reduce((sum, r) => sum + (r.duration || 0), 0)
   const resultTableHeight = Math.max(240, (typeof window !== 'undefined' ? window.innerHeight : 900) - editorHeight - 230)
   const tableNameCounts: Record<string, number> = {}
-  const allParsedNames = extractAllTableNames(currentBatch[0]?.sql || '')
   let queryIndex = 0
 
   return (
@@ -372,6 +397,7 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
       {/* Results 区 */}
       <Content style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', background: token.colorBgContainer, flex: 1 }}>
         <Tabs
+          destroyInactiveTabPane
           activeKey={activeEditorTab.resultTab}
           onChange={(key) => updateActiveTab({ resultTab: key })}
           size="small"
@@ -389,7 +415,9 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
               if (r.type !== 'query') return null
               const currentQueryIndex = queryIndex++
               
-              const parsedName = allParsedNames[idx]
+              // 从每条结果自身的 SQL 中提取表名
+              const parsedNames = extractAllTableNames(r.sql || '')
+              const parsedName = parsedNames[0]
               let displayLabel = `结果 ${currentQueryIndex + 1}`
               if (parsedName) {
                 const count = (tableNameCounts[parsedName] || 0) + 1
@@ -431,7 +459,7 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
                         : r.type === 'query'
                           ? r.preview
                             ? `[OK] 预览加载 ${r.loadedRows ?? r.rows?.length ?? 0} 行${r.hasMore ? '（还有更多）' : ''}. (耗时 ${r.duration}ms)`
-                            : `[OK] 查询返回 ${r.rows?.length ?? 0} 行. (耗时 ${r.duration}ms)`
+                            : `[OK] 查询返回 ${r.loadedRows ?? r.rows?.length ?? 0} 行${r.hasMore ? '（结果已截断，请添加 LIMIT 限制查询范围）' : ''}. (耗时 ${r.duration}ms)`
                           : `[OK] 影响 ${r.affectedRows} 行. (耗时 ${r.duration}ms)`}
                       <div style={{ color: token.colorTextQuaternary, fontSize: 12, marginTop: 2, whiteSpace: 'pre-wrap' }}>{r.sql}</div>
                     </div>

@@ -40,6 +40,11 @@ class TaskManager(
         encodeDefaults = true
     }
 
+    // 防抖存盘机制 (C3): 必须在 init 之前声明，避免初始化顺序 NPE
+    private val dirty = AtomicBoolean(false)
+    private val debounceTimer = Timer("TaskManager-SaveDebounce", true)
+    private var pendingTask: TimerTask? = null
+
     init {
         loadFromDisk()
         cleanupExpiredExportFiles()
@@ -451,9 +456,7 @@ class TaskManager(
      * 关键的终态操作（createTask / markCompleted / markFailed / markCancelled / delete）
      * 仍然调用 saveImmediately() 确保数据不丢失。
      */
-    private val dirty = AtomicBoolean(false)
-    private val debounceTimer = Timer("TaskManager-SaveDebounce", true)
-    private var pendingTask: TimerTask? = null
+    // (dirty, debounceTimer, pendingTask 已移至 init 前声明)
 
     /** 延迟批量写入（用于高频更新如 onProgress） */
     private fun scheduleSave() {

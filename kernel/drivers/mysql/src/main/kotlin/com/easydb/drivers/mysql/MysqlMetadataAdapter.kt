@@ -102,9 +102,35 @@ class MysqlMetadataAdapter : MetadataAdapter {
         return result
     }
 
+    override fun listRoutines(session: DatabaseSession, database: String): List<RoutineInfo> {
+        val conn = (session as MysqlDatabaseSession).connection
+        val result = mutableListOf<RoutineInfo>()
+        conn.prepareStatement("""
+            SELECT ROUTINE_NAME, ROUTINE_TYPE, DEFINER, CREATED, LAST_ALTERED, ROUTINE_COMMENT
+            FROM INFORMATION_SCHEMA.ROUTINES
+            WHERE ROUTINE_SCHEMA = ?
+            ORDER BY ROUTINE_TYPE, ROUTINE_NAME
+        """.trimIndent()).use { stmt ->
+            stmt.setString(1, database)
+            stmt.executeQuery().use { rs ->
+                while (rs.next()) {
+                    result.add(RoutineInfo(
+                        name = rs.getString("ROUTINE_NAME"),
+                        type = rs.getString("ROUTINE_TYPE"),
+                        definer = rs.getString("DEFINER"),
+                        created = rs.getString("CREATED"),
+                        modified = rs.getString("LAST_ALTERED"),
+                        comment = rs.getString("ROUTINE_COMMENT")
+                    ))
+                }
+            }
+        }
+        return result
+    }
+
     override fun getTableDefinition(session: DatabaseSession, database: String, table: String): TableDefinition {
-        val columns = getColumns(session, database, table)
-        val indexes = getIndexes(session, database, table)
+        val columns = try { getColumns(session, database, table) } catch (_: Exception) { emptyList() }
+        val indexes = try { getIndexes(session, database, table) } catch (_: Exception) { emptyList() }
         val ddl = getDdl(session, database, table)
         val tableInfo = TableInfo(name = table, schema = database)
         return TableDefinition(table = tableInfo, columns = columns, indexes = indexes, ddl = ddl)
@@ -130,7 +156,7 @@ class MysqlMetadataAdapter : MetadataAdapter {
                         nullable = rs.getString("IS_NULLABLE") == "YES",
                         defaultValue = rs.getString("COLUMN_DEFAULT"),
                         isPrimaryKey = rs.getString("COLUMN_KEY") == "PRI",
-                        isAutoIncrement = rs.getString("EXTRA").contains("auto_increment", ignoreCase = true),
+                        isAutoIncrement = rs.getString("EXTRA")?.contains("auto_increment", ignoreCase = true) ?: false,
                         comment = rs.getString("COLUMN_COMMENT")
                     ))
                 }
@@ -238,14 +264,58 @@ class MysqlMetadataAdapter : MetadataAdapter {
 
     override fun getDdl(session: DatabaseSession, database: String, table: String): String {
         val conn = (session as MysqlDatabaseSession).connection
-        conn.createStatement().use { stmt ->
-            stmt.executeQuery("SHOW CREATE TABLE `$database`.`$table`").use { rs ->
-                if (rs.next()) {
-                    return rs.getString(2)
+        // 依次尝试不同对象类型的 DDL 查询
+        val commands = listOf(
+            "SHOW CREATE TABLE `$database`.`$table`",
+            "SHOW CREATE VIEW `$database`.`$table`",
+            "SHOW CREATE PROCEDURE `$database`.`$table`",
+            "SHOW CREATE FUNCTION `$database`.`$table`"
+        )
+        for (cmd in commands) {
+            try {
+                conn.createStatement().use { stmt ->
+                    stmt.executeQuery(cmd).use { rs ->
+                        if (rs.next()) {
+                            return rs.getString(2)
+                        }
+                    }
                 }
+            } catch (_: Exception) {
+                // 当前类型不匹配，尝试下一个
             }
         }
         return ""
+    }
+
+    /**
+     * 根据已知对象类型精确获取 DDL（供迁移/同步使用）
+     * @param objectType: table, view, procedure, function, trigger
+     * 注意：SHOW CREATE TRIGGER 返回列为 (Trigger, sql_mode, SQL Original Statement, ...)
+     */
+    fun getObjectDdl(session: DatabaseSession, database: String, name: String, objectType: String): String {
+        val conn = (session as MysqlDatabaseSession).connection
+        val cmd = when (objectType) {
+            "view" -> "SHOW CREATE VIEW `$database`.`$name`"
+            "procedure" -> "SHOW CREATE PROCEDURE `$database`.`$name`"
+            "function" -> "SHOW CREATE FUNCTION `$database`.`$name`"
+            "trigger" -> "SHOW CREATE TRIGGER `$database`.`$name`"
+            else -> "SHOW CREATE TABLE `$database`.`$name`"
+        }
+        // TABLE/VIEW: DDL 在第 2 列
+        // PROCEDURE/FUNCTION/TRIGGER: DDL 在第 3 列（第 2 列是 sql_mode）
+        val ddlColumnIndex = when (objectType) {
+            "procedure", "function", "trigger" -> 3
+            else -> 2
+        }
+        return try {
+            conn.createStatement().use { stmt ->
+                stmt.executeQuery(cmd).use { rs ->
+                    if (rs.next()) rs.getString(ddlColumnIndex) else ""
+                }
+            }
+        } catch (_: Exception) {
+            ""
+        }
     }
 
     override fun createDatabase(session: DatabaseSession, name: String, charset: String, collation: String) {

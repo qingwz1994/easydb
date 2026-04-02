@@ -273,7 +273,7 @@ export const TaskCenterPage: React.FC = () => {
         <div style={{ 
           flex: 1, background: token.colorBgContainer, borderRadius: 8, 
           boxShadow: '0 2px 8px rgba(0,0,0,0.02)', border: `1px solid ${token.colorBorderSecondary}`,
-          display: 'flex', flexDirection: 'column', overflow: 'hidden'
+          display: 'flex', flexDirection: 'column', overflow: 'auto'
         }}>
           {tasks.length === 0 && !loading ? (
             <EmptyState description="暂无任务，在「迁移 / 同步 / 导出 / 导入」中创建任务" />
@@ -285,6 +285,7 @@ export const TaskCenterPage: React.FC = () => {
               loading={loading}
               pagination={false}
               size="small"
+              scroll={{ y: 'calc(100vh - 230px)' }}
               onRow={(record) => ({
                 onClick: () => handleSelectTask(record),
                 style: {

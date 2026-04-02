@@ -298,14 +298,30 @@ fun Route.metadataRoutes() {
                 comment = trigger.comment ?: "${trigger.timing ?: ""} ${trigger.event ?: ""} ON ${trigger.table ?: ""}".trim()
             )
         }
-        call.ok(tables + triggers)
+        val routines = metaAdapter.listRoutines(session, database).map { routine ->
+            TableInfo(
+                name = routine.name,
+                schema = database,
+                type = if (routine.type == "FUNCTION") "function" else "procedure",
+                comment = routine.comment
+            )
+        }
+        call.ok(tables + triggers + routines)
     }
 
     get("/{connectionId}/{database}/tables/{table}/definition") {
         val session = getSessionOrFail(call, connMgr) ?: return@get
         val database = call.parameters["database"]!!
         val table = call.parameters["table"]!!
-        call.ok(adapter.metadataAdapter().getTableDefinition(session, database, table))
+        try {
+            call.ok(adapter.metadataAdapter().getTableDefinition(session, database, table))
+        } catch (e: Exception) {
+            System.err.println("[EasyDB] getTableDefinition failed for $database.$table: ${e.message}")
+            call.ok(com.easydb.common.TableDefinition(
+                table = com.easydb.common.TableInfo(name = table, schema = database),
+                columns = emptyList(), indexes = emptyList(), ddl = ""
+            ))
+        }
     }
 
     get("/{connectionId}/{database}/tables/{table}/indexes") {
@@ -324,14 +340,23 @@ fun Route.metadataRoutes() {
         val where = (body["where"] as? kotlinx.serialization.json.JsonPrimitive)?.content
         val orderBy = (body["orderBy"] as? kotlinx.serialization.json.JsonPrimitive)?.content
         val offset = (body["offset"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: 0
-        call.ok(adapter.metadataAdapter().previewRows(session, database, table, limit, where, orderBy, offset))
+        try {
+            call.ok(adapter.metadataAdapter().previewRows(session, database, table, limit, where, orderBy, offset))
+        } catch (e: Exception) {
+            System.err.println("[EasyDB] previewRows failed for $database.$table: ${e.message}")
+            call.respond(io.ktor.http.HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "unknown"), "type" to e.javaClass.simpleName))
+        }
     }
 
     get("/{connectionId}/{database}/tables/{table}/ddl") {
         val session = getSessionOrFail(call, connMgr) ?: return@get
         val database = call.parameters["database"]!!
         val table = call.parameters["table"]!!
-        call.ok(adapter.metadataAdapter().getDdl(session, database, table))
+        try {
+            call.ok(adapter.metadataAdapter().getDdl(session, database, table))
+        } catch (e: Exception) {
+            call.ok("")
+        }
     }
 
     // 预览建表 DDL（不执行）

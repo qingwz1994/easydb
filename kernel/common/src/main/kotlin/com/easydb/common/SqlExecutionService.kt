@@ -43,6 +43,18 @@ class SqlExecutionService {
          * 超过该长度的 SQL 会被截断，避免超长 INSERT 等拖垂前端渲染。
          */
         private const val MAX_RESULT_SQL_DISPLAY_LENGTH = 2000
+
+        /**
+         * SQL 编辑器查询结果最大行数（防 OOM 保护）。
+         * 类似 DBeaver 默认只取 200 行，这里设为 5000 行兼顾实用性。
+         * 超出时在结果中标记 hasMore=true，提示用户添加 LIMIT。
+         */
+        private const val MAX_QUERY_ROWS = 5000
+
+        /**
+         * 单元格最大字符数。超长内容会被截断，防止大 BLOB/TEXT 撑爆内存。
+         */
+        private const val MAX_CELL_CHARS = 4096
     }
 
     /** 截断超长 SQL，防止 JSON 序列化撒到前端拖垂渲染 */
@@ -76,7 +88,14 @@ class SqlExecutionService {
                 stmt.execute("USE `$database`")
             }
 
-            conn.createStatement().use { stmt ->
+            conn.createStatement(
+                java.sql.ResultSet.TYPE_FORWARD_ONLY,
+                java.sql.ResultSet.CONCUR_READ_ONLY
+            ).use { stmt ->
+                // DBeaver 风格保护：流式读取 + 行数上限，防止大表 SELECT * 导致 OOM
+                stmt.fetchSize = 1000
+                stmt.maxRows = MAX_QUERY_ROWS + 1  // 多取 1 行用于判断 hasMore
+
                 var hasResult = stmt.execute(sql)
                 val results = mutableListOf<SqlResult>()
 
@@ -89,11 +108,21 @@ class SqlExecutionService {
                         val columnCount = meta.columnCount
                         val columns = (1..columnCount).map { meta.getColumnLabel(it) }
                         val rows = mutableListOf<Map<String, String?>>()
+                        var queryHasMore = false
 
                         while (rs.next()) {
+                            if (rows.size >= MAX_QUERY_ROWS) {
+                                queryHasMore = true
+                                break
+                            }
                             val row = mutableMapOf<String, String?>()
                             for (i in 1..columnCount) {
-                                row[columns[i - 1]] = rs.getString(i)
+                                val value = rs.getString(i)
+                                row[columns[i - 1]] = when {
+                                    value == null -> null
+                                    value.length > MAX_CELL_CHARS -> value.take(MAX_CELL_CHARS) + " …[已截断]"
+                                    else -> value
+                                }
                             }
                             rows.add(row)
                         }
@@ -101,6 +130,8 @@ class SqlExecutionService {
 
                         results.add(SqlResult(
                             type = "query", columns = columns, rows = rows,
+                            hasMore = queryHasMore,
+                            loadedRows = rows.size,
                             duration = duration, sql = truncateSql(sql),
                             executedAt = LocalDateTime.now().format(timeFormatter)
                         ))

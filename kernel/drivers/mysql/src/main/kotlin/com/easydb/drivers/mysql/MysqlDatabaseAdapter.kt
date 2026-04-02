@@ -21,8 +21,8 @@ class MysqlDatabaseAdapter : DatabaseAdapter {
         supportsSsh = true,
         supportsSsl = true,
         supportsViews = true,
-        supportsStoredProcedures = false,  // V1.0 不支持
-        supportsTriggers = false            // V1.0 不支持
+        supportsStoredProcedures = true,
+        supportsTriggers = true
     )
 
     override fun connectionAdapter(): ConnectionAdapter = connectionAdapter

@@ -29,9 +29,11 @@
 - SSH tunnel support
 
 ### 🗂️ Database Workbench
-- Object tree browser (Database → Table → Columns / Indexes)
+- Object tree browser with categorized nodes: Tables · Views · Stored Procedures · Functions · Triggers
 - Data preview with WHERE filter, column sorting, and field auto-completion
-- Table structure and DDL viewer
+- View support: data preview (read-only) and DDL viewer
+- Stored procedure / function / trigger DDL viewer
+- Table structure designer and DDL viewer
 
 ### ✏️ SQL Editor
 - Powered by Monaco Editor with syntax highlighting
@@ -167,8 +169,8 @@ easydb/
 | v1.0 | ✅ Released | MySQL connection → Workbench → SQL Editor → Migration → Sync → Task Center |
 | v1.1.0 | ✅ Released | Connection search/filter, data export, task log improvements |
 | v1.2.0 | ✅ Released | Data preview filter/sort/pagination, inline editing, schema diff, multi-tab |
-| **v1.3.0** | 🚧 In Progress | Dark mode, SQL file import, storage management, query favorites, keyboard shortcuts, export cancellation, auto-update |
-| v1.4.0 | 📋 Planned | View/procedure/function browser, database backup & restore |
+| **v1.3.0** | 🚧 In Progress | Dark mode, SQL file import, storage management, query favorites, keyboard shortcuts, export cancellation, auto-update, **view/procedure/function/trigger browser** |
+| v1.4.0 | 📋 Planned | Database backup & restore, stored procedure execution, parameter inspector |
 | v1.5.0 | 📋 Planned | Slow query analysis, i18n, performance monitoring |
 
 ## 🤝 Contributing

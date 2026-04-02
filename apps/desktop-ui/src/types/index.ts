@@ -70,7 +70,7 @@ export interface DatabaseInfo {
 export interface TableInfo {
   name: string
   schema?: string
-  type: 'table' | 'view' | 'trigger'
+  type: 'table' | 'view' | 'trigger' | 'procedure' | 'function'
   rowCount?: number
   comment?: string
   dataLength?: number
@@ -359,3 +359,104 @@ export interface SavedScript {
   createdAt: string
   updatedAt: string
 }
+
+// ─── 数据追踪（Change Tracker）────────────────────────────
+
+export interface ChangeEvent {
+  id: string
+  timestamp: number
+  database: string
+  table: string
+  eventType: 'INSERT' | 'UPDATE' | 'DELETE'
+  columns: string[]
+  rowsBefore?: Record<string, string | null>[]
+  rowsAfter?: Record<string, string | null>[]
+  rowCount: number
+  sourceInfo?: {
+    type: string
+    file?: string
+    position?: number
+    serverId?: number
+  }
+  transactionId?: string  // 事务 ID，来自 QUERY:BEGIN / XID 事件
+}
+
+export interface TrackerSessionConfig {
+  connectionId: string
+  database?: string
+  mode?: 'realtime' | 'replay'
+  startFile?: string
+  startPosition?: number
+  endFile?: string
+  endPosition?: number
+  filterTables?: string[]
+  filterTypes?: string[]
+  targetTables?: string[]  // 内核级白名单，在 TABLE_MAP 阶段过滤
+}
+
+export interface TrackerSessionStatus {
+  sessionId: string
+  connectionId: string
+  status: 'running' | 'stopped' | 'error' | 'checking' | 'completed'
+  currentFile?: string
+  currentPosition?: number
+  eventCount: number
+  startedAt?: string
+  errorMessage?: string
+  database?: string
+}
+
+export interface TrackerServerCheck {
+  compatible: boolean
+  binlogEnabled: boolean
+  binlogFormat?: string
+  binlogRowImage?: string
+  hasReplicationPrivilege: boolean
+  currentFile?: string
+  currentPosition?: number
+  issues: string[]
+}
+
+export interface RollbackSqlRequest {
+  connectionId: string
+  database: string
+  eventIds: string[]
+}
+
+export interface RollbackSqlResult {
+  sqlStatements: string[]
+  affectedTables: string[]
+  totalRows: number
+  warnings: string[]
+}
+
+export interface BinlogFileInfo {
+  file: string
+  size: number
+  encrypted?: string
+}
+
+export interface PagedHistoryResponse {
+  items: ChangeEvent[]
+  total: number
+  page: number
+  pageSize: number
+  stats: HistoryStats
+}
+
+export interface HistoryStats {
+  insertCount: number
+  updateCount: number
+  deleteCount: number
+  tables: string[]
+  timeRange: number[]  // [minTimestamp, maxTimestamp]
+}
+
+export interface SseTick {
+  type: 'tick' | 'completed' | 'error'
+  totalCount: number
+  rate: number
+  latestId?: string
+  message?: string
+}
+

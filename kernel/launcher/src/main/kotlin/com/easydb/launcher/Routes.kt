@@ -79,6 +79,11 @@ fun Application.configureRoutes() {
             route("/groups") {
                 groupRoutes()
             }
+
+            // 数据追踪（Binlog / CDC）
+            route("/tracker") {
+                trackerRoutes()
+            }
         }
     }
 }
