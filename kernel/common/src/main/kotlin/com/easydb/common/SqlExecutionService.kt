@@ -92,9 +92,8 @@ class SqlExecutionService {
                 java.sql.ResultSet.TYPE_FORWARD_ONLY,
                 java.sql.ResultSet.CONCUR_READ_ONLY
             ).use { stmt ->
-                // DBeaver 风格保护：流式读取 + 行数上限，防止大表 SELECT * 导致 OOM
-                stmt.fetchSize = 1000
-                stmt.maxRows = MAX_QUERY_ROWS + 1  // 多取 1 行用于判断 hasMore
+                // 行数上限保护：多取 1 行判断 hasMore，防止大表 SELECT * 导致 OOM
+                stmt.maxRows = MAX_QUERY_ROWS + 1
 
                 var hasResult = stmt.execute(sql)
                 val results = mutableListOf<SqlResult>()
