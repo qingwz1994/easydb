@@ -34,7 +34,7 @@ class SqlHistoryStore(
             id = UUID.randomUUID().toString(),
             connectionId = connectionId,
             database = database,
-            sql = sql,
+            sql = if (sql.length > 2000) sql.take(2000) + " …[truncated]" else sql,
             type = result.type,
             duration = result.duration,
             rowCount = result.rows?.size?.toLong() ?: result.affectedRows?.toLong(),
@@ -44,13 +44,12 @@ class SqlHistoryStore(
 
         synchronized(entries) {
             entries.add(0, entry)
-            // 超出上限时截断
             if (entries.size > maxEntries) {
                 entries.subList(maxEntries, entries.size).clear()
             }
         }
 
-        saveToDisk()
+        scheduleSave()
     }
 
     /** 获取历史列表（支持按 connectionId 和关键词筛选） */
@@ -66,7 +65,26 @@ class SqlHistoryStore(
     /** 清空历史 */
     fun clear() {
         synchronized(entries) { entries.clear() }
-        saveToDisk()
+        saveToDiskNow()
+    }
+
+    // ─── 异步防抖保存 ───────────────────────────────────────
+
+    private val saveExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+    @Volatile private var pendingSave = false
+
+    /** 防抖：短时间多次 add 只触发一次磁盘写入 */
+    private fun scheduleSave() {
+        if (pendingSave) return
+        pendingSave = true
+        saveExecutor.submit {
+            try {
+                Thread.sleep(2000) // 2 秒防抖
+                saveToDiskNow()
+            } finally {
+                pendingSave = false
+            }
+        }
     }
 
     // ─── 磁盘 I/O ───────────────────────────────────────────
@@ -79,15 +97,14 @@ class SqlHistoryStore(
             val list = json.decodeFromString<List<SqlHistoryEntry>>(text)
             synchronized(entries) {
                 entries.clear()
-                entries.addAll(list)
+                entries.addAll(list.take(maxEntries))
             }
         } catch (e: Exception) {
             System.err.println("[SqlHistoryStore] Failed to load: ${e.message}")
         }
     }
 
-    @Synchronized
-    private fun saveToDisk() {
+    private fun saveToDiskNow() {
         try {
             storageDir.mkdirs()
             val snapshot = synchronized(entries) { entries.toList() }

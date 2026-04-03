@@ -168,11 +168,14 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
     }
 
     if (!execSql || !activeEditorTab?.connectionId || !activeEditorTab?.database) return
+    const executeStartTime = Date.now()
+
     setExecuting(true)
     try {
+      // 关闭之前的 session（fire-and-forget，不阻塞新查询的执行）
       const previousSessionIds = collectSqlQuerySessionIds(activeEditorTab.currentBatch, activeEditorTab.results)
       if (previousSessionIds.length > 0) {
-        await Promise.allSettled(previousSessionIds.map((querySessionId) => sqlApi.querySessionClose(querySessionId)))
+        Promise.allSettled(previousSessionIds.map((querySessionId) => sqlApi.querySessionClose(querySessionId)))
       }
 
       // 拆分多条 SQL，每条 SELECT 走 querySession 流式分页（类似 DBeaver），非 SELECT 走 execute
@@ -187,7 +190,7 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
         if (!normalized) continue
 
         if (isPreviewableSql(normalized)) {
-          // SELECT / SHOW / DESC 等查询：走 querySession 流式分页，首次只加载 200 行
+
           const result = await sqlApi.querySessionStart({
             connectionId: activeEditorTab.connectionId,
             database: activeEditorTab.database,
@@ -195,6 +198,7 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
             pageSize: DEFAULT_SQL_PREVIEW_PAGE_SIZE,
             maxCellChars: MAX_SQL_PREVIEW_CELL_CHARS,
           }) as SqlResult
+
           resultList.push(result)
         } else {
           // DML / DDL：走一次性执行
@@ -205,27 +209,32 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
         }
       }
 
-      const newResults = [...[...resultList].reverse(), ...(activeEditorTab.results || [])]
+
+      const totalElapsed = Date.now() - executeStartTime
+      const adjustedResults = resultList.map(r => ({ ...r, duration: totalElapsed }))
+      const newResults = [...[...adjustedResults].reverse(), ...(activeEditorTab.results || [])]
+
 
       const hasError = resultList.some((r) => r.type === 'error')
       if (hasError) {
         const errorMsg = resultList.find((r) => r.type === 'error')?.error ?? 'SQL 执行失败'
         toast.error(errorMsg)
-        updateActiveTab({ results: newResults, currentBatch: resultList, resultTab: 'messages' })
+        updateActiveTab({ results: newResults, currentBatch: adjustedResults, resultTab: 'messages' })
       } else {
         const hasQuery = resultList.some((r) => r.type === 'query')
         if (hasQuery) {
-          updateActiveTab({ results: newResults, currentBatch: resultList, resultTab: 'result-0' })
+          updateActiveTab({ results: newResults, currentBatch: adjustedResults, resultTab: 'result-0' })
         } else {
           const totalAffected = resultList.reduce((sum, r) => sum + (r.affectedRows ?? 0), 0)
           toast.success(`执行成功，共影响 ${totalAffected} 行`)
-          updateActiveTab({ results: newResults, currentBatch: resultList, resultTab: 'messages' })
+          updateActiveTab({ results: newResults, currentBatch: adjustedResults, resultTab: 'messages' })
         }
       }
     } catch (e) {
       handleApiError(e, 'SQL 执行失败')
     } finally {
       setExecuting(false)
+
     }
   }, [activeEditorTab, updateActiveTab])
 
