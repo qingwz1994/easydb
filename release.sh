@@ -54,7 +54,9 @@ fi
 
 # 检查 tag 是否已存在
 if git tag -l "$TAG" | grep -q "$TAG"; then
-    error "Tag $TAG 已存在！请使用新版本号。"
+    warn "Tag $TAG 已存在，将覆盖（本地 + 远程）"
+    git tag -d "$TAG" 2>/dev/null || true
+    git push origin :refs/tags/"$TAG" 2>/dev/null || true
 fi
 
 # 获取当前分支
@@ -100,14 +102,14 @@ if ! git merge "$CURRENT_BRANCH" --no-ff -m "release: $TAG - 合并 $CURRENT_BRA
 fi
 ok "合并成功"
 
-# 3. 打 tag
+# 3. 打 tag（-f 强制覆盖）
 info "创建 tag $TAG..."
-git tag -a "$TAG" -m "Release $TAG"
+git tag -a "$TAG" -m "Release $TAG" -f
 ok "Tag $TAG 已创建"
 
 # 4. 推送
 info "推送到 GitHub..."
-git push origin main --tags
+git push origin main --tags --force
 ok "推送成功"
 
 # 5. 切回开发分支
