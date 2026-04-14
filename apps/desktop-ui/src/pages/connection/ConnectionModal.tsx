@@ -77,7 +77,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
       footer={(_, { OkBtn, CancelBtn }) => (
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <a onClick={handleTest} style={{ fontSize: 13 }}>
+            <a onClick={handleTest} style={{ fontSize: 13, color: 'var(--edb-accent)' }}>
               {testing ? '测试中...' : '测试连接'}
             </a>
             {testResult && (

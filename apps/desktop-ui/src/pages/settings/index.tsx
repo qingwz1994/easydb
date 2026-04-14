@@ -524,7 +524,7 @@ export const SettingsPage: React.FC = () => {
   }, [storageInfo, loadStorageInfo])
 
   return (
-    <div style={{ height: '100%', background: 'var(--color-bg-layout)' }}>
+    <div style={{ height: '100%', background: 'var(--edb-bg-base)' }}>
       <div style={{ padding: '16px 32px', margin: '16px 32px 0 32px', background: token.colorBgContainer, borderRadius: 8, boxShadow: '0 2px 10px rgba(0,0,0,0.02)' }}>
          <Tabs
             tabPosition="left"

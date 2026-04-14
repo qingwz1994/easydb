@@ -195,7 +195,7 @@ export const SyncPage: React.FC = () => {
   const canNext = !!sourceId && !!targetId && !!sourceDb && !!targetDb && selectedTables.length > 0
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--color-bg-layout)' }}>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--edb-bg-base)' }}>
       {/* 核心双屏拓扑界面 */}
       <div style={{ flex: 1, overflow: 'auto', padding: 32 }}>
         

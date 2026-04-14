@@ -126,8 +126,8 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
         collapsedWidth={56}
         collapsed={siderCollapsed}
         style={{
-          background: token.colorBgContainer,
-          borderRight: `1px solid ${token.colorBorderSecondary}`,
+          background: 'var(--edb-bg-elevated)',
+          borderRight: '1px solid var(--edb-border-subtle)',
         }}
       >
         {/* Logo */}
@@ -138,13 +138,13 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
             alignItems: 'center',
             justifyContent: siderCollapsed ? 'center' : 'flex-start',
             paddingLeft: siderCollapsed ? 0 : 24,
-            borderBottom: `1px solid ${token.colorBorderSecondary}`,
+            borderBottom: '1px solid var(--edb-border-subtle)',
             fontWeight: 700,
             fontSize: siderCollapsed ? 14 : 16,
-            color: token.colorPrimary,
+            color: 'var(--edb-accent)',
             letterSpacing: 1,
             cursor: 'pointer',
-            transition: 'all 0.2s',
+            transition: 'all var(--edb-transition-normal)',
           }}
           onClick={() => navigate('/connection')}
         >
@@ -169,7 +169,8 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
             display: 'flex',
             justifyContent: 'center',
             cursor: 'pointer',
-            color: token.colorTextSecondary,
+            color: 'var(--edb-text-muted)',
+            transition: 'color var(--edb-transition-fast)',
           }}
           onClick={() => setSiderCollapsed(!siderCollapsed)}
         >
@@ -183,8 +184,8 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
           style={{
             height: 48,
             lineHeight: '48px',
-            background: token.colorBgContainer,
-            borderBottom: `1px solid ${token.colorBorderSecondary}`,
+            background: 'var(--edb-bg-elevated)',
+            borderBottom: '1px solid var(--edb-border-subtle)',
             padding: '0 24px',
             display: 'flex',
             alignItems: 'center',
@@ -217,7 +218,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
           style={{
             height: '100%',
             overflow: 'auto',
-            background: token.colorBgLayout,
+            background: 'var(--edb-bg-base)',
           }}
         >
           {children}

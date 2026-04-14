@@ -31,7 +31,7 @@ import { DataTrackerPage } from '@/pages/data-tracker'
 import { checkForUpdate, getAutoCheckEnabled } from '@/utils/updater'
 import { useThemeStore } from '@/stores/themeStore'
 
-const fontFamily = "'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+const fontFamily = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
 const fontFamilyCode = "'JetBrains Mono', 'Fira Code', 'SF Mono', monospace"
 
 const App: React.FC = () => {
@@ -78,13 +78,13 @@ const App: React.FC = () => {
       theme={{
         algorithm: isDark ? theme.darkAlgorithm : theme.defaultAlgorithm,
         token: {
-          colorPrimary: isDark ? '#22C55E' : '#22C55E',
-          colorBgBase: isDark ? '#0F172A' : '#FFFFFF',
-          colorBgContainer: isDark ? '#1E293B' : '#FFFFFF',
-          colorBgElevated: isDark ? '#334155' : '#FFFFFF',
-          colorBorder: isDark ? '#475569' : '#E2E8F0',
-          colorBorderSecondary: isDark ? '#334155' : '#F1F5F9',
-          borderRadius: 6,
+          colorPrimary: isDark ? '#10B981' : '#059669',
+          colorBgBase: isDark ? '#09090B' : '#FAFAFA',
+          colorBgContainer: isDark ? '#18181B' : '#FFFFFF',
+          colorBgElevated: isDark ? '#27272A' : '#FFFFFF',
+          colorBorder: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)',
+          colorBorderSecondary: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+          borderRadius: 8,
           fontSize: 13,
           fontFamily,
           fontFamilyCode,

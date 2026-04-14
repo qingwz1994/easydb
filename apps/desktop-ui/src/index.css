@@ -1,43 +1,105 @@
-/* ===== EasyDB Design Tokens ===== */
+/* ===== EasyDB v2 Design Tokens ===== */
+/* Refined Dark IDE — inspired by TablePlus / Linear / Vercel */
 
 /* Google Fonts */
-@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
-/* ---------- Light Theme (default) ---------- */
-:root {
-  --color-bg-base: #FFFFFF;
-  --color-bg-elevated: #F8FAFC;
-  --color-bg-surface: #F1F5F9;
-  --color-border: #E2E8F0;
-  --color-text-primary: #0F172A;
-  --color-text-secondary: #475569;
-  --color-text-muted: #94A3B8;
-  --color-accent: #2563EB;
-  --color-accent-hover: #1D4ED8;
-  --color-success: #22C55E;
-  --color-warning: #F59E0B;
-  --color-error: #EF4444;
+/* ─────────────────────────────────────────────────────
+   Light Theme (default)
+   ───────────────────────────────────────────────────── */
+:root,
+:root[data-theme="light"] {
+  /* Background hierarchy */
+  --edb-bg-base:      #FAFAFA;
+  --edb-bg-elevated:  #FFFFFF;
+  --edb-bg-surface:   #F4F4F5;
+  --edb-bg-hover:     #E4E4E7;
+  --edb-bg-active:    #D4D4D8;
 
+  /* Borders */
+  --edb-border-subtle:  rgba(0,0,0,0.04);
+  --edb-border-default: rgba(0,0,0,0.08);
+  --edb-border-strong:  rgba(0,0,0,0.14);
+
+  /* Text hierarchy */
+  --edb-text-primary:   #18181B;
+  --edb-text-secondary: #71717A;
+  --edb-text-muted:     #A1A1AA;
+  --edb-text-disabled:  #D4D4D8;
+
+  /* Brand / Accent */
+  --edb-accent:         #059669;
+  --edb-accent-hover:   #047857;
+  --edb-accent-muted:   rgba(5,150,105,0.10);
+  --edb-accent-glow:    0 0 8px rgba(5,150,105,0.15);
+
+  /* Semantic */
+  --edb-success:  #16A34A;
+  --edb-warning:  #D97706;
+  --edb-error:    #DC2626;
+  --edb-info:     #2563EB;
+
+  /* Radius */
+  --edb-radius-sm: 4px;
+  --edb-radius-md: 8px;
+  --edb-radius-lg: 12px;
+
+  /* Transitions */
+  --edb-transition-fast:   120ms ease-out;
+  --edb-transition-normal: 200ms ease-out;
+  --edb-transition-slow:   300ms ease-out;
+
+  /* Shadows */
+  --edb-shadow-sm:  0 1px 2px rgba(0,0,0,0.05);
+  --edb-shadow-md:  0 4px 12px rgba(0,0,0,0.08);
+  --edb-shadow-lg:  0 8px 24px rgba(0,0,0,0.12);
+  --edb-shadow-glow: var(--edb-accent-glow);
+
+  /* Font */
   --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-family-code: 'Fira Code', 'JetBrains Mono', 'SF Mono', monospace;
+  --font-family-code: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
   --font-size-base: 13px;
-  --border-radius: 6px;
 }
 
-/* ---------- Dark Theme ---------- */
+/* ─────────────────────────────────────────────────────
+   Dark Theme
+   ───────────────────────────────────────────────────── */
 [data-theme="dark"] {
-  --color-bg-base: #0F172A;
-  --color-bg-elevated: #1E293B;
-  --color-bg-surface: #334155;
-  --color-border: #475569;
-  --color-text-primary: #F8FAFC;
-  --color-text-secondary: #94A3B8;
-  --color-text-muted: #64748B;
-  --color-accent: #3B82F6;
-  --color-accent-hover: #2563EB;
-  --color-success: #22C55E;
-  --color-warning: #F59E0B;
-  --color-error: #EF4444;
+  /* Background hierarchy (Zinc scale) */
+  --edb-bg-base:      #09090B;
+  --edb-bg-elevated:  #18181B;
+  --edb-bg-surface:   #27272A;
+  --edb-bg-hover:     #3F3F46;
+  --edb-bg-active:    #52525B;
+
+  /* Borders */
+  --edb-border-subtle:  rgba(255,255,255,0.06);
+  --edb-border-default: rgba(255,255,255,0.10);
+  --edb-border-strong:  rgba(255,255,255,0.16);
+
+  /* Text hierarchy */
+  --edb-text-primary:   #FAFAFA;
+  --edb-text-secondary: #A1A1AA;
+  --edb-text-muted:     #71717A;
+  --edb-text-disabled:  #52525B;
+
+  /* Brand / Accent */
+  --edb-accent:         #10B981;
+  --edb-accent-hover:   #059669;
+  --edb-accent-muted:   rgba(16,185,129,0.15);
+  --edb-accent-glow:    0 0 12px rgba(16,185,129,0.25);
+
+  /* Semantic */
+  --edb-success:  #22C55E;
+  --edb-warning:  #F59E0B;
+  --edb-error:    #EF4444;
+  --edb-info:     #3B82F6;
+
+  /* Shadows */
+  --edb-shadow-sm:  0 1px 2px rgba(0,0,0,0.3);
+  --edb-shadow-md:  0 4px 12px rgba(0,0,0,0.4);
+  --edb-shadow-lg:  0 8px 24px rgba(0,0,0,0.5);
+  --edb-shadow-glow: var(--edb-accent-glow);
 }
 
 /* ===== Base Resets ===== */
@@ -56,14 +118,15 @@ html, body, #root {
 body {
   font-family: var(--font-family);
   font-size: var(--font-size-base);
-  color: var(--color-text-primary);
-  background: var(--color-bg-base);
+  color: var(--edb-text-primary);
+  background: var(--edb-bg-base);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition: background-color var(--edb-transition-normal),
+              color var(--edb-transition-normal);
 }
 
-/* ===== Scrollbar (dark mode adaptive) ===== */
+/* ===== Scrollbar ===== */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -72,67 +135,139 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-text-muted);
+  background: var(--edb-text-muted);
   border-radius: 3px;
+  opacity: 0.5;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-secondary);
+  background: var(--edb-text-secondary);
 }
 
-/* ===== Monaco Editor dark mode sync ===== */
-[data-theme="dark"] .monaco-editor {
-  --vscode-editor-background: var(--color-bg-elevated);
-}
-
-/* ===== Ant Design overrides for dark mode ===== */
-[data-theme="dark"] .ant-card {
-  background: var(--color-bg-elevated);
-  border-color: var(--color-border);
-}
-
-[data-theme="dark"] .ant-table {
-  background: var(--color-bg-elevated);
-}
-
-[data-theme="dark"] .ant-table-thead > tr > th {
-  background: var(--color-bg-surface) !important;
-}
-
-[data-theme="dark"] .ant-modal-content {
-  background: var(--color-bg-elevated);
-}
-
-[data-theme="dark"] .ant-input,
-[data-theme="dark"] .ant-select-selector,
-[data-theme="dark"] .ant-input-number {
-  background: var(--color-bg-surface) !important;
-  border-color: var(--color-border) !important;
-}
-
-/* Code font for SQL/DDL displays */
+/* Code font shorthand */
 .code-font {
   font-family: var(--font-family-code);
 }
 
-/* ===== SQL Editor Pro-Max Overrides ===== */
-.sql-spreadsheet-grid .ant-table-cell {
-  border-right: 1px solid var(--color-border) !important;
-  border-bottom: 1px solid var(--color-border) !important;
+/* ===== Ant Design Global Overrides ===== */
+
+/* --- Menu --- */
+.ant-menu-item-selected {
+  position: relative;
+}
+.ant-menu-inline .ant-menu-item-selected::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: var(--edb-accent);
+  border-radius: 0 1px 1px 0;
 }
 
+/* --- Card --- */
+[data-theme="dark"] .ant-card {
+  background: var(--edb-bg-elevated);
+  border-color: var(--edb-border-subtle);
+}
+
+/* --- Table --- */
+[data-theme="dark"] .ant-table {
+  background: var(--edb-bg-elevated);
+}
+[data-theme="dark"] .ant-table-thead > tr > th {
+  background: var(--edb-bg-surface) !important;
+  border-bottom-color: var(--edb-border-default) !important;
+}
+
+/* --- Modal --- */
+.ant-modal-content {
+  border-radius: var(--edb-radius-lg) !important;
+  box-shadow: var(--edb-shadow-lg) !important;
+}
+[data-theme="dark"] .ant-modal-content {
+  background: var(--edb-bg-elevated);
+  border: 1px solid var(--edb-border-subtle);
+}
+
+/* --- Input / Select --- */
+[data-theme="dark"] .ant-input,
+[data-theme="dark"] .ant-select-selector,
+[data-theme="dark"] .ant-input-number {
+  background: var(--edb-bg-surface) !important;
+  border-color: var(--edb-border-default) !important;
+}
+[data-theme="dark"] .ant-input:hover,
+[data-theme="dark"] .ant-select-selector:hover,
+[data-theme="dark"] .ant-input-number:hover {
+  border-color: var(--edb-border-strong) !important;
+}
+
+/* --- Statistic --- */
+.ant-statistic-title {
+  color: var(--edb-text-muted) !important;
+  font-size: 12px !important;
+}
+
+/* --- Tabs --- */
+.ant-tabs-tab {
+  transition: color var(--edb-transition-fast) !important;
+}
+
+/* ===== Monaco Editor dark mode sync ===== */
+[data-theme="dark"] .monaco-editor {
+  --vscode-editor-background: var(--edb-bg-elevated);
+}
+
+/* ===== Connection Card Styles ===== */
+.connection-card {
+  transition: border-color var(--edb-transition-fast),
+              box-shadow var(--edb-transition-fast),
+              transform var(--edb-transition-fast) !important;
+}
+.connection-card:hover {
+  border-color: var(--edb-border-strong) !important;
+  box-shadow: var(--edb-shadow-md) !important;
+}
+.connection-card.connection-card--selected {
+  border-color: var(--edb-accent) !important;
+  box-shadow: var(--edb-shadow-glow), var(--edb-shadow-sm) !important;
+}
+
+/* ===== Status Tag (dot + label) ===== */
+.edb-status-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--edb-text-secondary);
+  line-height: 1;
+}
+.edb-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.edb-status-dot--pulse {
+  animation: edb-pulse 1.5s ease-in-out infinite;
+}
+
+/* ===== SQL Editor Pro-Max Overrides ===== */
+.sql-spreadsheet-grid .ant-table-cell {
+  border-right: 1px solid var(--edb-border-default) !important;
+  border-bottom: 1px solid var(--edb-border-default) !important;
+}
 .sql-spreadsheet-grid .table-row-light > td {
   background-color: transparent;
 }
-
 .sql-spreadsheet-grid .table-row-dark > td {
   background-color: rgba(0, 0, 0, 0.02);
 }
-
 .sql-spreadsheet-grid .ant-table-body,
 .sql-spreadsheet-grid .ant-table-tbody-virtual-holder {
   padding-bottom: 8px;
 }
-
 [data-theme="dark"] .sql-spreadsheet-grid .table-row-dark > td {
   background-color: rgba(255, 255, 255, 0.02);
 }
@@ -146,9 +281,25 @@ body {
   background: transparent !important;
   border-top: 2px solid transparent !important;
   border-radius: 0 !important;
-  transition: all 0.2s;
+  transition: all var(--edb-transition-fast);
 }
 .sql-editor-tabs .ant-tabs-tab-active {
-  background: var(--color-bg-base) !important;
-  border-top: 2px solid var(--color-accent) !important;
+  background: var(--edb-bg-base) !important;
+  border-top: 2px solid var(--edb-accent) !important;
+}
+
+/* ===== Animations ===== */
+@keyframes edb-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+@keyframes edb-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes edb-slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }

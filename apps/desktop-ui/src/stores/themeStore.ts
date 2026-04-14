@@ -30,7 +30,7 @@ function getEffectiveTheme(mode: ThemeMode): 'light' | 'dark' {
 
 function loadThemeMode(): ThemeMode {
   const saved = localStorage.getItem(STORAGE_KEY) as ThemeMode | null
-  return saved ?? 'light'
+  return saved ?? 'dark'
 }
 
 interface ThemeState {
