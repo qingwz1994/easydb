@@ -455,7 +455,7 @@ export const ImportSqlDialog: React.FC<ImportSqlDialogProps> = ({
                 fontFamily: 'monospace',
                 fontSize: 12,
                 lineHeight: 1.6,
-                border: `1px solid ${token.colorBorderSecondary}`,
+                border: '1px solid var(--glass-border)',
               }}
             >
               {logs.length === 0 ? (
@@ -521,7 +521,7 @@ export const ImportSqlDialog: React.FC<ImportSqlDialogProps> = ({
                 fontFamily: 'monospace',
                 fontSize: 12,
                 lineHeight: 1.6,
-                border: `1px solid ${token.colorBorderSecondary}`,
+                border: '1px solid var(--glass-border)',
               }}
             >
               {logs.length === 0 ? (

@@ -518,9 +518,10 @@ export default function ExportDatabaseModal({
               <div
                 style={{
                   minWidth: 0,
-                  border: `1px solid ${token.colorBorderSecondary}`,
+                  border: '1px solid var(--glass-border)',
                   borderRadius: token.borderRadiusLG,
-                  background: token.colorBgContainer,
+                  background: 'var(--glass-panel)',
+                  backdropFilter: 'var(--glass-blur-sm)',
                   padding: 16,
                 }}
               >
@@ -607,9 +608,9 @@ export default function ExportDatabaseModal({
                 size="small"
                 loading={estimateLoading && selectedCount > 0}
                 style={{
-                  borderColor: token.colorBorderSecondary,
-                  background: token.colorBgContainer,
-                  boxShadow: `0 8px 24px ${token.colorFillSecondary}`,
+                  borderColor: 'var(--glass-border)',
+                  background: 'var(--glass-panel)',
+                  backdropFilter: 'var(--glass-blur-sm)',
                 }}
               >
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -800,7 +801,7 @@ export default function ExportDatabaseModal({
                 fontFamily: token.fontFamilyCode || 'SFMono-Regular, Consolas, monospace',
                 fontSize: 12,
                 lineHeight: 1.6,
-                border: `1px solid ${token.colorBorderSecondary}`
+                border: '1px solid var(--glass-border)'
               }}
             >
               {logs.length === 0 && (
@@ -846,7 +847,7 @@ export default function ExportDatabaseModal({
                   fontFamily: token.fontFamilyCode || 'SFMono-Regular, Consolas, monospace',
                   fontSize: 12,
                   lineHeight: 1.6,
-                  border: `1px solid ${token.colorBorderSecondary}`
+                  border: '1px solid var(--glass-border)'
                 }}
               >
                 {logs.map((log, i) => (

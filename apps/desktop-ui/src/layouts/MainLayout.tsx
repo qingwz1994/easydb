@@ -15,7 +15,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 import React, { useEffect } from 'react'
-import { Layout, Menu, theme, Typography, Space, Breadcrumb } from 'antd'
+import { Layout, Menu, Typography, Space, Breadcrumb } from 'antd'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   ApiOutlined,
@@ -72,7 +72,6 @@ interface MainLayoutProps {
 export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   const navigate = useNavigate()
   const location = useLocation()
-  const { token } = theme.useToken()
 
   const themeMode = useThemeStore((s) => s.themeMode)
   const setThemeMode = useThemeStore((s) => s.setThemeMode)

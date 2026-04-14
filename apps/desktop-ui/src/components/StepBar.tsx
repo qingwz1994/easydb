@@ -27,8 +27,9 @@ export const StepBar: React.FC<StepBarProps> = ({
   return (
     <div style={{
       padding: '16px 24px',
-      background: token.colorBgContainer,
-      borderBottom: `1px solid ${token.colorBorderSecondary}`,
+      background: 'var(--glass-panel)',
+      backdropFilter: 'var(--glass-blur-sm)',
+      borderBottom: '1px solid var(--glass-border)',
     }}>
       <Steps
         current={current}

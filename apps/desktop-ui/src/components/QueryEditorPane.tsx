@@ -304,7 +304,7 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
       {/* 快捷连接栏 */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0,
-        padding: '8px 16px', borderBottom: `1px solid ${token.colorBorderSecondary}`, background: token.colorBgContainer
+        padding: '8px 16px', borderBottom: '1px solid var(--glass-border)', background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur-sm)'
       }}>
         <Space size={12}>
           <Select
@@ -396,15 +396,15 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
           document.body.style.userSelect = 'none'
         }}
         style={{
-          height: 4, cursor: 'row-resize', background: token.colorBgSpotlight, zIndex: 10,
-          opacity: 0.5, transition: 'opacity 0.2s', borderBottom: `1px solid ${token.colorBorderSecondary}`
+          height: 4, cursor: 'row-resize', background: 'var(--glass-border)', zIndex: 10,
+          opacity: 0.5, transition: 'opacity 0.2s', borderBottom: '1px solid var(--glass-border)'
         }}
         onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
         onMouseLeave={(e) => (!isDraggingRef.current && (e.currentTarget.style.opacity = '0.5'))}
       />
 
       {/* Results 区 */}
-      <Content style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', background: token.colorBgContainer, flex: 1 }}>
+      <Content style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', background: 'transparent', flex: 1 }}>
         <Tabs
           destroyInactiveTabPane
           activeKey={activeEditorTab.resultTab}

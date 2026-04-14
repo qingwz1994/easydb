@@ -280,7 +280,7 @@ export const SqlResultPanel: React.FC<SqlResultPanelProps> = ({
             padding: 12,
             borderRadius: token.borderRadius,
             background: token.colorFillAlter,
-            border: `1px solid ${token.colorBorderSecondary}`,
+            border: '1px solid var(--glass-border)',
             fontFamily: 'Menlo, Monaco, Consolas, monospace',
             fontSize: 13,
             whiteSpace: 'pre-wrap',

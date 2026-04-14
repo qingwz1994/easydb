@@ -673,13 +673,13 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
           background: transparent !important;
           font-weight: 600;
           color: ${token.colorTextSecondary};
-          border-bottom: 2px solid ${token.colorBorderSecondary} !important;
+          border-bottom: 2px solid var(--glass-border) !important;
           padding: 8px 12px !important;
         }
         /* Pro-Max Spreadsheet Cells */
         .editable-data-table .ant-table-tbody > tr > td {
           padding: 4px 12px !important;
-          border-bottom: 1px solid ${token.colorBorderSecondary} !important;
+          border-bottom: 1px solid var(--glass-border) !important;
           border-right: none !important;
           font-family: 'JetBrains Mono', monospace;
           font-size: 13px;
@@ -809,8 +809,8 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
           alignItems: 'center',
           padding: '10px 0 0',
           flexShrink: 0,
-          background: token.colorBgContainer,
-          borderTop: `1px solid ${token.colorBorderSecondary}`,
+          background: 'var(--glass-panel)',
+          borderTop: '1px solid var(--glass-border)',
         }}
       >
         <Pagination
