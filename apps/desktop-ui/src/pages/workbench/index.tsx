@@ -66,6 +66,7 @@ const CategoryListView: React.FC<{
 }> = ({ database, category, objects, objectCategories, onSelectObject, search, onSearchChange }) => {
   const { token } = theme.useToken()
   const deferredSearch = useDeferredValue(search)
+  const compactPanelStyle = useMemo<CSSProperties>(() => ({
     background: 'var(--glass-panel)',
     backdropFilter: 'var(--glass-blur-sm)',
     border: '1px solid var(--glass-border)',
