@@ -111,6 +111,11 @@
   --glass-inner-glow: inset 0 1px 0 rgba(255,255,255,0.60);
   --glass-inner-glow-hover: inset 0 1px 0 rgba(255,255,255,0.80);
 
+  --glass-blur-heavy: blur(24px) saturate(150%);
+
+  /* Floating layers — near-opaque white for light mode */
+  --glass-popup: rgba(255, 255, 255, 0.92);
+
   --edb-bg-elevated: var(--glass-panel);
   --edb-bg-surface: rgba(255,255,255,0.30);
   --edb-bg-hover: var(--glass-panel-hover);
