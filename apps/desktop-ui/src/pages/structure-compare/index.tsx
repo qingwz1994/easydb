@@ -303,8 +303,9 @@ export const StructureComparePage: React.FC = () => {
       {/* 顶部配置栏 (迷你双屏) */}
       <div style={{
         padding: '16px 24px',
-        background: token.colorBgContainer,
-        borderBottom: `1px solid ${token.colorBorderSecondary}`,
+        background: 'var(--glass-panel)',
+        backdropFilter: 'var(--glass-blur-sm)',
+        borderBottom: '1px solid var(--glass-border)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
@@ -315,8 +316,8 @@ export const StructureComparePage: React.FC = () => {
           {/* 左侧：源端 */}
           <div style={{ 
             display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', 
-            background: token.colorBgLayout, borderRadius: 8, 
-            border: `1px solid ${sourceConnId ? token.colorPrimaryBorder : token.colorBorderSecondary}` 
+            background: 'var(--glass-panel)', borderRadius: 8, 
+            border: `1px solid ${sourceConnId ? token.colorPrimaryBorder : 'var(--glass-border)'}` 
           }}>
             <Text strong type="secondary" style={{ width: 45, color: token.colorPrimary }}><DatabaseOutlined style={{ marginRight: 4 }}/>源端:</Text>
             <Select
@@ -333,15 +334,15 @@ export const StructureComparePage: React.FC = () => {
             />
           </div>
 
-          <div style={{ padding: '0 8px', background: token.colorBgContainer, borderRadius: '50%', boxShadow: '0 2px 6px rgba(0,0,0,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32 }}>
+          <div style={{ padding: '0 8px', background: 'var(--glass-panel)', borderRadius: '50%', border: '1px solid var(--glass-border)', boxShadow: 'var(--glass-inner-glow)', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32 }}>
             <SwapRightOutlined style={{ fontSize: 18, color: token.colorPrimary }} />
           </div>
 
           {/* 右侧：目标端 */}
           <div style={{ 
             display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', 
-            background: token.colorBgLayout, borderRadius: 8, 
-            border: `1px solid ${targetConnId ? token.colorSuccessBorder : token.colorBorderSecondary}` 
+            background: 'var(--glass-panel)', borderRadius: 8, 
+            border: `1px solid ${targetConnId ? token.colorSuccessBorder : 'var(--glass-border)'}` 
           }}>
             <Text strong type="secondary" style={{ width: 45, color: token.colorSuccess }}><DatabaseOutlined style={{ marginRight: 4 }}/>目标:</Text>
             <Select
@@ -390,12 +391,13 @@ export const StructureComparePage: React.FC = () => {
         <Layout style={{ flex: 1, overflow: 'hidden' }}>
           {/* 左侧：差异对象列表 */}
           <Sider width={300} style={{
-            background: token.colorBgContainer,
-            borderRight: `1px solid ${token.colorBorderSecondary}`,
+            background: 'var(--glass-panel)',
+            backdropFilter: 'var(--glass-blur-sm)',
+            borderRight: '1px solid var(--glass-border)',
             overflow: 'auto',
           }}>
             {/* 摘要头部 */}
-            <div style={{ padding: '12px 16px', borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--glass-border)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <Space size={8}>
                   <Text strong style={{ fontSize: 14 }}>对比结果</Text>
@@ -448,8 +450,9 @@ export const StructureComparePage: React.FC = () => {
             {/* 全局操作工具栏 */}
             <div style={{
               padding: '8px 16px',
-              background: token.colorBgContainer,
-              borderBottom: `1px solid ${token.colorBorderSecondary}`,
+              background: 'var(--glass-panel)',
+              backdropFilter: 'var(--glass-blur-sm)',
+              borderBottom: '1px solid var(--glass-border)',
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
@@ -471,7 +474,7 @@ export const StructureComparePage: React.FC = () => {
                 <div style={{
                   marginBottom: 16,
                   paddingBottom: 12,
-                  borderBottom: `1px solid ${token.colorBorderSecondary}`,
+                  borderBottom: '1px solid var(--glass-border)',
                 }}>
                   <Space size={8}>
                     <Title level={5} style={{ margin: 0 }}>{selectedDetail.tableName}</Title>
@@ -551,7 +554,7 @@ export const StructureComparePage: React.FC = () => {
                       />
                     )}
                     <pre style={{
-                      background: token.colorBgLayout,
+                      background: 'var(--glass-panel)',
                       padding: 12,
                       borderRadius: 6,
                       fontSize: 12,

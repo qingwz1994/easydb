@@ -33,8 +33,17 @@ const eventTypeConfig: Record<string, { color: string; label: string }> = {
 
 export const DataTrackerPage: React.FC = () => {
   const { token } = theme.useToken()
-  const isDark = token.colorBgBase === '#000000' || token.colorBgContainer === '#141414'
-    || (token.colorBgBase ? parseInt(token.colorBgBase.replace('#', ''), 16) < 0x808080 : false)
+  const isDark = (() => {
+    // Check CSS variable or token-based detection for glassmorphism theme
+    const bgBase = token.colorBgBase
+    if (!bgBase || bgBase === 'transparent') return true
+    if (bgBase.startsWith('rgba')) return true // glassmorphism uses rgba
+    if (bgBase.startsWith('#')) {
+      const val = parseInt(bgBase.replace('#', ''), 16)
+      return val < 0x808080
+    }
+    return false
+  })()
 
   // 连接与会话状态
   const [connections, setConnections] = useState<ConnectionConfig[]>([])
@@ -1738,7 +1747,7 @@ export const DataTrackerPage: React.FC = () => {
           background: ${token.colorPrimaryBgHover} !important;
         }
         .ant-table-tbody > tr:hover > td {
-          background: ${token.colorBgTextHover} !important;
+          background: var(--glass-panel) !important;
         }
       `}</style>
     </div>

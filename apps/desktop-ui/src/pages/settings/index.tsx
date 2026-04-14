@@ -152,7 +152,7 @@ export const SettingsPage: React.FC = () => {
           <Title level={4} style={{ marginBottom: 24, fontWeight: 600 }}>通用设置</Title>
           <List
             itemLayout="horizontal"
-            style={{ background: token.colorBgContainer, borderRadius: 8, border: `1px solid ${token.colorBorderSecondary}` }}
+            style={{ background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur-sm)', borderRadius: 8, border: '1px solid var(--glass-border)' }}
           >
             <List.Item actions={[
               <Radio.Group
@@ -201,7 +201,7 @@ export const SettingsPage: React.FC = () => {
           <Title level={4} style={{ marginBottom: 24, fontWeight: 600 }}>SQL 编辑器首选项</Title>
           <List
             itemLayout="horizontal"
-            style={{ background: token.colorBgContainer, borderRadius: 8, border: `1px solid ${token.colorBorderSecondary}` }}
+            style={{ background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur-sm)', borderRadius: 8, border: '1px solid var(--glass-border)' }}
           >
             <List.Item actions={[<Switch defaultChecked />]}>
               <List.Item.Meta 
@@ -248,8 +248,9 @@ export const SettingsPage: React.FC = () => {
             <Space direction="vertical" size={20} style={{ width: '100%' }}>
               {/* 概览卡片 */}
               <div style={{
-                background: token.colorBgContainer, borderRadius: 12,
-                border: `1px solid ${token.colorBorderSecondary}`,
+                background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur-sm)', borderRadius: 12,
+                border: '1px solid var(--glass-border)',
+                boxShadow: 'var(--glass-inner-glow)',
                 padding: '24px 28px',
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 16 }}>
@@ -269,7 +270,7 @@ export const SettingsPage: React.FC = () => {
                   percent={100}
                   success={{ percent: calcPercent(storageInfo.exports.size, storageInfo.totalSize) }}
                   strokeColor={token.colorWarning}
-                  trailColor={token.colorBorderSecondary}
+                  trailColor={'var(--glass-border)'}
                   showInfo={false}
                   size={['100%', 12]}
                   style={{ marginBottom: 8 }}
@@ -284,7 +285,7 @@ export const SettingsPage: React.FC = () => {
                     日志 {storageInfo.logs.sizeText}
                   </Text>
                   <Text type="secondary">
-                    <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: token.colorBorderSecondary, marginRight: 6 }}/>
+                    <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: 'var(--glass-border)', marginRight: 6 }}/>
                     配置 {storageInfo.config.sizeText}
                   </Text>
                 </div>
@@ -308,12 +309,12 @@ export const SettingsPage: React.FC = () => {
 
               {/* 分类管理 */}
               <div style={{
-                background: token.colorBgContainer, borderRadius: 12,
-                border: `1px solid ${token.colorBorderSecondary}`,
+                background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur-sm)', borderRadius: 12,
+                border: '1px solid var(--glass-border)',
                 overflow: 'hidden',
               }}>
                 {/* 导出文件 */}
-                <div style={{ padding: '16px 20px', borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
+                <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--glass-border)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
                     <Avatar size="large" icon={<FileZipOutlined />} style={{ backgroundColor: '#e6f4ff', color: '#1677ff', flexShrink: 0 }}/>
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -362,7 +363,7 @@ export const SettingsPage: React.FC = () => {
                 </div>
 
                 {/* 任务日志 */}
-                <div style={{ padding: '16px 20px', borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
+                <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--glass-border)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
                     <Avatar size="large" icon={<FileTextOutlined />} style={{ backgroundColor: '#fff7e6', color: '#fa8c16', flexShrink: 0 }}/>
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -440,8 +441,8 @@ export const SettingsPage: React.FC = () => {
           ) : (
             <div style={{
               textAlign: 'center', padding: 60,
-              background: token.colorBgContainer, borderRadius: 12,
-              border: `1px solid ${token.colorBorderSecondary}`,
+              background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur-sm)', borderRadius: 12,
+              border: '1px solid var(--glass-border)',
             }}>
               <DatabaseOutlined style={{ fontSize: 48, color: token.colorTextQuaternary, marginBottom: 16 }} />
               <div><Text type="secondary">点击「刷新」扫描存储空间</Text></div>
@@ -460,7 +461,7 @@ export const SettingsPage: React.FC = () => {
         <div style={{ padding: '0 32px', maxWidth: 800 }}>
           <Title level={4} style={{ marginBottom: 24, fontWeight: 600 }}>关于及系统版本</Title>
           <div style={{ 
-            background: token.colorBgContainer, borderRadius: 8, border: `1px solid ${token.colorBorderSecondary}`,
+            background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur-sm)', borderRadius: 8, border: '1px solid var(--glass-border)',
             padding: 32, display: 'flex', flexDirection: 'column', alignItems: 'center'
           }}>
             <DesktopOutlined style={{ fontSize: 64, color: token.colorPrimary, marginBottom: 16 }} />
@@ -491,7 +492,7 @@ export const SettingsPage: React.FC = () => {
                     发现新版本：v{updateInfo.latestVersion}
                   </Text>
                   {updateInfo.releaseNotes && (
-                    <Text type="secondary" style={{ fontSize: 13, background: token.colorBgContainer, padding: 8, borderRadius: 4, display: 'block' }}>
+                    <Text type="secondary" style={{ fontSize: 13, background: 'var(--glass-panel)', padding: 8, borderRadius: 4, display: 'block' }}>
                       {updateInfo.releaseNotes.substring(0, 300)}...
                     </Text>
                   )}
@@ -525,7 +526,7 @@ export const SettingsPage: React.FC = () => {
 
   return (
     <div style={{ height: '100%', background: 'var(--edb-bg-base)' }}>
-      <div style={{ padding: '16px 32px', margin: '16px 32px 0 32px', background: token.colorBgContainer, borderRadius: 8, boxShadow: '0 2px 10px rgba(0,0,0,0.02)' }}>
+      <div style={{ padding: '16px 32px', margin: '16px 32px 0 32px', background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur-sm)', borderRadius: 8, border: '1px solid var(--glass-border)', boxShadow: 'var(--glass-shadow)' }}>
          <Tabs
             tabPosition="left"
             items={items}

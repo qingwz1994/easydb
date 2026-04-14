@@ -195,7 +195,7 @@ export const SyncPage: React.FC = () => {
   const canNext = !!sourceId && !!targetId && !!sourceDb && !!targetDb && selectedTables.length > 0
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--edb-bg-base)' }}>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'transparent' }}>
       {/* 核心双屏拓扑界面 */}
       <div style={{ flex: 1, overflow: 'auto', padding: 32 }}>
         
@@ -250,10 +250,12 @@ export const SyncPage: React.FC = () => {
             top: 60,
             transform: 'translateX(-50%)',
             zIndex: 10,
-            background: token.colorBgContainer,
+            background: 'var(--glass-panel)',
+            backdropFilter: 'var(--glass-blur-sm)',
             padding: '8px',
             borderRadius: '50%',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+            border: '1px solid var(--glass-border)',
+            boxShadow: 'var(--glass-shadow), var(--glass-inner-glow)'
           }}>
             <SwapRightOutlined style={{ fontSize: 24, color: token.colorPrimary }} />
           </div>
@@ -341,8 +343,9 @@ export const SyncPage: React.FC = () => {
       {/* 底部吸附控制台 */}
       <div style={{
         padding: '16px 32px',
-        borderTop: `1px solid ${token.colorBorderSecondary}`,
-        background: token.colorBgContainer,
+        borderTop: '1px solid var(--glass-border)',
+        background: 'var(--glass-panel)',
+        backdropFilter: 'var(--glass-blur)',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
