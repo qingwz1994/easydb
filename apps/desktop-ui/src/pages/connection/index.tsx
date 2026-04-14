@@ -247,9 +247,11 @@ export const ConnectionPage: React.FC = () => {
         width={220}
         theme="light"
         style={{
-          borderRight: '1px solid var(--edb-border-subtle)',
+          borderRight: '1px solid var(--glass-border)',
           overflow: 'auto',
-          background: 'var(--edb-bg-elevated)',
+          background: 'var(--glass-panel)',
+          backdropFilter: 'var(--glass-blur)',
+          WebkitBackdropFilter: 'var(--glass-blur)',
         }}
       >
         <div style={{ padding: '20px 16px 8px 16px', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--edb-text-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -335,22 +337,22 @@ export const ConnectionPage: React.FC = () => {
         {selectedGroup === 'all' && (
           <Row gutter={16} style={{ marginBottom: 24 }}>
             <Col span={6}>
-              <Card size="small" bordered={false} style={{ background: 'var(--edb-bg-elevated)', border: '1px solid var(--edb-border-subtle)', borderRadius: 'var(--edb-radius-md)' }}>
+              <Card size="small" bordered={false} style={{ background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur)', border: '1px solid var(--glass-border)', borderRadius: 'var(--edb-radius-lg)', boxShadow: 'var(--glass-shadow), var(--glass-inner-glow)' }}>
                 <Statistic title="连接总数" value={stats.total} prefix={<ApiOutlined />} />
               </Card>
             </Col>
             <Col span={6}>
-              <Card size="small" bordered={false} style={{ background: 'var(--edb-bg-elevated)', border: '1px solid var(--edb-border-subtle)', borderRadius: 'var(--edb-radius-md)' }}>
+              <Card size="small" bordered={false} style={{ background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur)', border: '1px solid var(--glass-border)', borderRadius: 'var(--edb-radius-lg)', boxShadow: 'var(--glass-shadow), var(--glass-inner-glow)' }}>
                 <Statistic title="已连接" value={stats.connected} valueStyle={{ color: 'var(--edb-success)' }} prefix={<CheckCircleOutlined />} />
               </Card>
             </Col>
             <Col span={6}>
-              <Card size="small" bordered={false} style={{ background: 'var(--edb-bg-elevated)', border: '1px solid var(--edb-border-subtle)', borderRadius: 'var(--edb-radius-md)' }}>
+              <Card size="small" bordered={false} style={{ background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur)', border: '1px solid var(--glass-border)', borderRadius: 'var(--edb-radius-lg)', boxShadow: 'var(--glass-shadow), var(--glass-inner-glow)' }}>
                 <Statistic title="未连接" value={stats.disconnected} valueStyle={{ color: 'var(--edb-text-secondary)' }} prefix={<DisconnectOutlined />} />
               </Card>
             </Col>
             <Col span={6}>
-              <Card size="small" bordered={false} style={{ background: 'var(--edb-bg-elevated)', border: '1px solid var(--edb-border-subtle)', borderRadius: 'var(--edb-radius-md)' }}>
+              <Card size="small" bordered={false} style={{ background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur)', border: '1px solid var(--glass-border)', borderRadius: 'var(--edb-radius-lg)', boxShadow: 'var(--glass-shadow), var(--glass-inner-glow)' }}>
                 <Statistic title="异常" value={stats.error} valueStyle={{ color: 'var(--edb-error)' }} prefix={<ExclamationCircleOutlined />} />
               </Card>
             </Col>
@@ -376,6 +378,12 @@ export const ConnectionPage: React.FC = () => {
                 connection={conn}
                 selected={selectedConn?.id === conn.id}
                 onClick={() => setSelectedConn(conn)}
+                onDoubleClick={async () => {
+                  if (conn.status !== 'connected') {
+                    await handleOpen(conn)
+                  }
+                  handleEnterWorkbench(conn)
+                }}
                 onOpen={() => handleOpen(conn)}
                 onClose={() => handleClose(conn)}
                 onEnterWorkbench={() => handleEnterWorkbench(conn)}

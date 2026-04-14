@@ -141,7 +141,7 @@ const CategoryListView: React.FC<{
           ]
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', padding: '24px 32px', background: token.colorBgLayout }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', padding: '24px 32px', background: 'transparent' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
         <Space>
           <Text strong style={{ fontSize: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -164,17 +164,17 @@ const CategoryListView: React.FC<{
 
       {isTables && categoryObjects.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 20, flexShrink: 0 }}>
-          <div style={{ background: token.colorBgContainer, padding: '16px 20px', borderRadius: 12, border: `1px solid ${token.colorBorderSecondary}`, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur)', padding: '16px 20px', borderRadius: 12, border: '1px solid var(--glass-border)', boxShadow: 'var(--glass-shadow), var(--glass-inner-glow)', display: 'flex', flexDirection: 'column' }}>
             <Text type="secondary" style={{ fontSize: 12, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}><Zap size={14} color={token.colorPrimary}/> 磁盘存储霸主 (Top 1 物理体积)</Text>
             <Text strong style={{ fontSize: 16 }}>{topTable?.name}</Text>
             <Text type="secondary" style={{ fontSize: 12, marginTop: 4 }}>占据 {formatBytes((topTable?.dataLength || 0) + (topTable?.indexLength || 0))} 容量</Text>
           </div>
-          <div style={{ background: token.colorBgContainer, padding: '16px 20px', borderRadius: 12, border: `1px solid ${token.colorBorderSecondary}`, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur)', padding: '16px 20px', borderRadius: 12, border: '1px solid var(--glass-border)', boxShadow: 'var(--glass-shadow), var(--glass-inner-glow)', display: 'flex', flexDirection: 'column' }}>
             <Text type="secondary" style={{ fontSize: 12, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}><Database size={14} /> 全库表体积总计</Text>
             <Text strong style={{ fontSize: 24, fontFamily: 'monospace', lineHeight: 1 }}>{formatBytes(totalDisk)}</Text>
             <Text type="secondary" style={{ fontSize: 12, marginTop: 6 }}>纯数据与索引体积</Text>
           </div>
-          <div style={{ background: token.colorBgContainer, padding: '16px 20px', borderRadius: 12, border: `1px solid ${token.colorBorderSecondary}`, display: 'flex', flexDirection: 'column' }}>
+          <div style={{ background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur)', padding: '16px 20px', borderRadius: 12, border: '1px solid var(--glass-border)', boxShadow: 'var(--glass-shadow), var(--glass-inner-glow)', display: 'flex', flexDirection: 'column' }}>
             <Text type="secondary" style={{ fontSize: 12, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}><Eye size={14} color={nonInnodbCount > 0 ? token.colorWarning : token.colorSuccess} /> 架构健康度预警</Text>
             <Text strong style={{ fontSize: 24, lineHeight: 1, color: nonInnodbCount > 0 ? token.colorWarning : token.colorSuccess }}>{nonInnodbCount}</Text>
             <Text type="secondary" style={{ fontSize: 12, marginTop: 6 }}>非 InnoDB 引擎的表数量</Text>
@@ -182,7 +182,7 @@ const CategoryListView: React.FC<{
         </div>
       )}
 
-      <div style={{ flex: 1, overflow: 'hidden', background: token.colorBgContainer, borderRadius: 12, border: `1px solid ${token.colorBorderSecondary}` }}>
+      <div style={{ flex: 1, overflow: 'hidden', background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur)', borderRadius: 12, border: '1px solid var(--glass-border)', boxShadow: 'var(--glass-inner-glow)' }}>
         <Table
           dataSource={filtered}
           columns={catColumns}
@@ -1224,8 +1224,11 @@ export const WorkbenchPage: React.FC = () => {
       <Sider
         width={280}
         style={{
-          background: token.colorBgContainer,
-          borderRight: `1px solid ${token.colorBorderSecondary}`,
+          background: 'var(--glass-panel)',
+          backdropFilter: 'var(--glass-blur)',
+          WebkitBackdropFilter: 'var(--glass-blur)',
+          borderRight: '1px solid var(--glass-border)',
+          boxShadow: 'var(--glass-shadow), var(--glass-inner-glow)',
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
@@ -1234,8 +1237,10 @@ export const WorkbenchPage: React.FC = () => {
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
         <style>{`
           .workbench-object-tree .ant-tree-node-content-wrapper.ant-tree-node-selected {
-            background: ${token.colorPrimaryBg};
-            color: ${token.colorPrimary};
+            background: var(--glass-panel-selected) !important;
+            color: var(--edb-text-primary) !important;
+            border: 1px solid var(--glass-border-selected);
+            border-radius: var(--edb-radius-sm);
           }
           .workbench-object-tree .ant-tree-title {
             display: inline-block;
@@ -1250,6 +1255,14 @@ export const WorkbenchPage: React.FC = () => {
             align-items: center;
             width: 100%;
             overflow: hidden;
+            border-radius: var(--edb-radius-sm);
+            transition: background 200ms ease;
+          }
+          .workbench-object-tree .ant-tree-node-content-wrapper:hover {
+            background: var(--glass-panel) !important;
+          }
+          .workbench-object-tree .ant-tree-switcher {
+            color: var(--edb-text-muted);
           }
         `}</style>
         {/* --- 极致优化的侧边栏微型头部 --- */}
@@ -1391,13 +1404,16 @@ export const WorkbenchPage: React.FC = () => {
                   />
                   <div style={{
                     position: 'fixed', left: ctxMenu.x, top: ctxMenu.y, zIndex: 1000,
-                    background: token.colorBgElevated, borderRadius: token.borderRadius,
-                    boxShadow: token.boxShadowSecondary, padding: '4px 0', minWidth: 160,
+                    background: 'var(--glass-panel-hover)', backdropFilter: 'var(--glass-blur)',
+                    WebkitBackdropFilter: 'var(--glass-blur)',
+                    borderRadius: 'var(--edb-radius-md)', border: '1px solid var(--glass-border)',
+                    boxShadow: 'var(--glass-shadow-lg), var(--glass-inner-glow)',
+                    padding: '6px 0', minWidth: 180,
                   }}>
                     {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                     {ctxMenuItems.map((item: any, i: number) => {
                       if (!item) return null
-                      if (item.type === 'divider') return <div key={`d${i}`} style={{ height: 1, background: token.colorBorderSecondary, margin: '4px 0' }} />
+                      if (item.type === 'divider') return <div key={`d${i}`} style={{ height: 1, background: 'var(--glass-border)', margin: '4px 8px' }} />
                       return (
                         <div
                           key={item.key}
@@ -1405,7 +1421,7 @@ export const WorkbenchPage: React.FC = () => {
                             padding: '5px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
                             color: item.danger ? token.colorError : token.colorText, fontSize: 13,
                           }}
-                          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = token.colorBgTextHover }}
+                          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--glass-panel)' }}
                           onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
                           onClick={() => { item.onClick?.(); setCtxMenu(null) }}
                         >
@@ -1424,7 +1440,7 @@ export const WorkbenchPage: React.FC = () => {
       </Sider>
 
       {/* 右侧详情区 */}
-      <Content style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', background: token.colorBgLayout }}>
+      <Content style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'transparent' }}>
         {openConnections.length === 0 && Object.keys(openTableTabs).length === 0 ? (
           <EmptyState
             icon={<DatabaseOutlined style={{ fontSize: 48, color: token.colorTextQuaternary }} />}
@@ -1432,8 +1448,8 @@ export const WorkbenchPage: React.FC = () => {
               <div style={{ textAlign: 'center' }}>
                 <div style={{ marginBottom: 16, color: token.colorTextSecondary }}>暂无打开的数据库连接</div>
                 <div style={{ fontSize: 13, color: token.colorTextQuaternary }}>请先在“连接管理”中双击打开一个连接<br/>或者在左侧双击打开你收藏的 SQL 脚本</div>
-                <div style={{ marginTop: 24, padding: '8px 16px', background: token.colorBgElevated, borderRadius: 8, display: 'inline-block' }}>
-                  <kbd style={{ fontFamily: 'monospace', background: token.colorBgLayout, padding: '2px 4px', borderRadius: 4 }}>Cmd/Ctrl</kbd> + <kbd style={{ fontFamily: 'monospace', background: token.colorBgLayout, padding: '2px 4px', borderRadius: 4 }}>K</kbd> 唤起命令面板
+                <div style={{ marginTop: 24, padding: '8px 16px', background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur-sm)', border: '1px solid var(--glass-border)', borderRadius: 8, display: 'inline-block' }}>
+                  <kbd style={{ fontFamily: 'monospace', background: 'var(--glass-panel)', padding: '2px 4px', borderRadius: 4 }}>Cmd/Ctrl</kbd> + <kbd style={{ fontFamily: 'monospace', background: 'var(--glass-panel)', padding: '2px 4px', borderRadius: 4 }}>K</kbd> 唤起命令面板
                 </div>
               </div>
             }
@@ -1463,10 +1479,12 @@ export const WorkbenchPage: React.FC = () => {
               /* Pro-Max Borderless Geeky Tabs */
               .workbench-main-tabs.ant-tabs-card > .ant-tabs-nav {
                 margin: 0 !important;
-                background: ${token.colorBgContainer};
+                background: var(--glass-panel);
+                backdrop-filter: var(--glass-blur-sm);
+                border-bottom: 1px solid var(--glass-border) !important;
               }
               .workbench-main-tabs.ant-tabs-card > .ant-tabs-nav::before {
-                border-bottom: 1px solid ${token.colorBorderSecondary} !important;
+                border-bottom: none !important;
               }
               .workbench-main-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab {
                 border: none !important;
@@ -1476,10 +1494,16 @@ export const WorkbenchPage: React.FC = () => {
                 margin: 0 !important;
                 border-bottom: 2px solid transparent !important;
                 transition: all 0.2s;
+                color: var(--edb-text-secondary);
+              }
+              .workbench-main-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab:hover {
+                background: var(--glass-panel) !important;
+                color: var(--edb-text-primary);
               }
               .workbench-main-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab-active {
-                background: ${token.colorBgElevated} !important;
-                border-bottom: 2px solid ${token.colorPrimary} !important;
+                background: var(--glass-panel-selected) !important;
+                border-bottom: 2px solid var(--edb-accent) !important;
+                color: var(--edb-text-primary) !important;
               }
               .workbench-main-tabs .ant-tabs-tab-remove {
                 opacity: 0;
@@ -1581,8 +1605,11 @@ export const WorkbenchPage: React.FC = () => {
                       />
                       <div style={{
                         position: 'fixed', left: tabCtxMenu.x, top: tabCtxMenu.y, zIndex: 1000,
-                        background: token.colorBgElevated, borderRadius: token.borderRadius,
-                        boxShadow: token.boxShadowSecondary, padding: '4px 0', minWidth: 140,
+                        background: 'var(--glass-panel-hover)', backdropFilter: 'var(--glass-blur)',
+                        WebkitBackdropFilter: 'var(--glass-blur)',
+                        borderRadius: 'var(--edb-radius-md)', border: '1px solid var(--glass-border)',
+                        boxShadow: 'var(--glass-shadow-lg), var(--glass-inner-glow)',
+                        padding: '6px 0', minWidth: 140,
                       }}>
                         {[
                           { label: '关闭', onClick: () => closeTableTab(tabCtxMenu.tabKey) },
@@ -1621,7 +1648,7 @@ export const WorkbenchPage: React.FC = () => {
                           <div
                             key={item.label}
                             style={{ padding: '5px 12px', cursor: 'pointer', fontSize: 13, color: token.colorText }}
-                            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = token.colorBgTextHover }}
+                            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--glass-panel)' }}
                             onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
                             onClick={() => { item.onClick(); setTabCtxMenu(null) }}
                           >
@@ -1794,7 +1821,7 @@ export const WorkbenchPage: React.FC = () => {
                 const objKey = `${activeTab.connectionId}::${activeTab.database}`
                 const dbObjects = objectsMap[objKey] || []
                 return (
-                  <div style={{ flex: 1, padding: '32px 40px', overflow: 'auto', background: token.colorBgBase }}>
+                  <div style={{ flex: 1, padding: '32px 40px', overflow: 'auto', background: 'transparent' }}>
                     <div style={{ maxWidth: 1000, margin: '0 auto' }}>
                       <div style={{ marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <div>
@@ -1817,7 +1844,7 @@ export const WorkbenchPage: React.FC = () => {
                         gridAutoRows: 'minmax(120px, auto)'
                       }}>
                         {/* Box 1: Tables Count */}
-                        <div style={{ gridColumn: 'span 4', background: token.colorBgContainer, borderRadius: 12, padding: 20, border: `1px solid ${token.colorBorderSecondary}`, display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
+                        <div style={{ gridColumn: 'span 4', background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur)', borderRadius: 12, padding: 20, border: '1px solid var(--glass-border)', boxShadow: 'var(--glass-shadow), var(--glass-inner-glow)', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
                           <Table2 size={20} color={token.colorPrimary} style={{ marginBottom: 12 }} />
                           <Text type="secondary" style={{ fontSize: 13, marginBottom: 4 }}>数据表总数</Text>
                           <Text strong style={{ fontSize: 32, lineHeight: 1 }}>{dbObjects.filter((t) => t.type === 'table').length}</Text>
@@ -1828,7 +1855,7 @@ export const WorkbenchPage: React.FC = () => {
 
                         {/* Box 2: Views & Triggers */}
                         <div style={{ gridColumn: 'span 4', display: 'flex', flexDirection: 'column', gap: 16 }}>
-                          <div style={{ flex: 1, background: token.colorBgContainer, borderRadius: 12, padding: '16px 20px', border: `1px solid ${token.colorBorderSecondary}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div style={{ flex: 1, background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur)', borderRadius: 12, padding: '16px 20px', border: '1px solid var(--glass-border)', boxShadow: 'var(--glass-inner-glow)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <div>
                               <Text type="secondary" style={{ fontSize: 13, display: 'block', marginBottom: 2 }}>视图分类</Text>
                               <Text strong style={{ fontSize: 20 }}>{dbObjects.filter((t) => t.type === 'view').length}</Text>
@@ -1837,7 +1864,7 @@ export const WorkbenchPage: React.FC = () => {
                               <Eye size={20} color="#3B82F6" />
                             </div>
                           </div>
-                          <div style={{ flex: 1, background: token.colorBgContainer, borderRadius: 12, padding: '16px 20px', border: `1px solid ${token.colorBorderSecondary}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div style={{ flex: 1, background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur)', borderRadius: 12, padding: '16px 20px', border: '1px solid var(--glass-border)', boxShadow: 'var(--glass-inner-glow)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <div>
                               <Text type="secondary" style={{ fontSize: 13, display: 'block', marginBottom: 2 }}>系统触发器</Text>
                               <Text strong style={{ fontSize: 20 }}>{dbObjects.filter((t) => t.type === 'trigger').length}</Text>
@@ -1849,16 +1876,16 @@ export const WorkbenchPage: React.FC = () => {
                         </div>
 
                         {/* Box 3: Quick Actions */}
-                        <div style={{ gridColumn: 'span 4', background: token.colorBgContainer, borderRadius: 12, padding: 20, border: `1px solid ${token.colorBorderSecondary}` }}>
+                        <div style={{ gridColumn: 'span 4', background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur)', borderRadius: 12, padding: 20, border: '1px solid var(--glass-border)', boxShadow: 'var(--glass-inner-glow)' }}>
                           <Text strong style={{ fontSize: 14, marginBottom: 16, display: 'flex', alignItems: 'center' }}>
                             <Activity size={16} style={{ marginRight: 6 }} />
                             快捷面板
                           </Text>
                           <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                            <Button block style={{ textAlign: 'left', background: token.colorBgElevated, border: 'none', color: token.colorTextSecondary }} icon={<ReloadOutlined />} onClick={() => loadTables(activeTab.connectionId, activeTab.database)}>
+                            <Button block style={{ textAlign: 'left', background: 'var(--glass-panel)', border: '1px solid var(--glass-border)', color: 'var(--edb-text-secondary)' }} icon={<ReloadOutlined />} onClick={() => loadTables(activeTab.connectionId, activeTab.database)}>
                               重新加载对象树
                             </Button>
-                            <Button block style={{ textAlign: 'left', background: token.colorBgElevated, border: 'none', color: token.colorTextSecondary }} icon={<PlusOutlined />} onClick={() => openTableDesignerTab(activeTab.connectionId, activeTab.connectionName, activeTab.database)}>
+                            <Button block style={{ textAlign: 'left', background: 'var(--glass-panel)', border: '1px solid var(--glass-border)', color: 'var(--edb-text-secondary)' }} icon={<PlusOutlined />} onClick={() => openTableDesignerTab(activeTab.connectionId, activeTab.connectionName, activeTab.database)}>
                               进入可视化表设计器
                             </Button>
                           </Space>
@@ -1940,7 +1967,7 @@ export const WorkbenchPage: React.FC = () => {
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: token.colorTextSecondary
                 }}>
-                  或按 <kbd style={{ padding: '2px 6px', background: token.colorBgLayout, border: `1px solid ${token.colorBorder}`, borderRadius: 4, fontFamily: 'monospace', color: token.colorText }}>{formatHotkey(['Cmd', 'K'])}</kbd> 唤起全局命令
+                  或按 <kbd style={{ padding: '2px 6px', background: 'var(--glass-panel)', border: '1px solid var(--glass-border)', borderRadius: 4, fontFamily: 'monospace', color: 'var(--edb-text-primary)' }}>{formatHotkey(['Cmd', 'K'])}</kbd> 唤起全局命令
                 </div>
                 {openConnections.length > 0 && (
                   <Space size={16} style={{ marginTop: 8 }}>

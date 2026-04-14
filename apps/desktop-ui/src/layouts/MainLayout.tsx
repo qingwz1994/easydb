@@ -126,25 +126,34 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
         collapsedWidth={56}
         collapsed={siderCollapsed}
         style={{
-          background: 'var(--edb-bg-elevated)',
-          borderRight: '1px solid var(--edb-border-subtle)',
+          background: 'var(--glass-panel)',
+          backdropFilter: 'var(--glass-blur)',
+          WebkitBackdropFilter: 'var(--glass-blur)',
+          borderRight: '1px solid var(--glass-border)',
+          boxShadow: 'var(--glass-shadow), var(--glass-inner-glow)',
+          zIndex: 10,
         }}
       >
         {/* Logo */}
         <div
           style={{
-            height: 48,
+            height: 52,
             display: 'flex',
             alignItems: 'center',
             justifyContent: siderCollapsed ? 'center' : 'flex-start',
-            paddingLeft: siderCollapsed ? 0 : 24,
-            borderBottom: '1px solid var(--edb-border-subtle)',
+            paddingLeft: siderCollapsed ? 0 : 20,
+            margin: '10px 10px 6px',
+            borderRadius: 'var(--edb-radius-md)',
+            background: 'var(--glass-panel)',
+            border: '1px solid var(--glass-border)',
+            boxShadow: 'var(--glass-inner-glow)',
             fontWeight: 700,
             fontSize: siderCollapsed ? 14 : 16,
             color: 'var(--edb-accent)',
-            letterSpacing: 1,
+            letterSpacing: 1.5,
             cursor: 'pointer',
             transition: 'all var(--edb-transition-normal)',
+            textShadow: '0 0 20px var(--edb-accent-muted)',
           }}
           onClick={() => navigate('/connection')}
         >
@@ -165,14 +174,31 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
           style={{
             position: 'absolute',
             bottom: 16,
-            width: '100%',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: 36,
+            height: 36,
             display: 'flex',
+            alignItems: 'center',
             justifyContent: 'center',
             cursor: 'pointer',
             color: 'var(--edb-text-muted)',
-            transition: 'color var(--edb-transition-fast)',
+            borderRadius: 'var(--edb-radius-md)',
+            background: 'var(--glass-panel)',
+            border: '1px solid var(--glass-border)',
+            boxShadow: 'var(--glass-inner-glow)',
+            backdropFilter: 'var(--glass-blur-sm)',
+            transition: 'all var(--edb-transition-fast)',
           }}
           onClick={() => setSiderCollapsed(!siderCollapsed)}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'var(--glass-panel-hover)'
+            e.currentTarget.style.color = 'var(--edb-text-primary)'
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'var(--glass-panel)'
+            e.currentTarget.style.color = 'var(--edb-text-muted)'
+          }}
         >
           {siderCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
         </div>
@@ -184,12 +210,16 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
           style={{
             height: 48,
             lineHeight: '48px',
-            background: 'var(--edb-bg-elevated)',
-            borderBottom: '1px solid var(--edb-border-subtle)',
+            background: 'var(--glass-panel)',
+            backdropFilter: 'var(--glass-blur)',
+            WebkitBackdropFilter: 'var(--glass-blur)',
+            borderBottom: '1px solid var(--glass-border)',
+            boxShadow: 'var(--glass-inner-glow)',
             padding: '0 24px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
+            zIndex: 9,
           }}
         >
           <Breadcrumb items={breadcrumbItems} />
