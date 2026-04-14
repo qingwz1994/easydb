@@ -27,6 +27,10 @@
   /* Blur */
   --glass-blur: blur(20px) saturate(180%);
   --glass-blur-sm: blur(12px) saturate(150%);
+  --glass-blur-heavy: blur(24px) saturate(180%);
+
+  /* Floating layers — near-opaque for readability */
+  --glass-popup: rgba(15, 12, 41, 0.92);
 
   /* Shadows */
   --glass-shadow: 0 8px 32px rgba(0,0,0,0.3);
@@ -538,4 +542,48 @@ body {
 @keyframes glass-shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
+}
+
+/* ═══════════════════════════════════════════════════════
+   Floating Overlays — 高不透明度浮层
+   解决毛玻璃下拉面板底层文字穿透问题
+   ═══════════════════════════════════════════════════════ */
+
+.ant-select-dropdown,
+.ant-dropdown,
+.ant-cascader-dropdown {
+  background: var(--glass-popup) !important;
+  backdrop-filter: var(--glass-blur-heavy) !important;
+  -webkit-backdrop-filter: var(--glass-blur-heavy) !important;
+  border: 1px solid var(--glass-border) !important;
+  box-shadow: var(--glass-shadow-lg), var(--glass-inner-glow) !important;
+}
+
+.ant-popover-inner {
+  background: var(--glass-popup) !important;
+  backdrop-filter: var(--glass-blur-heavy) !important;
+  -webkit-backdrop-filter: var(--glass-blur-heavy) !important;
+  border: 1px solid var(--glass-border) !important;
+}
+
+.ant-tooltip-inner {
+  background: rgba(15, 12, 41, 0.95) !important;
+  backdrop-filter: var(--glass-blur-heavy) !important;
+  -webkit-backdrop-filter: var(--glass-blur-heavy) !important;
+}
+
+.ant-picker-dropdown {
+  background: transparent !important;
+}
+.ant-picker-dropdown .ant-picker-panel-container {
+  background: var(--glass-popup) !important;
+  backdrop-filter: var(--glass-blur-heavy) !important;
+  -webkit-backdrop-filter: var(--glass-blur-heavy) !important;
+  border: 1px solid var(--glass-border) !important;
+  box-shadow: var(--glass-shadow-lg) !important;
+}
+
+.ant-color-picker-panel-container {
+  background: var(--glass-popup) !important;
+  backdrop-filter: var(--glass-blur-heavy) !important;
 }
