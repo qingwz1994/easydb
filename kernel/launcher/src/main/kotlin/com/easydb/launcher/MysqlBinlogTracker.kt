@@ -9,7 +9,6 @@
 package com.easydb.launcher
 
 import com.easydb.common.*
-import com.easydb.drivers.mysql.MysqlDatabaseSession
 import com.github.shyiko.mysql.binlog.BinaryLogClient
 import com.github.shyiko.mysql.binlog.event.*
 import kotlinx.coroutines.flow.Flow
@@ -212,8 +211,7 @@ class MysqlBinlogTracker : ChangeTracker {
 
     override fun start(session: DatabaseSession, config: TrackerSessionConfig): String {
         val sessionId = UUID.randomUUID().toString()
-        val mysqlSession = session as MysqlDatabaseSession
-        val connConfig = mysqlSession.config
+        val connConfig = session.config
 
         val client = BinaryLogClient(
             connConfig.host,
@@ -402,7 +400,7 @@ class MysqlBinlogTracker : ChangeTracker {
     }
 
     override fun checkServerCompatibility(session: DatabaseSession): TrackerServerCheck {
-        val conn = (session as MysqlDatabaseSession).connection
+        val conn = session.getJdbcConnection()
         val issues = mutableListOf<String>()
         var binlogEnabled = false
         var binlogFormat: String? = null
@@ -506,7 +504,7 @@ class MysqlBinlogTracker : ChangeTracker {
     }
 
     override fun listBinlogFiles(session: DatabaseSession): List<BinlogFileInfo> {
-        val conn = (session as MysqlDatabaseSession).connection
+        val conn = session.getJdbcConnection()
         val files = mutableListOf<BinlogFileInfo>()
         try {
             conn.createStatement().use { stmt ->
@@ -804,7 +802,7 @@ class MysqlBinlogTracker : ChangeTracker {
     private fun loadColumnNames(session: TrackerSession, database: String, table: String): List<String> {
         val columns = mutableListOf<String>()
         try {
-            val conn = (session.dbSession as MysqlDatabaseSession).connection
+            val conn = session.dbSession.getJdbcConnection()
             conn.prepareStatement("""
                 SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
                 WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?

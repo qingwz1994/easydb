@@ -51,6 +51,12 @@ interface DatabaseSession {
     val config: ConnectionConfig
     fun isValid(): Boolean
     fun close()
+
+    /**
+     * 获取底层 JDBC Connection。
+     * 替代反射和强制转型，为上层提供统一的连接获取方式。
+     */
+    fun getJdbcConnection(): java.sql.Connection
 }
 
 // ─── 元数据适配器 ─────────────────────────────────────────

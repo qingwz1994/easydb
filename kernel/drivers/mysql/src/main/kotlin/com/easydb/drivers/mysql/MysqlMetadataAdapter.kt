@@ -25,7 +25,7 @@ import com.easydb.common.*
 class MysqlMetadataAdapter : MetadataAdapter {
 
     override fun listDatabases(session: DatabaseSession): List<DatabaseInfo> {
-        val conn = (session as MysqlDatabaseSession).connection
+        val conn = session.getJdbcConnection()
         val result = mutableListOf<DatabaseInfo>()
         conn.createStatement().use { stmt ->
             stmt.executeQuery("""
@@ -46,7 +46,7 @@ class MysqlMetadataAdapter : MetadataAdapter {
     }
 
     override fun listTables(session: DatabaseSession, database: String): List<TableInfo> {
-        val conn = (session as MysqlDatabaseSession).connection
+        val conn = session.getJdbcConnection()
         val result = mutableListOf<TableInfo>()
         conn.prepareStatement("""
             SELECT TABLE_NAME, TABLE_SCHEMA, TABLE_TYPE, TABLE_ROWS, TABLE_COMMENT,
@@ -77,7 +77,7 @@ class MysqlMetadataAdapter : MetadataAdapter {
     }
 
     override fun listTriggers(session: DatabaseSession, database: String): List<TriggerInfo> {
-        val conn = (session as MysqlDatabaseSession).connection
+        val conn = session.getJdbcConnection()
         val result = mutableListOf<TriggerInfo>()
         conn.prepareStatement("""
             SELECT TRIGGER_NAME, EVENT_OBJECT_TABLE, EVENT_MANIPULATION,
@@ -103,7 +103,7 @@ class MysqlMetadataAdapter : MetadataAdapter {
     }
 
     override fun listRoutines(session: DatabaseSession, database: String): List<RoutineInfo> {
-        val conn = (session as MysqlDatabaseSession).connection
+        val conn = session.getJdbcConnection()
         val result = mutableListOf<RoutineInfo>()
         conn.prepareStatement("""
             SELECT ROUTINE_NAME, ROUTINE_TYPE, DEFINER, CREATED, LAST_ALTERED, ROUTINE_COMMENT
@@ -137,7 +137,7 @@ class MysqlMetadataAdapter : MetadataAdapter {
     }
 
     private fun getColumns(session: DatabaseSession, database: String, table: String): List<ColumnInfo> {
-        val conn = (session as MysqlDatabaseSession).connection
+        val conn = session.getJdbcConnection()
         val result = mutableListOf<ColumnInfo>()
         conn.prepareStatement("""
             SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT,
@@ -166,7 +166,7 @@ class MysqlMetadataAdapter : MetadataAdapter {
     }
 
     override fun getIndexes(session: DatabaseSession, database: String, table: String): List<IndexInfo> {
-        val conn = (session as MysqlDatabaseSession).connection
+        val conn = session.getJdbcConnection()
         val indexMap = mutableMapOf<String, MutableList<String>>()
         val indexMeta = mutableMapOf<String, Pair<Boolean, Boolean>>() // unique, primary
 
@@ -199,7 +199,7 @@ class MysqlMetadataAdapter : MetadataAdapter {
     }
 
     override fun previewRows(session: DatabaseSession, database: String, table: String, limit: Int, where: String?, orderBy: String?, offset: Int): List<Map<String, String?>> {
-        val conn = (session as MysqlDatabaseSession).connection
+        val conn = session.getJdbcConnection()
         val result = mutableListOf<Map<String, String?>>()
 
         // 构建 SQL
@@ -263,7 +263,7 @@ class MysqlMetadataAdapter : MetadataAdapter {
     }
 
     override fun getDdl(session: DatabaseSession, database: String, table: String): String {
-        val conn = (session as MysqlDatabaseSession).connection
+        val conn = session.getJdbcConnection()
         // 依次尝试不同对象类型的 DDL 查询
         val commands = listOf(
             "SHOW CREATE TABLE `$database`.`$table`",
@@ -293,7 +293,7 @@ class MysqlMetadataAdapter : MetadataAdapter {
      * 注意：SHOW CREATE TRIGGER 返回列为 (Trigger, sql_mode, SQL Original Statement, ...)
      */
     fun getObjectDdl(session: DatabaseSession, database: String, name: String, objectType: String): String {
-        val conn = (session as MysqlDatabaseSession).connection
+        val conn = session.getJdbcConnection()
         val cmd = when (objectType) {
             "view" -> "SHOW CREATE VIEW `$database`.`$name`"
             "procedure" -> "SHOW CREATE PROCEDURE `$database`.`$name`"
@@ -319,21 +319,21 @@ class MysqlMetadataAdapter : MetadataAdapter {
     }
 
     override fun createDatabase(session: DatabaseSession, name: String, charset: String, collation: String) {
-        val conn = (session as MysqlDatabaseSession).connection
+        val conn = session.getJdbcConnection()
         conn.createStatement().use { stmt ->
             stmt.execute("CREATE DATABASE `$name` CHARACTER SET $charset COLLATE $collation")
         }
     }
 
     override fun dropDatabase(session: DatabaseSession, name: String) {
-        val conn = (session as MysqlDatabaseSession).connection
+        val conn = session.getJdbcConnection()
         conn.createStatement().use { stmt ->
             stmt.execute("DROP DATABASE `$name`")
         }
     }
 
     override fun listCharsets(session: DatabaseSession): List<CharsetInfo> {
-        val conn = (session as MysqlDatabaseSession).connection
+        val conn = session.getJdbcConnection()
         val charsetMap = mutableMapOf<String, MutableList<String>>()
         val defaultCollations = mutableMapOf<String, String>()
 

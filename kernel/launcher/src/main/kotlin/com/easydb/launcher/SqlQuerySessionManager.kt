@@ -59,6 +59,28 @@ class SqlQuerySessionManager {
     private data class PooledConnection(val connection: Connection, val createdAt: Long = System.currentTimeMillis())
     private val connectionPool = ConcurrentHashMap<PoolKey, PooledConnection>()
 
+    /**
+     * 连接池保活线程：每 60 秒检查池中连接有效性
+     * 失效连接自动移除，下次 acquireConnection 时重建
+     */
+    private val poolKeepAlive = Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "query-pool-keepalive").apply { isDaemon = true }
+    }.also { executor ->
+        executor.scheduleAtFixedRate({
+            for ((key, pooled) in connectionPool) {
+                try {
+                    if (pooled.connection.isClosed || !pooled.connection.isValid(2)) {
+                        connectionPool.remove(key)
+                        closeQuietly(pooled.connection)
+                    }
+                } catch (_: Exception) {
+                    connectionPool.remove(key)
+                    closeQuietly(pooled.connection)
+                }
+            }
+        }, 60, 60, java.util.concurrent.TimeUnit.SECONDS)
+    }
+
     private fun acquireConnection(session: MysqlDatabaseSession, database: String): Connection {
         val key = PoolKey(session.connectionId, database)
         val pooled = connectionPool[key]

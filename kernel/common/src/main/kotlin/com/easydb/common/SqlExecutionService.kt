@@ -436,13 +436,10 @@ class SqlExecutionService {
 
     /**
      * 提取底层 JDBC Connection
-     * 通过反射获取 MysqlDatabaseSession 的 connection 字段
-     * 避免 common 模块直接依赖 drivers/mysql
+     * 通过 DatabaseSession 接口方法直接获取
      */
     private fun getConnection(session: DatabaseSession): java.sql.Connection {
-        val field = session.javaClass.getDeclaredField("connection")
-        field.isAccessible = true
-        return field.get(session) as java.sql.Connection
+        return session.getJdbcConnection()
     }
 
     private fun parseSqlChunk(
