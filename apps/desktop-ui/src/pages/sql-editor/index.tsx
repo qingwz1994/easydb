@@ -369,7 +369,7 @@ export const SqlEditorPage: React.FC = () => {
   let queryIndex = 0
 
   return (
-    <Layout style={{ height: '100%', background: token.colorBgContainer }}>
+    <Layout style={{ height: '100%', background: 'transparent' }}>
       <Layout style={{ flex: 1, background: 'transparent' }}>
         <Layout.Content style={{ display: 'flex', flexDirection: 'column' }}>
           {tabs.length === 0 ? (
@@ -384,7 +384,7 @@ export const SqlEditorPage: React.FC = () => {
           ) : (
           <>
           {/* 编辑器标签页 */}
-          <div style={{ borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
+          <div style={{ borderBottom: '1px solid var(--glass-border)' }}>
             <Tabs
               className="sql-editor-tabs"
               type="editable-card"
@@ -408,7 +408,7 @@ export const SqlEditorPage: React.FC = () => {
           {/* 编辑器上下文悬浮栏 */}
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '8px 16px', borderBottom: `1px solid ${token.colorBorderSecondary}`, background: token.colorBgContainer
+            padding: '8px 16px', borderBottom: '1px solid var(--glass-border)', background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur-sm)'
           }}>
             <Space size={12}>
               <Select
@@ -509,15 +509,15 @@ export const SqlEditorPage: React.FC = () => {
               document.body.style.userSelect = 'none'
             }}
             style={{
-              height: 4, cursor: 'row-resize', background: token.colorBgSpotlight, zIndex: 10,
-              opacity: 0.5, transition: 'opacity 0.2s', borderBottom: `1px solid ${token.colorBorderSecondary}`
+              height: 4, cursor: 'row-resize', background: 'var(--glass-border)', zIndex: 10,
+              opacity: 0.5, transition: 'opacity 0.2s', borderBottom: '1px solid var(--glass-border)'
             }}
             onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
             onMouseLeave={(e) => (!isDraggingRef.current && (e.currentTarget.style.opacity = '0.5'))}
           />
 
               {/* 结果区 */}
-              <Content style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', background: token.colorBgContainer, flex: 1 }}>
+              <Content style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', background: 'transparent', flex: 1 }}>
                 <Tabs
                   activeKey={activeEditorTab.resultTab}
                   onChange={(key) => updateActiveTab({ resultTab: key })}
