@@ -1513,7 +1513,7 @@ export const WorkbenchPage: React.FC = () => {
       </Sider>
 
       {/* 右侧详情区 */}
-      <Content style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', background: token.colorBgLayout }}>
+      <Content style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'transparent' }}>
         {openConnections.length === 0 && Object.keys(openTableTabs).length === 0 ? (
           <EmptyState
             icon={<DatabaseOutlined style={{ fontSize: 48, color: token.colorTextQuaternary }} />}

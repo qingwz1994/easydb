@@ -449,7 +449,7 @@ export const ImportSqlDialog: React.FC<ImportSqlDialogProps> = ({
                 marginTop: 24,
                 height: 280,
                 overflow: 'auto',
-                background: token.colorBgLayout,
+                background: 'transparent',
                 borderRadius: token.borderRadius,
                 padding: '8px 12px',
                 fontFamily: 'monospace',
@@ -515,7 +515,7 @@ export const ImportSqlDialog: React.FC<ImportSqlDialogProps> = ({
               style={{
                 height: 220,
                 overflow: 'auto',
-                background: token.colorBgLayout,
+                background: 'transparent',
                 borderRadius: token.borderRadius,
                 padding: '8px 12px',
                 fontFamily: 'monospace',
