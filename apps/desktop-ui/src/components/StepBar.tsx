@@ -1,5 +1,5 @@
 import React from 'react'
-import { Steps, theme } from 'antd'
+import { Steps } from 'antd'
 
 interface StepItem {
   /** 步骤标题 */
@@ -22,8 +22,6 @@ export const StepBar: React.FC<StepBarProps> = ({
   current,
   onChange,
 }) => {
-  const { token } = theme.useToken()
-
   return (
     <div style={{
       padding: '16px 24px',

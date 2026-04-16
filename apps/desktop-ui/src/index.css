@@ -30,7 +30,7 @@
   --glass-blur-heavy: blur(24px) saturate(180%);
 
   /* Floating layers — near-opaque for readability */
-  --glass-popup: rgba(15, 12, 41, 0.92);
+  --glass-popup: rgba(15, 12, 41, 0.98);
 
   /* Shadows */
   --glass-shadow: 0 8px 32px rgba(0,0,0,0.3);
@@ -114,7 +114,7 @@
   --glass-blur-heavy: blur(24px) saturate(150%);
 
   /* Floating layers — near-opaque white for light mode */
-  --glass-popup: rgba(255, 255, 255, 0.92);
+  --glass-popup: rgba(255, 255, 255, 0.98);
 
   --edb-bg-elevated: var(--glass-panel);
   --edb-bg-surface: rgba(255,255,255,0.30);

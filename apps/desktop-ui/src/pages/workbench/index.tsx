@@ -14,7 +14,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-import React, { useEffect, useState, useCallback, useRef, useDeferredValue, useMemo, useLayoutEffect, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react'
+import React, { useEffect, useState, useCallback, useRef, useDeferredValue, useMemo, useLayoutEffect, type CSSProperties } from 'react'
 import {
   Layout, Tree, Tabs, Table, Typography, Input, Space, Button, Tag, Tooltip, Modal, Dropdown,
   theme, Breadcrumb,
@@ -50,6 +50,7 @@ import { formatHotkey } from '@/utils/osUtils'
 
 const { Sider, Content } = Layout
 const { Text } = Typography
+type TreeDataNode = DataNode & { 'data-node-key'?: string }
 
 /** 分类列表视图 — 独立组件，搜索状态通过 props 持久化 */
 import type { MenuProps } from 'antd'
@@ -307,12 +308,22 @@ export const WorkbenchPage: React.FC = () => {
     return () => { loadSeqRef.current++ }
   }, [])
 
-  // --- 右键菜单状态（单个 Dropdown 代替 N 个）---
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; nodeKey: string } | null>(null)
   // --- Tab 右键菜单 ---
   const [tabCtxMenu, setTabCtxMenu] = useState<{ x: number; y: number; tabKey: string } | null>(null)
 
+  // --- 树节点右键菜单 ---
+  const [treeCtxMenu, setTreeCtxMenu] = useState<{ x: number; y: number; nodeKey: string } | null>(null)
 
+  // ESC 键关闭树节点右键菜单
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setTreeCtxMenu(null)
+    }
+    if (treeCtxMenu) {
+      document.addEventListener('keydown', handleEsc)
+      return () => document.removeEventListener('keydown', handleEsc)
+    }
+  }, [treeCtxMenu])
 
   // --- 新建数据库弹窗状态 ---
   const [createDbModal, setCreateDbModal] = useState<{ connectionId: string; connectionName: string } | null>(null)
@@ -779,21 +790,23 @@ export const WorkbenchPage: React.FC = () => {
     return () => clearTimeout(timer)
   }, [])
 
-  const treeData: DataNode[] = useMemo(() => {
+  const treeData: TreeDataNode[] = useMemo(() => {
     if (deferTree) return [] // 初次渲染不计算
 
-    const scriptsNode: DataNode = {
+    const scriptsNode: TreeDataNode = {
       key: 'saved-scripts',
+      'data-node-key': 'saved-scripts',
       title: <span style={{ fontWeight: 600 }}>📚 收藏脚本</span>,
       children: savedScripts.map(s => ({
         key: `script:${s.id}`,
+        'data-node-key': `script:${s.id}`,
         title: s.name,
         icon: <StarOutlined style={{ color: token.colorWarning }} />,
         isLeaf: true,
       }))
     }
 
-    const connNodes = openConnections.map((conn) => {
+    const connNodes: TreeDataNode[] = openConnections.map((conn) => {
     const connDbs = databasesMap[conn.id] || []
     const isLoading = loadingConns.has(conn.id)
 
@@ -811,7 +824,7 @@ export const WorkbenchPage: React.FC = () => {
         // 数据库名不匹配且子对象也不匹配 → 过滤掉
         if (deferredSearch && !dbNameMatches && !hasMatchingObjects) return null
 
-        const categoryChildren: DataNode[] = objectCategories
+        const categoryChildren: TreeDataNode[] = objectCategories
           .map((cat) => {
             const items = dbObjects.filter(
               (t) => cat.types.includes(t.type)
@@ -819,29 +832,33 @@ export const WorkbenchPage: React.FC = () => {
             )
             return {
               key: `cat:${conn.id}:${db.name}:${cat.key}`,
+              'data-node-key': `cat:${conn.id}:${db.name}:${cat.key}`,
               title: `${cat.label} (${items.length})`,
               icon: cat.icon,
               children: items.map((t) => ({
                 key: `obj:${conn.id}:${db.name}:${t.name}`,
+                'data-node-key': `obj:${conn.id}:${db.name}:${t.name}`,
                 title: t.name,
                 icon: t.type === 'view' ? iconView : t.type === 'trigger' ? iconTrigger : t.type === 'procedure' ? iconProcedure : t.type === 'function' ? iconFunction : iconTable,
                 isLeaf: true,
               })),
-            } as DataNode
+            } as TreeDataNode
           })
           .filter((cat) => !deferredSearch || (cat.children && cat.children.length > 0))
 
         return {
           key: `db:${conn.id}:${db.name}`,
+          'data-node-key': `db:${conn.id}:${db.name}`,
           title: db.name,
           icon: iconDb,
           children: categoryChildren,
-        } as DataNode
+        } as TreeDataNode
       })
-      .filter(Boolean) as DataNode[]
+      .filter(Boolean) as TreeDataNode[]
 
     return {
       key: `conn:${conn.id}`,
+      'data-node-key': `conn:${conn.id}`,
       title: (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', paddingRight: 4 }}>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
@@ -859,8 +876,8 @@ export const WorkbenchPage: React.FC = () => {
         </div>
       ),
       icon: iconConn,
-      children: isLoading ? [{ key: `loading:${conn.id}`, title: '加载中...', isLeaf: true, selectable: false }] : dbChildren,
-    } as DataNode
+      children: isLoading ? [{ key: `loading:${conn.id}`, 'data-node-key': `loading:${conn.id}`, title: '加载中...', isLeaf: true, selectable: false }] : dbChildren,
+    } as TreeDataNode
   })
 
   return [scriptsNode, ...connNodes]
@@ -1247,9 +1264,11 @@ export const WorkbenchPage: React.FC = () => {
     return []
   }, [openConnections, loadDatabases, loadTables, selectedCtx, setSelectedCtx, handleTableExport, setCreateDbModal, setEditDbModal, setImportSqlModal, setExportModal, openTableDesignerTab, objectsMap, openOrActivateTab, updateTabState, loadTabDataForTab])
 
-  // ctxMenuItems 缓存（必须在 getContextMenuItems 之后）
-  const ctxMenuItems = useMemo(() => ctxMenu ? getContextMenuItems(ctxMenu.nodeKey) : [], [ctxMenu, getContextMenuItems])
-
+  // 延迟计算菜单项：仅在右键触发瞬间计算 1 次（而非 titleRender 中 N 次）
+  const treeCtxMenuItems = useMemo(
+    () => (treeCtxMenu ? getContextMenuItems(treeCtxMenu.nodeKey) : []),
+    [treeCtxMenu, getContextMenuItems]
+  )
   // 可添加的连接列表（排除已在工作台中的）
   const availableConnections = connections.filter(
     (c) => !openConnections.some((o) => o.id === c.id)
@@ -1268,7 +1287,8 @@ export const WorkbenchPage: React.FC = () => {
     : []
 
   return (
-    <Layout style={{ height: '100%' }}>
+    <>
+      <Layout style={{ height: '100%' }}>
       {/* 左侧对象树 */}
       <Sider
         width={280}
@@ -1382,7 +1402,21 @@ export const WorkbenchPage: React.FC = () => {
             style={{ borderRadius: 10, fontSize: 12 }}
           />
         </div>
-        <div ref={treeContainerRef} style={{ flex: 1, overflow: 'hidden' }}>
+        <div
+          ref={treeContainerRef}
+          style={{ flex: 1, overflow: 'hidden' }}
+          onContextMenu={(e) => {
+            // 事件委托：从冒泡路径中查找 data-tree-key，作为 onRightClick 的可靠 fallback
+            const el = (e.target as HTMLElement).closest('[data-tree-key]')
+            if (!el) return
+            const nodeKey = el.getAttribute('data-tree-key')
+            if (!nodeKey) return
+            const menuItems = getContextMenuItems(nodeKey)
+            if (!menuItems || menuItems.length === 0) return
+            e.preventDefault()
+            setTreeCtxMenu({ x: e.clientX, y: e.clientY, nodeKey })
+          }}
+        >
           {openConnections.length === 0 && savedScripts.length === 0 ? (
             <div style={{ padding: '24px 12px', textAlign: 'center' }}>
               <Text type="secondary" style={{ fontSize: 13 }}>
@@ -1400,14 +1434,24 @@ export const WorkbenchPage: React.FC = () => {
                 titleRender={
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   (nodeData: any) => {
-                  if (nodeData.isLeaf && String(nodeData.key).startsWith('obj:')) {
+                  const key = String(nodeData.key)
+                  const title = nodeData.title as React.ReactNode
+                  // 叶子对象节点保留 Tooltip（名称可能被截断）
+                  if (nodeData.isLeaf && key.startsWith('obj:')) {
                     return (
                       <Tooltip title={String(nodeData.title)} mouseEnterDelay={0.5} placement="right">
-                        <span>{nodeData.title as React.ReactNode}</span>
+                        <span data-tree-key={key} style={{ display: 'contents' }}>{title}</span>
                       </Tooltip>
                     )
                   }
-                  return nodeData.title as React.ReactNode
+                  return <span data-tree-key={key} style={{ display: 'contents' }}>{title}</span>
+                }}
+                onRightClick={({ event, node }) => {
+                  const nodeKey = String(node.key)
+                  const menuItems = getContextMenuItems(nodeKey)
+                  if (menuItems && menuItems.length > 0) {
+                    setTreeCtxMenu({ x: event.clientX, y: event.clientY, nodeKey })
+                  }
                 }}
                 onSelect={handleTreeSelect}
                 selectedKeys={selectedTreeKeys}
@@ -1459,54 +1503,7 @@ export const WorkbenchPage: React.FC = () => {
                     }
                   }
                 }}
-                onRightClick={({ event, node }) => {
-                  event.preventDefault()
-                  event.stopPropagation()
-                  const key = String(node.key)
-                  const nativeEvent = event as unknown as ReactMouseEvent
-                  setCtxMenu({ x: nativeEvent.clientX, y: nativeEvent.clientY, nodeKey: key })
-                }}
               />
-              {ctxMenu && ctxMenuItems && ctxMenuItems.length > 0 && (
-                <>
-                  <div
-                    style={{ position: 'fixed', inset: 0, zIndex: 999 }}
-                    onClick={() => setCtxMenu(null)}
-                    onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null) }}
-                  />
-                  <div style={{
-                    position: 'fixed', left: ctxMenu.x, top: ctxMenu.y, zIndex: 1000,
-                    background: 'var(--glass-popup)',
-                    backdropFilter: 'var(--glass-blur-heavy)',
-                    WebkitBackdropFilter: 'var(--glass-blur-heavy)',
-                    borderRadius: token.borderRadiusLG,
-                    border: '1px solid var(--glass-border)',
-                    boxShadow: 'var(--glass-shadow-lg), var(--glass-inner-glow)',
-                    padding: '6px 0', minWidth: 180,
-                  }}>
-                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                    {ctxMenuItems.map((item: any, i: number) => {
-                      if (!item) return null
-                      if (item.type === 'divider') return <div key={`d${i}`} style={{ height: 1, background: 'var(--glass-border)', margin: '4px 8px' }} />
-                      return (
-                        <div
-                          key={item.key}
-                          style={{
-                            padding: '5px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
-                            color: item.danger ? token.colorError : token.colorText, fontSize: 13,
-                          }}
-                          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = token.controlItemBgHover }}
-                          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
-                          onClick={() => { item.onClick?.(); setCtxMenu(null) }}
-                        >
-                          {item.icon}
-                          <span>{item.label}</span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </>
-              )}
             </>
           )}
         </div>
@@ -1721,8 +1718,8 @@ export const WorkbenchPage: React.FC = () => {
                         ].map((item) => (
                           <div
                             key={item.label}
-                            style={{ padding: '5px 12px', cursor: 'pointer', fontSize: 13, color: token.colorText }}
-                            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = token.controlItemBgHover }}
+                            style={{ padding: '5px 12px', cursor: 'pointer', fontSize: 13, color: 'var(--edb-text-primary)', transition: 'background 0.15s' }}
+                            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--glass-panel-hover)' }}
                             onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
                             onClick={() => { item.onClick(); setTabCtxMenu(null) }}
                           >
@@ -2158,5 +2155,53 @@ export const WorkbenchPage: React.FC = () => {
         onCancel={() => setShowShortcuts(false)}
       />
     </Layout>
+
+    {/* 树节点右键菜单 - 放在 Layout 外部确保 fixed 定位生效 */}
+    {treeCtxMenu && (
+      <>
+        <div
+          style={{ position: 'fixed', inset: 0, zIndex: 999 }}
+          onClick={() => setTreeCtxMenu(null)}
+          onContextMenu={(e) => { e.preventDefault(); setTreeCtxMenu(null) }}
+        />
+        <div style={{
+          position: 'fixed', left: treeCtxMenu.x, top: treeCtxMenu.y, zIndex: 1000,
+          background: 'var(--glass-popup)',
+          backdropFilter: 'var(--glass-blur-heavy)',
+          WebkitBackdropFilter: 'var(--glass-blur-heavy)',
+          borderRadius: token.borderRadiusLG,
+          border: '1px solid var(--glass-border)',
+          boxShadow: 'var(--glass-shadow-lg), var(--glass-inner-glow)',
+          padding: '6px 0', minWidth: 180,
+        }}>
+          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+          {(treeCtxMenuItems || []).map((item: any, idx: number) => {
+            if (!item) return null
+            if (item.type === 'divider') return <div key={`divider-${idx}`} style={{ height: 1, background: 'var(--glass-border)', margin: '4px 8px' }} />
+            return (
+              <div
+                key={String(item.key)}
+                style={{
+                  padding: '5px 12px', cursor: 'pointer', fontSize: 13,
+                  color: item.danger ? 'var(--edb-error)' : 'var(--edb-text-primary)',
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  transition: 'background 0.15s',
+                }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--glass-panel-hover)' }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+                onClick={() => {
+                  if (item.onClick) item.onClick({ key: String(item.key), keyPath: [String(item.key)], domEvent: new MouseEvent('click') } as any)
+                  setTreeCtxMenu(null)
+                }}
+              >
+                {item.icon && <span style={{ display: 'flex', alignItems: 'center' }}>{item.icon}</span>}
+                {item.label}
+              </div>
+            )
+          })}
+        </div>
+      </>
+    )}
+  </>
   )
 }
