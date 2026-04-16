@@ -14,8 +14,8 @@ export function isPreviewableSql(sql: string): boolean {
   if (!normalized) return false
   if (normalized.includes(';')) return false
 
-  // 必须以 SELECT/SHOW/DESC/DESCRIBE/EXPLAIN/WITH 开头
-  if (!/^(select|show|desc|describe|explain|with)\b/i.test(normalized)) return false
+  // 必须以 SELECT/WITH 开头（SHOW/DESC/DESCRIBE/EXPLAIN 不支持 LIMIT/OFFSET 包装）
+  if (!/^(select|with)\b/i.test(normalized)) return false
 
   // 聚合函数查询（COUNT/SUM/AVG/MAX/MIN）通常只返回一行，不需要分页
   // 例如：SELECT COUNT(*) FROM table, SELECT MAX(id) FROM table
