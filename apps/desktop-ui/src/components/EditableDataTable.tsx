@@ -105,7 +105,15 @@ const CellEditor: React.FC<{
           }
         }}
         autoFocus
-        style={{ width: '100%', height: '100%', borderRadius: 0 }}
+        style={{
+          width: '100%',
+          height: '100%',
+          borderRadius: 0,
+          background: 'var(--glass-popup)',
+          border: '1px solid var(--edb-accent)',
+          color: 'var(--edb-text-primary)',
+          caretColor: 'var(--edb-accent)',
+        }}
       />
     </div>
   )
@@ -314,7 +322,7 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
       const toolbarHeight = toolbarRef.current?.getBoundingClientRect().height ?? 0
       const pagerHeight = pagerRef.current?.getBoundingClientRect().height ?? 44
       const headerHeight = 40
-      const outerGap = 16
+      const outerGap = 24 // 增加底部间距，确保最后一行可见
       const next = Math.max(220, Math.floor(el.clientHeight - toolbarHeight - pagerHeight - headerHeight - outerGap))
       setTableScrollY(next)
     }
