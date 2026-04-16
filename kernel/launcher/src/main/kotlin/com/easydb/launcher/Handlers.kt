@@ -567,22 +567,6 @@ fun Route.sqlRoutes() {
         call.ok(result)
     }
 
-    post("/query-session/fetch") {
-        val req = call.receive<SqlQuerySessionFetchRequest>()
-        call.ok(querySessionMgr.fetch(req.querySessionId, req.pageSize, req.maxCellChars))
-    }
-
-    post("/query-session/status") {
-        val req = call.receive<SqlQuerySessionStatusRequest>()
-        call.ok(querySessionMgr.getStatus(req.querySessionId))
-    }
-
-    post("/query-session/close") {
-        val req = call.receive<SqlQuerySessionCloseRequest>()
-        querySessionMgr.close(req.querySessionId)
-        call.ok(true)
-    }
-
     post("/import-file/start") {
         val req = call.receive<SqlImportFileRequest>()
         val session = connMgr.getSession(req.connectionId)

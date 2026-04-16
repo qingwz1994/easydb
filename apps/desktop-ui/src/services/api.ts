@@ -164,25 +164,17 @@ export const sqlApi = {
       method: 'POST',
       body: JSON.stringify({ connectionId, database, sql }),
     }),
-  querySessionStart: (config: { connectionId: string; database: string; sql: string; pageSize?: number; maxCellChars?: number }) =>
-    request('/api/sql/query-session/start', {
+  queryPreview: (config: {
+    connectionId: string
+    database: string
+    sql: string
+    offset?: number
+    pageSize?: number
+    maxCellChars?: number
+  }) =>
+    request('/api/sql/query-preview', {
       method: 'POST',
       body: JSON.stringify(config),
-    }),
-  querySessionFetch: (config: { querySessionId: string; pageSize?: number; maxCellChars?: number }) =>
-    request('/api/sql/query-session/fetch', {
-      method: 'POST',
-      body: JSON.stringify(config),
-    }),
-  querySessionStatus: (querySessionId: string) =>
-    request('/api/sql/query-session/status', {
-      method: 'POST',
-      body: JSON.stringify({ querySessionId }),
-    }),
-  querySessionClose: (querySessionId: string) =>
-    request('/api/sql/query-session/close', {
-      method: 'POST',
-      body: JSON.stringify({ querySessionId }),
     }),
   importFileStart: (config: { connectionId: string; database: string; filePath: string; fileName?: string }) =>
     request('/api/sql/import-file/start', {

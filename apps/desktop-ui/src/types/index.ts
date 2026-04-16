@@ -107,7 +107,8 @@ export interface SqlResult {
   affectedRows?: number
   preview?: boolean
   hasMore?: boolean
-  querySessionId?: string
+  connectionId?: string // 用于加载更多
+  database?: string // 用于加载更多
   totalRows?: number
   offset?: number
   pageSize?: number
@@ -117,13 +118,6 @@ export interface SqlResult {
   sql: string
   executedAt: string
   error?: string
-}
-
-export interface SqlQuerySessionStatus {
-  querySessionId: string
-  totalRows?: number
-  counting: boolean
-  exists: boolean
 }
 
 // SQL 历史记录

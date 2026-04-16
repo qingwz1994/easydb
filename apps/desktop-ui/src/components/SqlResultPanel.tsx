@@ -2,7 +2,6 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import { Alert, Dropdown, Modal, Space, Table, Typography, theme } from 'antd'
 import { DownloadOutlined } from '@ant-design/icons'
 import type { SqlResult } from '@/types'
-import { sqlApi } from '@/services/api'
 import { exportResultSet } from '@/utils/exportUtils'
 import {
   formatSqlCell,
@@ -20,6 +19,7 @@ interface SqlResultPanelProps {
   loadMoreKey?: string
   currentLoadKey?: string | null
   onLoadMore?: () => void
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   onResultMetaChange?: (patch: Partial<SqlResult>) => void
 }
 
@@ -36,7 +36,8 @@ export const SqlResultPanel: React.FC<SqlResultPanelProps> = ({
   loadMoreKey,
   currentLoadKey,
   onLoadMore,
-  onResultMetaChange,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  onResultMetaChange: _onResultMetaChange,
 }) => {
   const { token } = theme.useToken()
   const [cellPreview, setCellPreview] = useState<CellPreviewState | null>(null)
@@ -94,45 +95,6 @@ export const SqlResultPanel: React.FC<SqlResultPanelProps> = ({
   useEffect(() => {
     autoLoadLockRef.current = false
   }, [isLoadingMore, result.rows?.length])
-
-  useEffect(() => {
-    if (!result.querySessionId || typeof result.totalRows === 'number' || !onResultMetaChange) {
-      return undefined
-    }
-
-    let cancelled = false
-    const poll = async () => {
-      try {
-        const status = await sqlApi.querySessionStatus(result.querySessionId!) as {
-          querySessionId: string
-          totalRows?: number
-          counting: boolean
-          exists: boolean
-        }
-
-        if (cancelled) return
-
-        if (typeof status.totalRows === 'number') {
-          onResultMetaChange({ totalRows: status.totalRows })
-          return
-        }
-
-        if (!status.exists || !status.counting) {
-          return
-        }
-
-        window.setTimeout(poll, 1000)
-      } catch {
-        // ignore polling failures
-      }
-    }
-
-    const timerId = window.setTimeout(poll, 500)
-    return () => {
-      cancelled = true
-      window.clearTimeout(timerId)
-    }
-  }, [onResultMetaChange, result.querySessionId, result.totalRows])
 
   useEffect(() => {
     const container = containerRef.current

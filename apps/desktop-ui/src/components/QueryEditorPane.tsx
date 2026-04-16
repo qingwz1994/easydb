@@ -12,7 +12,6 @@ import { handleApiError, toast } from '@/utils/notification'
 import { createSqlCompletionProvider, clearCompletionCache } from '../pages/sql-editor/sqlCompletionProvider'
 import {
   DEFAULT_SQL_PREVIEW_PAGE_SIZE,
-  collectSqlQuerySessionIds,
   isPreviewableSql,
   MAX_SQL_PREVIEW_CELL_CHARS,
   mergeSqlPreviewResult,
@@ -172,13 +171,7 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
 
     setExecuting(true)
     try {
-      // 关闭之前的 session（fire-and-forget，不阻塞新查询的执行）
-      const previousSessionIds = collectSqlQuerySessionIds(activeEditorTab.currentBatch, activeEditorTab.results)
-      if (previousSessionIds.length > 0) {
-        Promise.allSettled(previousSessionIds.map((querySessionId) => sqlApi.querySessionClose(querySessionId)))
-      }
-
-      // 拆分多条 SQL，每条 SELECT 走 querySession 流式分页（类似 DBeaver），非 SELECT 走 execute
+      // 拆分多条 SQL，每条 SELECT  queryPreview 流式分页（类似 DBeaver），非 SELECT 走 execute
       const statements = execSql
         .split(/;(?=(?:[^']*'[^']*')*[^']*$)/) // 按分号拆分，但忽略引号内的分号
         .map(s => s.trim())
@@ -190,16 +183,21 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
         if (!normalized) continue
 
         if (isPreviewableSql(normalized)) {
-
-          const result = await sqlApi.querySessionStart({
+          const result = await sqlApi.queryPreview({
             connectionId: activeEditorTab.connectionId,
             database: activeEditorTab.database,
             sql: normalized,
+            offset: 0,
             pageSize: DEFAULT_SQL_PREVIEW_PAGE_SIZE,
             maxCellChars: MAX_SQL_PREVIEW_CELL_CHARS,
           }) as SqlResult
 
-          resultList.push(result)
+          // 为结果添加 connectionId 和 database，用于后续加载更多
+          resultList.push({
+            ...result,
+            connectionId: activeEditorTab.connectionId,
+            database: activeEditorTab.database,
+          })
         } else {
           // DML / DDL：走一次性执行
           const results = await sqlApi.execute(
@@ -241,32 +239,40 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
   const handleLoadMore = useCallback(async (batchIndex: number) => {
     if (!activeEditorTab) return
     const target = activeEditorTab.currentBatch?.[batchIndex]
-    if (!target || target.type !== 'query' || !target.preview || !target.hasMore || !target.querySessionId) return
+    if (!target || target.type !== 'query' || !target.preview || !target.hasMore) return
+    if (!target.connectionId || !target.database) return
 
     const loadKey = `${queryId}-${batchIndex}`
     setLoadingMoreKey(loadKey)
     try {
-      const next = await sqlApi.querySessionFetch({
-        querySessionId: target.querySessionId,
+      // 用 rows.length 作为新的 offset
+      const offset = target.rows?.length ?? 0
+
+      const next = await sqlApi.queryPreview({
+        connectionId: target.connectionId,
+        database: target.database,
+        sql: target.sql,
+        offset,
         pageSize: target.pageSize ?? DEFAULT_SQL_PREVIEW_PAGE_SIZE,
         maxCellChars: MAX_SQL_PREVIEW_CELL_CHARS,
       }) as SqlResult
 
       if (next.type === 'error') {
-        // 会话已过期/关闭时，标记加载完毕而不是报错（可能是竞态：数据已全部加载）
-        updateActiveTab({
-          currentBatch: (activeEditorTab.currentBatch ?? []).map((result, idx) => {
-            if (idx !== batchIndex) return result
-            return { ...result, hasMore: false }
-          }),
-        })
+        toast.error(next.error ?? '加载更多失败')
         return
+      }
+
+      // 为新结果添加 connectionId 和 database
+      const enrichedNext = {
+        ...next,
+        connectionId: target.connectionId,
+        database: target.database,
       }
 
       updateActiveTab({
         currentBatch: (activeEditorTab.currentBatch ?? []).map((result, idx) => {
           if (idx !== batchIndex) return result
-          return mergeSqlPreviewResult(result, next)
+          return mergeSqlPreviewResult(result, enrichedNext)
         }),
       })
     } catch (error) {

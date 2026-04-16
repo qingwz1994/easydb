@@ -36,7 +36,6 @@ import { handleApiError, toast } from '@/utils/notification'
 import { createSqlCompletionProvider, clearCompletionCache } from './sqlCompletionProvider'
 import {
   DEFAULT_SQL_PREVIEW_PAGE_SIZE,
-  collectSqlQuerySessionIds,
   isPreviewableSql,
   MAX_SQL_PREVIEW_CELL_CHARS,
   mergeSqlPreviewResult,
@@ -166,11 +165,6 @@ export const SqlEditorPage: React.FC = () => {
   }
 
   const removeTab = (targetKey: string) => {
-    const targetTab = tabs.find((tab) => tab.key === targetKey)
-    const querySessionIds = collectSqlQuerySessionIds(targetTab?.currentBatch, targetTab?.results)
-    querySessionIds.forEach((querySessionId) => {
-      void sqlApi.querySessionClose(querySessionId).catch(() => {})
-    })
     storeRemoveTab(targetKey)
   }
 
@@ -273,35 +267,39 @@ export const SqlEditorPage: React.FC = () => {
     const normalizedSql = normalizeExecutableSql(execSql)
     setExecuting(true)
     try {
-      const previousSessionIds = collectSqlQuerySessionIds(activeEditorTab.currentBatch, activeEditorTab.results)
-      if (previousSessionIds.length > 0) {
-        await Promise.allSettled(previousSessionIds.map((querySessionId) => sqlApi.querySessionClose(querySessionId)))
-      }
-
       const resultList = isPreviewableSql(normalizedSql)
-        ? [await sqlApi.querySessionStart({
+        ? [await sqlApi.queryPreview({
           connectionId: activeEditorTab.connectionId,
           database: activeEditorTab.database,
           sql: normalizedSql,
+          offset: 0,
           pageSize: DEFAULT_SQL_PREVIEW_PAGE_SIZE,
           maxCellChars: MAX_SQL_PREVIEW_CELL_CHARS,
         }) as SqlResult]
         : await sqlApi.execute(activeEditorTab.connectionId, activeEditorTab.database, execSql) as SqlResult[]
-      const newResults = [...[...resultList].reverse(), ...activeEditorTab.results]
 
-      const hasError = resultList.some((r) => r.type === 'error')
+      // 为预览结果添加 connectionId 和 database，用于后续加载更多
+      const enrichedResultList = resultList.map((r) => ({
+        ...r,
+        connectionId: activeEditorTab.connectionId,
+        database: activeEditorTab.database,
+      }))
+
+      const newResults = [...[...enrichedResultList].reverse(), ...activeEditorTab.results]
+
+      const hasError = enrichedResultList.some((r) => r.type === 'error')
       if (hasError) {
-        const errorMsg = resultList.find((r) => r.type === 'error')?.error ?? 'SQL 执行失败'
+        const errorMsg = enrichedResultList.find((r) => r.type === 'error')?.error ?? 'SQL 执行失败'
         toast.error(errorMsg)
-        updateActiveTab({ results: newResults, currentBatch: resultList, resultTab: 'messages' })
+        updateActiveTab({ results: newResults, currentBatch: enrichedResultList, resultTab: 'messages' })
       } else {
-        const hasQuery = resultList.some((r) => r.type === 'query')
+        const hasQuery = enrichedResultList.some((r) => r.type === 'query')
         if (hasQuery) {
-          updateActiveTab({ results: newResults, currentBatch: resultList, resultTab: 'result-0' })
+          updateActiveTab({ results: newResults, currentBatch: enrichedResultList, resultTab: 'result-0' })
         } else {
-          const totalAffected = resultList.reduce((sum, r) => sum + (r.affectedRows ?? 0), 0)
+          const totalAffected = enrichedResultList.reduce((sum, r) => sum + (r.affectedRows ?? 0), 0)
           toast.success(`执行成功，共影响 ${totalAffected} 行`)
-          updateActiveTab({ results: newResults, currentBatch: resultList, resultTab: 'messages' }) // 全是 update 的情况跳转到消息
+          updateActiveTab({ results: newResults, currentBatch: enrichedResultList, resultTab: 'messages' }) // 全是 update 的情况跳转到消息
         }
       }
     } catch (e) {
@@ -314,13 +312,20 @@ export const SqlEditorPage: React.FC = () => {
   const handleLoadMore = useCallback(async (batchIndex: number) => {
     if (!activeEditorTab) return
     const target = activeEditorTab.currentBatch?.[batchIndex]
-    if (!target || target.type !== 'query' || !target.preview || !target.hasMore || !target.querySessionId) return
+    if (!target || target.type !== 'query' || !target.preview || !target.hasMore) return
+    if (!target.connectionId || !target.database) return
 
     const loadKey = `${activeEditorTab.key}-${batchIndex}`
     setLoadingMoreKey(loadKey)
     try {
-      const next = await sqlApi.querySessionFetch({
-        querySessionId: target.querySessionId,
+      // 用 rows.length 作为新的 offset
+      const offset = target.rows?.length ?? 0
+
+      const next = await sqlApi.queryPreview({
+        connectionId: target.connectionId,
+        database: target.database,
+        sql: target.sql,
+        offset,
         pageSize: target.pageSize ?? DEFAULT_SQL_PREVIEW_PAGE_SIZE,
         maxCellChars: MAX_SQL_PREVIEW_CELL_CHARS,
       }) as SqlResult
@@ -330,10 +335,17 @@ export const SqlEditorPage: React.FC = () => {
         return
       }
 
+      // 为新结果添加 connectionId 和 database
+      const enrichedNext = {
+        ...next,
+        connectionId: target.connectionId,
+        database: target.database,
+      }
+
       updateActiveTab({
         currentBatch: (activeEditorTab.currentBatch ?? []).map((result, idx) => {
           if (idx !== batchIndex) return result
-          return mergeSqlPreviewResult(result, next)
+          return mergeSqlPreviewResult(result, enrichedNext)
         }),
       })
     } catch (error) {
