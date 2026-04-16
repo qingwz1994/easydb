@@ -320,9 +320,9 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
 
     const updateHeight = () => {
       const toolbarHeight = toolbarRef.current?.getBoundingClientRect().height ?? 0
-      const pagerHeight = pagerRef.current?.getBoundingClientRect().height ?? 44
+      const pagerHeight = pagerRef.current?.getBoundingClientRect().height ?? 56
       const headerHeight = 40
-      const outerGap = 24 // 增加底部间距，确保最后一行可见
+      const outerGap = 32 // 增加间距，确保最后一行完全可见
       const next = Math.max(220, Math.floor(el.clientHeight - toolbarHeight - pagerHeight - headerHeight - outerGap))
       setTableScrollY(next)
     }
@@ -805,7 +805,7 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
       )}
 
       {/* 表格 */}
-      <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
+      <div style={{ flex: 1, overflow: 'hidden', minHeight: 0, paddingBottom: 8 }}>
         {tableNode}
       </div>
 
@@ -815,7 +815,7 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
           display: 'flex',
           justifyContent: 'flex-end',
           alignItems: 'center',
-          padding: '10px 0 0',
+          padding: '12px 0',
           flexShrink: 0,
           background: 'var(--glass-panel)',
           borderTop: '1px solid var(--glass-border)',
