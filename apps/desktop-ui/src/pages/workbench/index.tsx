@@ -43,6 +43,8 @@ import { CreateDatabaseModal } from '@/components/CreateDatabaseModal'
 import { EditDatabaseModal } from '@/components/EditDatabaseModal'
 import { ImportSqlDialog } from '@/components/ImportSqlDialog'
 import ExportDatabaseModal from '@/components/ExportDatabaseModal'
+import BackupDatabaseModal from '@/components/BackupDatabaseModal'
+import RestoreDatabaseModal from '@/components/RestoreDatabaseModal'
 import { TableDesigner } from '@/components/TableDesigner'
 import { QueryEditorPane } from '@/components/QueryEditorPane'
 import { ShortcutsModal } from '@/components/ShortcutsModal'
@@ -335,6 +337,8 @@ export const WorkbenchPage: React.FC = () => {
   // --- SQL 文件导入弹窗状态 ---
   const [importSqlModal, setImportSqlModal] = useState<{ connectionId: string; connectionName: string; database?: string } | null>(null)
   const [exportModal, setExportModal] = useState<{ connectionId: string; connectionName: string, database: string } | null>(null)
+  const [backupModal, setBackupModal] = useState<{ connectionId: string; connectionName: string; database: string } | null>(null)
+  const [restoreModal, setRestoreModal] = useState<{ connectionId: string; connectionName: string; database: string } | null>(null)
 
   const [showShortcuts, setShowShortcuts] = useState(false)
 
@@ -1045,6 +1049,24 @@ export const WorkbenchPage: React.FC = () => {
           onClick: () => loadTables(connId, dbName),
         },
         { type: 'divider' },
+        {
+          key: 'backup-db',
+          icon: <DatabaseOutlined />,
+          label: '备份数据库...',
+          onClick: () => {
+            const conn = openConnections.find((c) => c.id === connId)
+            setBackupModal({ connectionId: connId, connectionName: conn?.name ?? '', database: dbName })
+          }
+        },
+        {
+          key: 'restore-db',
+          icon: <ReloadOutlined />,
+          label: '恢复数据库...',
+          onClick: () => {
+            const conn = openConnections.find((c) => c.id === connId)
+            setRestoreModal({ connectionId: connId, connectionName: conn?.name ?? '', database: dbName })
+          }
+        },
         {
           key: 'export-db',
           icon: <ExportOutlined />,
@@ -2156,6 +2178,26 @@ export const WorkbenchPage: React.FC = () => {
         onClose={() => setExportModal(null)}
         {...exportModal}
       />)}
+
+      {backupModal && (
+        <BackupDatabaseModal
+          open={true}
+          onClose={() => setBackupModal(null)}
+          connectionId={backupModal.connectionId}
+          connectionName={backupModal.connectionName}
+          database={backupModal.database}
+        />
+      )}
+
+      {restoreModal && (
+        <RestoreDatabaseModal
+          open={true}
+          onClose={() => setRestoreModal(null)}
+          targetConnectionId={restoreModal.connectionId}
+          targetConnectionName={restoreModal.connectionName}
+          defaultTargetDatabase={restoreModal.database}
+        />
+      )}
 
       {/* 快捷键查看弹窗 */}
       <ShortcutsModal

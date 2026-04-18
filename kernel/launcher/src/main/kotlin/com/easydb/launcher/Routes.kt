@@ -69,6 +69,14 @@ fun Application.configureRoutes() {
             route("/export") {
                 exportRoutes()
             }
+            
+            // 备份恢复
+            route("/backup") {
+                backupRoutes()
+            }
+            route("/restore") {
+                restoreRoutes()
+            }
 
             // 存储管理
             route("/storage") {

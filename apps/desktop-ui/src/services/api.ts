@@ -267,6 +267,25 @@ export const exportApi = {
     request('/api/export/start', { method: 'POST', body: JSON.stringify(config) }),
 }
 
+// ─── 数据库备份 (Backup) ──────────────────────────────────
+export const backupApi = {
+  estimate: (config: unknown) =>
+    request('/api/backup/estimate', { method: 'POST', body: JSON.stringify(config) }),
+  start: (config: unknown) =>
+    request('/api/backup/start', { method: 'POST', body: JSON.stringify(config) }),
+  list: () =>
+    request('/api/backup/list'),
+  downloadUrl: (path: string) => `${KERNEL_BASE_URL}/api/backup/download?path=${encodeURIComponent(path)}`,
+}
+
+// ─── 数据库恢复 (Restore) ─────────────────────────────────
+export const restoreApi = {
+  inspect: (config: { filePath: string }) =>
+    request('/api/restore/inspect', { method: 'POST', body: JSON.stringify(config) }),
+  start: (config: unknown) =>
+    request('/api/restore/start', { method: 'POST', body: JSON.stringify(config) }),
+}
+
 // ─── 任务中心 ────────────────────────────────────────────
 export const taskApi = {
   list: (status?: string) =>
