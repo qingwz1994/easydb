@@ -454,3 +454,24 @@ export interface SseTick {
   message?: string
 }
 
+// ─── 查询结果可编辑性分析 ─────────────────────────────
+
+export type EditabilityReason =
+  | 'not_query'           // 非 SELECT 查询
+  | 'preview_mode'        // 预览模式（数据可能截断）
+  | 'missing_context'     // 缺少 connectionId 或 database
+  | 'parse_error'         // SQL 解析失败
+  | 'multi_table'         // 多表 JOIN
+  | 'aggregate'           // 聚合查询
+  | 'view'                // 视图查询
+  | 'no_primary_key'      // 表无主键
+  | 'metadata_error'      // 元数据获取失败
+
+export interface EditabilityStatus {
+  editable: boolean
+  reason?: EditabilityReason
+  tableName?: string
+  primaryKeys?: string[]
+  columns?: ColumnInfo[]
+}
+

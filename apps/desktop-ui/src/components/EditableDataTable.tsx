@@ -16,7 +16,7 @@
  */
 import React, { useState, useMemo, useCallback, useRef, useEffect, useLayoutEffect } from 'react'
 import {
-  Table, Input, Button, Space, Tag, Popconfirm, Typography, theme, Modal, Pagination, AutoComplete,
+  Table, Input, Button, Space, Tag, Popconfirm, Typography, theme, Modal, AutoComplete,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
@@ -37,6 +37,10 @@ interface EditableDataTableProps {
   dataSource: Record<string, unknown>[]
   onRefresh: () => void
   onFilter?: (params: { where?: string; orderBy?: string }) => void
+  // 加载更多（preview 模式）
+  hasMore?: boolean
+  onLoadMore?: () => void
+  loadingMore?: boolean
 }
 
 type CellChange = {
@@ -56,6 +60,9 @@ type TableRow = Record<string, unknown> & {
   _key: number
   _rowIndex: number
 }
+
+/** 虚拟滚动估算行高（px），用于计算滚动偏移 */
+const ESTIMATED_ROW_HEIGHT = 35
 
 /**
  * 浮层编辑器：不触发表格重渲染，直接在单元格上方覆盖 Input
@@ -127,13 +134,17 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
   dataSource,
   onRefresh,
   onFilter,
+  hasMore,
+  onLoadMore,
+  loadingMore,
 }) => {
   const { token } = theme.useToken()
   const containerRef = useRef<HTMLDivElement>(null)
   const toolbarRef = useRef<HTMLDivElement>(null)
-  const pagerRef = useRef<HTMLDivElement>(null)
   const selectedRowRef = useRef<number>(-1)
   const cellChangesRef = useRef<CellChange[]>([])
+  const tableBodyRef = useRef<HTMLDivElement | null>(null)
+  const autoLoadLockRef = useRef(false)
 
   // 筛选状态
   const [whereClause, setWhereClause] = useState('')
@@ -155,8 +166,6 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
   const [cellChangeCount, setCellChangeCount] = useState(0)
   // 触发器：用于需要强制刷新表格的场景
   const [gridVersion, setGridVersion] = useState(0)
-  const [currentPage, setCurrentPage] = useState(1)
-  const [pageSize, setPageSize] = useState(20)
   const [tableScrollY, setTableScrollY] = useState(240)
 
   const primaryKeys = useMemo(() =>
@@ -182,13 +191,29 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
   const hasChanges = cellChangeCount > 0 || pendingRows.length > 0
   const editableColumnNames = useMemo(() => columns.map((col) => col.name), [columns])
 
+  // 加载更多逻辑
+  const maybeLoadMore = useCallback(() => {
+    const scrollBody = tableBodyRef.current
+    if (!scrollBody || !hasMore || !onLoadMore || loadingMore || autoLoadLockRef.current) return
+
+    const threshold = 120
+    const reachedBottom = scrollBody.scrollTop + scrollBody.clientHeight >= scrollBody.scrollHeight - threshold
+    if (!reachedBottom) return
+
+    autoLoadLockRef.current = true
+    onLoadMore()
+  }, [hasMore, onLoadMore, loadingMore])
+
+  // 重置加载锁
+  useEffect(() => {
+    autoLoadLockRef.current = false
+  }, [loadingMore, dataSource.length])
+
   useEffect(() => {
     selectedRowRef.current = -1
     cellChangesRef.current = []
     setCellChangeCount(0)
     setEditorState(null)
-    setCurrentPage(1)
-    setPageSize(20)
     setGridVersion((v) => v + 1)
     setWhereClause('')
     setAppliedWhere('')
@@ -223,13 +248,6 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
     })
   }, [sortColumn, sortDirection, appliedWhere, onFilter])
 
-  useEffect(() => {
-    const totalPages = Math.max(1, Math.ceil(effectiveData.length / pageSize))
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages)
-    }
-  }, [currentPage, effectiveData.length, pageSize])
-
   const getCellValue = useCallback((rowIndex: number, column: string): string | null => {
     const changedCell = cellChangesRef.current.find((item) => item.rowIndex === rowIndex && item.column === column)
     if (changedCell) return changedCell.newValue
@@ -244,7 +262,17 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
   ), [])
 
   const syncCellVisual = useCallback((rowIndex: number, column: string, value: string | null) => {
-    const cell = containerRef.current?.querySelector(`td[data-row-index="${rowIndex}"][data-column-key="${column}"]`)
+    const container = containerRef.current
+    if (!container) return
+
+    // 使用多种查找方式确保在虚拟表格中也能找到元素
+    const row = container.querySelector(`.ant-table-row[data-row-key="${rowIndex}"]`)
+    if (!(row instanceof HTMLElement)) return
+
+    const cellContent = row.querySelector(`[data-column="${column}"]`)
+    const cell = cellContent?.closest('.ant-table-cell')
+      ?? row.querySelector(`.ant-table-cell[data-column-key="${column}"]`)
+
     if (!(cell instanceof HTMLElement)) return
 
     const content = cell.querySelector('[data-cell-display]')
@@ -268,19 +296,33 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
   }, [])
 
   const scrollRowIntoView = useCallback((rowIndex: number) => {
-    requestAnimationFrame(() => {
-      const rowEl = containerRef.current?.querySelector(`tr[data-row-key="${rowIndex}"]`)
-      if (rowEl instanceof HTMLElement) {
+    const container = containerRef.current
+    if (!container) return
+
+    // 先检查行是否已在 DOM 中
+    const rowEl = container.querySelector(`.ant-table-row[data-row-key="${rowIndex}"]`)
+    if (rowEl instanceof HTMLElement) {
+      requestAnimationFrame(() => {
         rowEl.scrollIntoView({ block: 'nearest' })
-      }
-    })
+      })
+      return
+    }
+
+    // 行不在 DOM 中（虚拟滚动），使用虚拟表格的滚动方法
+    const virtualBody = container.querySelector('.ant-table-tbody-virtual-holder') as HTMLDivElement | null
+    if (virtualBody && typeof virtualBody.scrollTo === 'function') {
+      // 估算行高
+      requestAnimationFrame(() => {
+        virtualBody.scrollTo({ top: rowIndex * ESTIMATED_ROW_HEIGHT, behavior: 'smooth' })
+      })
+    }
   }, [])
 
   const syncSelectedRowClass = useCallback((rowIndex: number) => {
     const container = containerRef.current
     if (!container) return
     container.querySelectorAll('tr.row-selected').forEach((row) => row.classList.remove('row-selected'))
-    const nextRow = container.querySelector(`tr[data-row-key="${rowIndex}"]`)
+    const nextRow = container.querySelector(`.ant-table-row[data-row-key="${rowIndex}"]`)
     if (nextRow instanceof HTMLElement) {
       nextRow.classList.add('row-selected')
     }
@@ -289,10 +331,6 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
   const handleRowSelect = useCallback((rowIndex: number, options?: { focusTable?: boolean; scroll?: boolean }) => {
     if (rowIndex < 0 || rowIndex >= effectiveData.length) return
     selectedRowRef.current = rowIndex
-    const nextPage = Math.floor(rowIndex / pageSize) + 1
-    if (nextPage !== currentPage) {
-      setCurrentPage(nextPage)
-    }
     syncSelectedRowClass(rowIndex)
     if (options?.scroll !== false) {
       scrollRowIntoView(rowIndex)
@@ -300,7 +338,7 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
     if (options?.focusTable !== false) {
       focusTable()
     }
-  }, [currentPage, effectiveData.length, focusTable, pageSize, scrollRowIntoView, syncSelectedRowClass])
+  }, [effectiveData.length, focusTable, scrollRowIntoView, syncSelectedRowClass])
 
   useLayoutEffect(() => {
     if (effectiveData.length === 0) {
@@ -320,10 +358,9 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
 
     const updateHeight = () => {
       const toolbarHeight = toolbarRef.current?.getBoundingClientRect().height ?? 0
-      const pagerHeight = pagerRef.current?.getBoundingClientRect().height ?? 56
       const headerHeight = 40
       const outerGap = 32 // 增加间距，确保最后一行完全可见
-      const next = Math.max(220, Math.floor(el.clientHeight - toolbarHeight - pagerHeight - headerHeight - outerGap))
+      const next = Math.max(220, Math.floor(el.clientHeight - toolbarHeight - headerHeight - outerGap))
       setTableScrollY(next)
     }
 
@@ -331,9 +368,34 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
     const observer = new ResizeObserver(updateHeight)
     observer.observe(el)
     if (toolbarRef.current) observer.observe(toolbarRef.current)
-    if (pagerRef.current) observer.observe(pagerRef.current)
     return () => observer.disconnect()
   }, [])
+
+  // 监听表格滚动，触发加载更多
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container || !hasMore) return undefined
+
+    // 找到表格滚动容器
+    const nextTableBody = (
+      container.querySelector('.ant-table-tbody-virtual-holder') ??
+      container.querySelector('.ant-table-body')
+    ) as HTMLDivElement | null
+
+    tableBodyRef.current = nextTableBody
+    if (!nextTableBody) return undefined
+
+    const handleScroll = () => maybeLoadMore()
+    nextTableBody.addEventListener('scroll', handleScroll, { passive: true })
+    window.requestAnimationFrame(maybeLoadMore)
+
+    return () => {
+      nextTableBody.removeEventListener('scroll', handleScroll)
+      if (tableBodyRef.current === nextTableBody) {
+        tableBodyRef.current = null
+      }
+    }
+  }, [hasMore, maybeLoadMore, tableScrollY])
 
   const openEditorAtPosition = useCallback((
     rowIndex: number,
@@ -354,18 +416,46 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
   const openEditorAtCell = useCallback((rowIndex: number, column: string) => {
     if (!isEditable) return
     const container = containerRef.current
-    const td = container?.querySelector(`td[data-row-index="${rowIndex}"][data-column-key="${column}"]`)
-    if (!(td instanceof HTMLElement) || !container) return
+    if (!container) return
 
-    const rect = td.getBoundingClientRect()
-    const containerRect = container.getBoundingClientRect()
-    openEditorAtPosition(rowIndex, column, {
-      left: rect.left - containerRect.left,
-      top: rect.top - containerRect.top,
-      width: rect.width,
-      height: rect.height,
-    })
-  }, [isEditable, openEditorAtPosition])
+    // 虚拟表格：行可能不在 DOM 中，需要先滚动
+    const row = container.querySelector(`.ant-table-row[data-row-key="${rowIndex}"]`)
+    const virtualBody = container.querySelector('.ant-table-tbody-virtual-holder') as HTMLDivElement | null
+
+    const tryOpenEditor = () => {
+      const rowEl = container.querySelector(`.ant-table-row[data-row-key="${rowIndex}"]`)
+      if (!(rowEl instanceof HTMLElement)) return
+
+      // 尝试多种方式查找单元格
+      const cellContent = rowEl.querySelector(`[data-column="${column}"]`)
+      const cell = cellContent?.closest('.ant-table-cell')
+        ?? rowEl.querySelector(`.ant-table-cell[data-column-key="${column}"]`)
+        ?? (rowEl.querySelectorAll('.ant-table-cell')[columns.findIndex(c => c.name === column)] as HTMLElement | undefined)
+
+      if (!(cell instanceof HTMLElement)) return
+
+      const rect = cell.getBoundingClientRect()
+      const containerRect = container.getBoundingClientRect()
+      openEditorAtPosition(rowIndex, column, {
+        left: rect.left - containerRect.left,
+        top: rect.top - containerRect.top,
+        width: rect.width,
+        height: rect.height,
+      })
+    }
+
+    // 如果行已在 DOM 中，直接打开编辑器
+    if (row instanceof HTMLElement) {
+      tryOpenEditor()
+    } else if (virtualBody && typeof virtualBody.scrollTo === 'function') {
+      // 行不在 DOM 中，先滚动到该行
+      const estimatedRowHeight = ESTIMATED_ROW_HEIGHT
+      virtualBody.scrollTo({ top: rowIndex * estimatedRowHeight, behavior: 'smooth' })
+      requestAnimationFrame(() => {
+        requestAnimationFrame(tryOpenEditor)
+      })
+    }
+  }, [isEditable, openEditorAtPosition, columns])
 
   useEffect(() => {
     const container = containerRef.current
@@ -374,7 +464,8 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
     const handleNativeClick = (event: MouseEvent) => {
       const target = event.target as HTMLElement | null
       if (!target || target.closest('.cell-editor')) return
-      const row = target.closest('tr[data-row-key]')
+      // Ant Design 虚拟滚动使用 DIV
+      const row = target.closest('.ant-table-row[data-row-key]')
       if (!(row instanceof HTMLElement)) return
       const rowIndex = Number(row.dataset.rowKey)
       if (!Number.isFinite(rowIndex)) return
@@ -385,22 +476,60 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
       if (!isEditable) return
       const target = event.target as HTMLElement | null
       if (!target) return
-      const cell = target.closest('td[data-column-key]')
-      const row = target.closest('tr[data-row-key]')
-      if (!(cell instanceof HTMLElement) || !(row instanceof HTMLElement)) return
-      const rowIndex = Number(row.dataset.rowKey)
-      const column = cell.dataset.columnKey
-      if (!Number.isFinite(rowIndex) || !column) return
 
-      const containerRect = container.getBoundingClientRect()
-      const rect = cell.getBoundingClientRect()
-      handleRowSelect(rowIndex, { focusTable: false, scroll: false })
-      openEditorAtPosition(rowIndex, column, {
-        left: rect.left - containerRect.left,
-        top: rect.top - containerRect.top,
-        width: rect.width,
-        height: rect.height,
-      })
+      // Ant Design 虚拟滚动使用 DIV 而非 TR/TD
+      const cell = target.closest('.ant-table-cell')
+      const row = target.closest('.ant-table-row[data-row-key]')
+
+      if (!(cell instanceof HTMLElement) || !(row instanceof HTMLElement)) return
+
+      // 获取列名：优先从内容元素获取，其次从 td 的属性获取，最后从子元素查找
+      const cellContent = target.closest('[data-column]')
+      const column = cellContent?.getAttribute('data-column')
+        ?? cell.getAttribute('data-column-key')
+        ?? cell.querySelector('[data-column]')?.getAttribute('data-column')
+
+      if (!column) return
+
+      const rowIndex = Number(row.dataset.rowKey)
+      if (!Number.isFinite(rowIndex)) return
+
+      // 虚拟表格：先滚动到该行，等待渲染后再打开编辑器
+      const container = containerRef.current
+      if (!container) return
+
+      // 找到表格的虚拟滚动容器
+      const virtualBody = container.querySelector('.ant-table-tbody-virtual-holder') as HTMLDivElement | null
+
+      const tryOpenEditor = () => {
+        const containerRect = container.getBoundingClientRect()
+        const rect = cell.getBoundingClientRect()
+        handleRowSelect(rowIndex, { focusTable: false, scroll: false })
+        openEditorAtPosition(rowIndex, column, {
+          left: rect.left - containerRect.left,
+          top: rect.top - containerRect.top,
+          width: rect.width,
+          height: rect.height,
+        })
+      }
+
+      // 检查行是否在 DOM 中，如果在则直接打开编辑器
+      const existingRow = container.querySelector(`.ant-table-row[data-row-key="${rowIndex}"]`)
+      if (existingRow instanceof HTMLElement) {
+        tryOpenEditor()
+      } else if (virtualBody && typeof virtualBody.scrollTo === 'function') {
+        // 行不在 DOM 中，需要先滚动到该行
+        // 估算行高 ~35px，滚动到目标位置
+        virtualBody.scrollTo({ top: rowIndex * ESTIMATED_ROW_HEIGHT, behavior: 'smooth' })
+        // 等待虚拟滚动渲染后打开编辑器
+        requestAnimationFrame(() => {
+          requestAnimationFrame(tryOpenEditor)
+        })
+      } else {
+        // 无法找到滚动容器，直接尝试打开（虚拟表格应该有）
+        handleRowSelect(rowIndex, { focusTable: false, scroll: false })
+        openEditorAtPosition(rowIndex, column, { left: 0, top: 0, width: 100, height: 30 })
+      }
     }
 
     container.addEventListener('click', handleNativeClick)
@@ -574,7 +703,7 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
       width: 150,
       ellipsis: true,
       onCell: (record: TableRow) => ({
-        'data-row-index': record._rowIndex,
+        'data-row-key': record._key,
         'data-column-key': col.name,
         style: {
           cursor: isEditable ? 'cell' : 'default',
@@ -588,12 +717,12 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
         const displayValue = getCellValue(rowIndex, col.name)
         if (displayValue == null) {
           return (
-            <span data-cell-display style={{ fontSize: 11, fontStyle: 'italic', color: token.colorTextTertiary }}>
+            <span data-cell-display data-column={col.name} style={{ fontSize: 11, fontStyle: 'italic', color: token.colorTextTertiary }}>
               NULL
             </span>
           )
         }
-        return <span data-cell-display style={{ display: 'block', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(displayValue)}</span>
+        return <span data-cell-display data-column={col.name} style={{ display: 'block', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(displayValue)}</span>
       },
     }))
 
@@ -605,7 +734,7 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
         width: 60,
         ellipsis: false,
         onCell: (record: TableRow) => ({
-          'data-row-index': record._rowIndex,
+          'data-row-key': record._key,
           'data-column-key': '_action',
           style: { cursor: 'default' },
         }),
@@ -624,16 +753,12 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
     [effectiveData]
   )
 
-  const pagedTableData = useMemo(() => {
-    const start = (currentPage - 1) * pageSize
-    return tableData.slice(start, start + pageSize)
-  }, [currentPage, pageSize, tableData])
-
   const tableNode = useMemo(() => (
     <Table
       key={gridVersion}
+      virtual
       columns={tableColumns}
-      dataSource={pagedTableData}
+      dataSource={tableData}
       rowKey="_key"
       pagination={false}
       size="small"
@@ -646,7 +771,7 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
         return classes.join(' ')
       }}
     />
-  ), [gridVersion, pagedTableData, pendingRows, tableColumns, tableScrollY])
+  ), [gridVersion, tableData, pendingRows, tableColumns, tableScrollY])
 
   return (
     <div
@@ -805,37 +930,8 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
       )}
 
       {/* 表格 */}
-      <div style={{ flex: 1, overflow: 'hidden', minHeight: 0, paddingBottom: 8 }}>
+      <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
         {tableNode}
-      </div>
-
-      <div
-        ref={pagerRef}
-        style={{
-          display: 'flex',
-          justifyContent: 'flex-end',
-          alignItems: 'center',
-          padding: '12px 0',
-          flexShrink: 0,
-          background: 'var(--glass-panel)',
-          borderTop: '1px solid var(--glass-border)',
-        }}
-      >
-        <Pagination
-          current={currentPage}
-          pageSize={pageSize}
-          total={tableData.length}
-          size="small"
-          showSizeChanger
-          pageSizeOptions={[20, 50, 100]}
-          showTotal={(total) => `共 ${total} 行`}
-          onChange={(page, size) => {
-            setCurrentPage(page)
-            if (size !== pageSize) {
-              setPageSize(size)
-            }
-          }}
-        />
       </div>
 
       {/* 浮层编辑器：覆盖在单元格上方，不触发 Table 重渲染 */}

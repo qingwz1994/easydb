@@ -34,7 +34,7 @@ import { useWorkbenchStore, type TableTabState, type WorkbenchTab } from '@/stor
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useSqlEditorStore } from '@/stores/sqlEditorStore'
 import { useCommandStore } from '@/stores/commandStore'
-import { metadataApi, connectionApi, scriptApi } from '@/services/api'
+import { metadataApi, connectionApi, scriptApi, setReconnectCallback } from '@/services/api'
 import { handleApiError, toast } from '@/utils/notification'
 import { exportTableData } from '@/utils/exportUtils'
 import { EmptyState } from '@/components/EmptyState'
@@ -348,6 +348,14 @@ export const WorkbenchPage: React.FC = () => {
       }).catch(() => {})
     }
   }, [connections.length, setConnections])
+
+  // --- 设置自动重连回调（API 层 NOT_CONNECTED 处理）---
+  useEffect(() => {
+    setReconnectCallback((connectionId: string) => {
+      updateConnection(connectionId, { status: 'connected' })
+    })
+    return () => setReconnectCallback(null)
+  }, [updateConnection])
 
   // --- 加载某个连接的数据库列表 ---
   // 确保连接已打开（自动重连）

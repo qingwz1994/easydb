@@ -25,6 +25,14 @@ const KERNEL_BASE_URL = 'http://localhost:18080'
 const MAX_RETRIES = 10
 const RETRY_DELAY_MS = 2000
 
+/** 自动重连回调（可选）- 通知前端更新连接状态 */
+export type ReconnectCallback = (connectionId: string) => void
+let reconnectCallback: ReconnectCallback | null = null
+
+export function setReconnectCallback(cb: ReconnectCallback | null) {
+  reconnectCallback = cb
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   let lastError: Error | null = null
 
@@ -37,20 +45,22 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
       if (!res.ok) {
         let errorMsg = `HTTP ${res.status}: ${res.statusText}`
+        let errorCode = ''
         try {
           const json = await res.json()
           if (json.error?.message) {
             errorMsg = json.error.message
+            errorCode = json.error?.code || ''
           }
         } catch {
           // 无法解析 JSON，使用默认错误消息
         }
-        throw new Error(errorMsg)
+        throw new ApiError(errorCode, errorMsg)
       }
 
       const json = await res.json()
       if (!json.success) {
-        throw new Error(json.error?.message ?? 'Unknown error')
+        throw new ApiError(json.error?.code || '', json.error?.message ?? 'Unknown error')
       }
       return json.data as T
     } catch (e) {
@@ -61,6 +71,32 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
         lastError.message.includes('NetworkError') ||
         lastError.message.includes('ERR_CONNECTION_REFUSED')
 
+      // 处理 NOT_CONNECTED 错误：自动重连并重试
+      if (lastError instanceof ApiError && lastError.code === 'NOT_CONNECTED') {
+        const connectionId = extractConnectionId(path)
+        if (connectionId && attempt < MAX_RETRIES) {
+          try {
+            // 尝试重连
+            const reconnectRes = await fetch(`${KERNEL_BASE_URL}/api/connection/${connectionId}/open`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+            })
+            const reconnectJson = await reconnectRes.json()
+            if (reconnectJson.success) {
+              // 通知前端更新连接状态
+              if (reconnectCallback) {
+                reconnectCallback(connectionId)
+              }
+              // 重连成功，重试原请求
+              continue
+            }
+          } catch {
+            // 重连失败，抛出原错误
+            break
+          }
+        }
+      }
+
       if (!isNetworkError || attempt === MAX_RETRIES) {
         throw lastError
       }
@@ -70,6 +106,24 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   }
 
   throw lastError!
+}
+
+/** 从 API 路径中提取连接 ID */
+function extractConnectionId(path: string): string | null {
+  // 元数据路径格式: /api/metadata/{connectionId}/...
+  // SQL 路径格式: /api/sql/execute (body 中有 connectionId)
+  const match = path.match(/\/api\/metadata\/([^\/]+)/)
+  return match ? match[1] : null
+}
+
+/** 自定义 API 错误类型，携带错误码 */
+class ApiError extends Error {
+  code: string
+  constructor(code: string, message: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.code = code
+  }
 }
 
 // ─── 连接管理 ───────────────────────────────────────────

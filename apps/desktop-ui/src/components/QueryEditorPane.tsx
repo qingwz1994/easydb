@@ -1,13 +1,15 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react'
-import { Layout, Button, Space, Typography, Tabs, Select, theme } from 'antd'
+import { Layout, Button, Space, Typography, Tabs, Select, Spin, theme } from 'antd'
 import { PlayCircleOutlined, ClearOutlined } from '@ant-design/icons'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
-import type { SqlResult } from '@/types'
+import type { SqlResult, EditabilityStatus } from '@/types'
 import { useSqlEditorStore, type EditorTab } from '@/stores/sqlEditorStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { sqlApi, connectionApi, metadataApi } from '@/services/api'
 import { SqlResultPanel } from '@/components/SqlResultPanel'
+import { EditableDataTable } from '@/components/EditableDataTable'
+import { analyzeEditability, extractAllTableNames } from '@/utils/editabilityAnalyzer'
 import { handleApiError, toast } from '@/utils/notification'
 import { createSqlCompletionProvider, clearCompletionCache } from '../pages/sql-editor/sqlCompletionProvider'
 import {
@@ -21,13 +23,6 @@ import { EmptyState } from '@/components/EmptyState'
 
 const { Content } = Layout
 const { Text } = Typography
-
-const extractAllTableNames = (sql: string): string[] => {
-  if (!sql) return []
-  const regex = /(?:from|update|into)\s+([`'"]?[a-zA-Z0-9_$]+[`'"]?)/gi
-  const matches = [...sql.matchAll(regex)]
-  return matches.map(m => m[1].replace(/[`'"]/g, ''))
-}
 
 interface QueryEditorPaneProps {
   queryId: string
@@ -48,7 +43,9 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
   const [executing, setExecuting] = useState(false)
   const [loadingMoreKey, setLoadingMoreKey] = useState<string | null>(null)
   const [databases, setDatabases] = useState<string[]>([])
-  
+  const [editabilityMap, setEditabilityMap] = useState<Map<number, EditabilityStatus>>(new Map())
+  const [analyzingEditability, setAnalyzingEditability] = useState(false)
+
   const [editorHeight, setEditorHeight] = useState(300)
   const isDraggingRef = useRef(false)
 
@@ -192,7 +189,7 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
             maxCellChars: MAX_SQL_PREVIEW_CELL_CHARS,
           }) as SqlResult
 
-          // 为结果添加 connectionId 和 database，用于后续加载更多
+          // 为结果添加 connectionId 和 database，用于后续加载更多和编辑性分析
           resultList.push({
             ...result,
             connectionId: activeEditorTab.connectionId,
@@ -203,7 +200,12 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
           const results = await sqlApi.execute(
             activeEditorTab.connectionId, activeEditorTab.database, stmt
           ) as SqlResult[]
-          resultList.push(...results)
+          // 补充连接信息，用于编辑性分析
+          resultList.push(...results.map(r => ({
+            ...r,
+            connectionId: activeEditorTab.connectionId,
+            database: activeEditorTab.database,
+          })))
         }
       }
 
@@ -289,6 +291,45 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
       )),
     })
   }, [activeEditorTab?.currentBatch, updateActiveTab])
+
+  // 分析查询结果的可编辑性
+  useEffect(() => {
+    const currentBatch = activeEditorTab?.currentBatch ?? []
+    if (currentBatch.length === 0) {
+      setEditabilityMap(new Map())
+      return
+    }
+
+    let cancelled = false
+
+    const analyzeBatch = async () => {
+      setAnalyzingEditability(true)
+      const newMap = new Map<number, EditabilityStatus>()
+
+      for (let idx = 0; idx < currentBatch.length; idx++) {
+        if (cancelled) return
+        const result = currentBatch[idx]
+        if (result.type === 'query') {
+          try {
+            const status = await analyzeEditability(result, metadataApi)
+            if (cancelled) return
+            newMap.set(idx, status)
+          } catch {
+            if (cancelled) return
+            newMap.set(idx, { editable: false, reason: 'metadata_error' })
+          }
+        }
+      }
+
+      if (!cancelled) {
+        setEditabilityMap(newMap)
+        setAnalyzingEditability(false)
+      }
+    }
+
+    analyzeBatch()
+    return () => { cancelled = true }
+  }, [activeEditorTab?.currentBatch])
 
   const handleClear = () => {
     updateActiveTab({ sql: '' })
@@ -443,17 +484,49 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
               return {
                 key: `result-${currentQueryIndex}`,
                 label: displayLabel,
-                children: (
-                  <SqlResultPanel
-                    result={r}
-                    displayLabel={displayLabel}
-                    tableHeight={resultTableHeight}
-                    loadMoreKey={`${queryId}-${idx}`}
-                    currentLoadKey={loadingMoreKey}
-                    onLoadMore={r.preview && r.hasMore ? () => handleLoadMore(idx) : undefined}
-                    onResultMetaChange={(patch) => handleResultMetaChange(idx, patch)}
-                  />
-                )
+                children: (() => {
+                  const editability = editabilityMap.get(idx)
+
+                  // 正在分析时显示加载状态（包括 preview 模式）
+                  if (!editability && analyzingEditability) {
+                    return (
+                      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: resultTableHeight }}>
+                        <Spin tip="分析可编辑性..." />
+                      </div>
+                    )
+                  }
+
+                  // 可编辑：渲染 EditableDataTable
+                  if (editability?.editable && editability.tableName && editability.columns) {
+                    return (
+                      <EditableDataTable
+                        connectionId={r.connectionId!}
+                        database={r.database!}
+                        tableName={editability.tableName}
+                        columns={editability.columns}
+                        dataSource={r.rows ?? []}
+                        onRefresh={() => handleExecute()}
+                        hasMore={r.preview && r.hasMore}
+                        onLoadMore={r.preview && r.hasMore ? () => handleLoadMore(idx) : undefined}
+                        loadingMore={loadingMoreKey === `${queryId}-${idx}`}
+                      />
+                    )
+                  }
+
+                  // 不可编辑或预览模式：渲染 SqlResultPanel
+                  return (
+                    <SqlResultPanel
+                      result={r}
+                      displayLabel={displayLabel}
+                      tableHeight={resultTableHeight}
+                      loadMoreKey={`${queryId}-${idx}`}
+                      currentLoadKey={loadingMoreKey}
+                      onLoadMore={r.preview && r.hasMore ? () => handleLoadMore(idx) : undefined}
+                      onResultMetaChange={(patch) => handleResultMetaChange(idx, patch)}
+                      editabilityReason={editability?.reason}
+                    />
+                  )
+                })()
               }
             }).filter(Boolean) as Array<{ key: string, label: string, children: React.ReactNode }>,
             {

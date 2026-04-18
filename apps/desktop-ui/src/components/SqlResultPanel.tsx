@@ -1,8 +1,9 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Dropdown, Modal, Space, Table, Typography, theme } from 'antd'
-import { DownloadOutlined } from '@ant-design/icons'
-import type { SqlResult } from '@/types'
+import { Alert, Dropdown, Modal, Space, Table, Tag, Tooltip, Typography, theme } from 'antd'
+import { DownloadOutlined, EditOutlined, StopOutlined } from '@ant-design/icons'
+import type { SqlResult, EditabilityReason } from '@/types'
 import { exportResultSet } from '@/utils/exportUtils'
+import { getEditabilityReasonText } from '@/utils/editabilityAnalyzer'
 import {
   formatSqlCell,
   isSqlCellTruncated,
@@ -21,6 +22,7 @@ interface SqlResultPanelProps {
   onLoadMore?: () => void
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   onResultMetaChange?: (patch: Partial<SqlResult>) => void
+  editabilityReason?: EditabilityReason  // 不可编辑原因
 }
 
 interface CellPreviewState {
@@ -38,6 +40,7 @@ export const SqlResultPanel: React.FC<SqlResultPanelProps> = ({
   onLoadMore,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   onResultMetaChange: _onResultMetaChange,
+  editabilityReason,
 }) => {
   const { token } = theme.useToken()
   const [cellPreview, setCellPreview] = useState<CellPreviewState | null>(null)
@@ -174,6 +177,21 @@ export const SqlResultPanel: React.FC<SqlResultPanelProps> = ({
     <div ref={containerRef} style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div ref={toolbarRef} style={{ display: 'flex', justifyContent: 'flex-end', padding: '2px 0 4px', gap: 8, flexShrink: 0 }}>
         <Space size={8} style={{ flex: 1, flexWrap: 'wrap' }}>
+          {result.type === 'query' && (
+            editabilityReason ? (
+              <Tooltip title={getEditabilityReasonText(editabilityReason)}>
+                <Tag icon={<StopOutlined />} color="warning" style={{ cursor: 'help' }}>
+                  不可编辑
+                </Tag>
+              </Tooltip>
+            ) : (
+              <Tooltip title="双击单元格可编辑数据">
+                <Tag icon={<EditOutlined />} color="success" style={{ cursor: 'help' }}>
+                  可编辑
+                </Tag>
+              </Tooltip>
+            )
+          )}
           <Text type="secondary" style={{ fontSize: 12, lineHeight: '24px' }}>
             已加载 {result.loadedRows ?? result.rows?.length ?? 0} 行 · {result.duration}ms
             {typeof result.totalRows === 'number' ? ` · 共 ${result.totalRows} 条` : ''}
