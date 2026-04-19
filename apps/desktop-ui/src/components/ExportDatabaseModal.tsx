@@ -755,7 +755,7 @@ export default function ExportDatabaseModal({
                     background: token.colorFillAlter,
                   }}
                 >
-                  <Text type=”secondary”>
+                  <Text type="secondary">
                     导出适用于数据交换，不建议替代正式备份。
                   </Text>
                 </div>

@@ -207,7 +207,7 @@ export default function RestoreDatabaseModal({
         dataFileCount: t.dataFiles?.length ?? 0,
       }))
       setTables(tableItems)
-      setSelectedTableKeys(tableItems.map(t => t.key))
+      setSelectedKeys(tableItems.map(t => t.key))
       // 优先使用用户选择的默认库，否则用备份源库
       form.setFieldValue('targetDatabase', defaultTargetDatabase?.trim() || result.manifest.database)
       setStep(1)
@@ -530,12 +530,12 @@ export default function RestoreDatabaseModal({
                     style={{ width: 180 }}
                     prefix={<SearchOutlined />}
                     value={tableSearch}
-                    onChange={e => setTableSearchText(e.target.value)}
+                    onChange={e => setTableSearch(e.target.value)}
                   />
-                  <Button size="small" onClick={() => setSelectedTableKeys(tables.map(t => t.key))}>
+                  <Button size="small" onClick={() => setSelectedKeys(tables.map(t => t.key))}>
                     全选
                   </Button>
-                  <Button size="small" onClick={() => setSelectedTableKeys([])} disabled={selectedKeys.length === 0}>
+                  <Button size="small" onClick={() => setSelectedKeys([])} disabled={selectedKeys.length === 0}>
                     清空
                   </Button>
                   <Tag>{selectedKeys.length} / {tables.length} 张表</Tag>
@@ -551,7 +551,7 @@ export default function RestoreDatabaseModal({
                   scroll={{ y: 200 }}
                   rowSelection={{
                     selectedRowKeys: selectedKeys,
-                    onChange: keys => setSelectedTableKeys(keys as string[]),
+                    onChange: keys => setSelectedKeys(keys as string[]),
                     preserveSelectedRowKeys: true,
                   }}
                 />

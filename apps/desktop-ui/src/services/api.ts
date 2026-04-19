@@ -276,6 +276,13 @@ export const backupApi = {
   list: () =>
     request('/api/backup/list'),
   downloadUrl: (path: string) => `${KERNEL_BASE_URL}/api/backup/download?path=${encodeURIComponent(path)}`,
+  deleteFile: (filePath: string) =>
+    request('/api/backup/file', { method: 'DELETE', body: JSON.stringify({ filePath }) }),
+  cleanup: (mode: string, days?: number) =>
+    request('/api/storage/cleanup', {
+      method: 'POST',
+      body: JSON.stringify({ target: 'backups', mode, days: days ?? 3 }),
+    }),
 }
 
 // ─── 数据库恢复 (Restore) ─────────────────────────────────

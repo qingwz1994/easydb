@@ -797,7 +797,7 @@ export const WorkbenchPage: React.FC = () => {
   // --- 解决切换工作台路由时的海量节点遍历卡顿 ---
   const [deferTree, setDeferTree] = useState(true)
   useEffect(() => {
-    // 延迟 50ms 计算树，让页面骨架先秒切渲染，解决点击“工作台”即卡死的性能瓶颈
+    // 延迟 50ms 计算树，让页面骨架先秒切渲染，解决点击"工作台"即卡死的性能瓶颈
     const timer = setTimeout(() => setDeferTree(false), 50)
     return () => clearTimeout(timer)
   }, [])

@@ -21,14 +21,15 @@ import {
   CloudDownloadOutlined, BulbOutlined, DesktopOutlined, SafetyCertificateOutlined,
   CodeOutlined, RetweetOutlined, AppstoreOutlined,
   DatabaseOutlined, FileZipOutlined, FileTextOutlined, SettingFilled,
-  DeleteOutlined, ClearOutlined, ExclamationCircleOutlined
+  DeleteOutlined, ClearOutlined, ExclamationCircleOutlined, SaveOutlined,
+  DownOutlined, UpOutlined, DownloadOutlined
 } from '@ant-design/icons'
 import {
   checkForUpdate, getAutoCheckEnabled, setAutoCheckEnabled, APP_VERSION,
   type UpdateInfo,
 } from '@/utils/updater'
 import { useThemeStore, type ThemeMode } from '@/stores/themeStore'
-import { storageApi } from '@/services/api'
+import { storageApi, backupApi } from '@/services/api'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -43,8 +44,16 @@ interface StorageInfo {
   exports: StorageCategoryInfo
   logs: StorageCategoryInfo
   config: StorageCategoryInfo
+  backups: StorageCategoryInfo
   totalSize: number
   totalSizeText: string
+}
+
+interface BackupFileInfo {
+  fileName: string
+  filePath: string
+  fileSizeBytes: string
+  lastModified: string
 }
 
 export const SettingsPage: React.FC = () => {
@@ -63,6 +72,13 @@ export const SettingsPage: React.FC = () => {
   const [cleaning, setCleaning] = useState<string | null>(null)
   const [exportDays, setExportDays] = useState(3)
   const [logDays, setLogDays] = useState(3)
+  const [backupDays, setBackupDays] = useState(7)
+
+  // 备份文件列表状态
+  const [showBackupFiles, setShowBackupFiles] = useState(false)
+  const [backupFiles, setBackupFiles] = useState<BackupFileInfo[]>([])
+  const [backupFilesLoading, setBackupFilesLoading] = useState(false)
+  const [deletingBackup, setDeletingBackup] = useState<string | null>(null)
 
   const handleToggleAutoCheck = useCallback((checked: boolean) => {
     setAutoCheck(checked)
@@ -105,7 +121,7 @@ export const SettingsPage: React.FC = () => {
 
   // 执行清理
   const handleCleanup = useCallback(async (target: string, mode: string, days?: number) => {
-    const targetLabels: Record<string, string> = { exports: '导出文件', logs: '任务日志', tasks: '任务记录' }
+    const targetLabels: Record<string, string> = { exports: '导出文件', logs: '任务日志', tasks: '任务记录', backups: '备份文件' }
     const label = targetLabels[target] || target
 
     const confirmMsg = mode === 'all'
@@ -128,7 +144,8 @@ export const SettingsPage: React.FC = () => {
             freedSizeText: string
           }
           message.success(`已清理 ${result.deletedCount} 项，释放 ${result.freedSizeText}`)
-          loadStorageInfo() // 刷新信息
+          loadStorageInfo()
+          if (target === 'backups' && showBackupFiles) loadBackupFiles()
         } catch {
           message.error('清理失败')
         } finally {
@@ -136,7 +153,51 @@ export const SettingsPage: React.FC = () => {
         }
       },
     })
-  }, [modal, message, loadStorageInfo])
+  }, [modal, message, loadStorageInfo, showBackupFiles])
+
+  // 加载备份文件列表
+  const loadBackupFiles = useCallback(async () => {
+    setBackupFilesLoading(true)
+    try {
+      const data = await backupApi.list() as BackupFileInfo[]
+      setBackupFiles(data)
+    } catch {
+      setBackupFiles([])
+    } finally {
+      setBackupFilesLoading(false)
+    }
+  }, [])
+
+  // 切换备份文件列表展开状态
+  const handleToggleBackupFiles = useCallback(() => {
+    if (!showBackupFiles) loadBackupFiles()
+    setShowBackupFiles(v => !v)
+  }, [showBackupFiles, loadBackupFiles])
+
+  // 删除单个备份文件
+  const handleDeleteBackupFile = useCallback((file: BackupFileInfo) => {
+    modal.confirm({
+      title: '删除备份文件',
+      icon: <ExclamationCircleOutlined />,
+      content: `确定要删除备份文件 "${file.fileName}" 吗？此操作不可恢复。`,
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        setDeletingBackup(file.filePath)
+        try {
+          await backupApi.deleteFile(file.filePath)
+          message.success(`已删除 ${file.fileName}`)
+          loadBackupFiles()
+          loadStorageInfo()
+        } catch {
+          message.error('删除失败')
+        } finally {
+          setDeletingBackup(null)
+        }
+      },
+    })
+  }, [modal, message, loadBackupFiles, loadStorageInfo])
 
   const calcPercent = (part: number, total: number) => {
     if (total === 0) return 0
@@ -275,7 +336,7 @@ export const SettingsPage: React.FC = () => {
                   size={['100%', 12]}
                   style={{ marginBottom: 8 }}
                 />
-                <div style={{ display: 'flex', gap: 24, fontSize: 12 }}>
+                <div style={{ display: 'flex', gap: 24, fontSize: 12, flexWrap: 'wrap' }}>
                   <Text type="secondary">
                     <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: token.colorPrimary, marginRight: 6 }}/>
                     导出文件 {storageInfo.exports.sizeText}
@@ -283,6 +344,10 @@ export const SettingsPage: React.FC = () => {
                   <Text type="secondary">
                     <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: token.colorWarning, marginRight: 6 }}/>
                     日志 {storageInfo.logs.sizeText}
+                  </Text>
+                  <Text type="secondary">
+                    <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#722ed1', marginRight: 6 }}/>
+                    备份 {storageInfo.backups?.sizeText ?? '0 B'}
                   </Text>
                   <Text type="secondary">
                     <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: 'var(--glass-border)', marginRight: 6 }}/>
@@ -360,6 +425,119 @@ export const SettingsPage: React.FC = () => {
                       全部清理
                     </Button>
                   </div>
+                </div>
+
+                {/* 备份文件 */}
+                <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--glass-border)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                    <Avatar size="large" icon={<SaveOutlined />} style={{ backgroundColor: '#f9f0ff', color: '#722ed1', flexShrink: 0 }}/>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div>
+                        <Text strong>备份文件</Text>
+                        <Text type="secondary" style={{ fontSize: 13, marginLeft: 6 }}>.edbkp</Text>
+                      </div>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {storageInfo.backups?.sizeText ?? '0 B'} / {storageInfo.backups?.fileCount ?? 0} 个文件 — 数据库逻辑备份包
+                      </Text>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+                    <Button
+                      size="small"
+                      icon={showBackupFiles ? <UpOutlined /> : <DownOutlined />}
+                      onClick={handleToggleBackupFiles}
+                      loading={backupFilesLoading}
+                    >
+                      {showBackupFiles ? '收起列表' : '查看文件列表'}
+                    </Button>
+                    <Space.Compact size="small">
+                      <Select
+                        value={backupDays}
+                        onChange={setBackupDays}
+                        style={{ width: 90 }}
+                        size="small"
+                        options={[
+                          { value: 3, label: '3 天前' },
+                          { value: 7, label: '7 天前' },
+                          { value: 30, label: '30 天前' },
+                          { value: 90, label: '90 天前' },
+                        ]}
+                      />
+                      <Button
+                        size="small"
+                        onClick={() => handleCleanup('backups', 'older_than_days', backupDays)}
+                        loading={cleaning === 'backups'}
+                        icon={<ClearOutlined />}
+                      >
+                        清理
+                      </Button>
+                    </Space.Compact>
+                    <Button
+                      size="small"
+                      danger
+                      onClick={() => handleCleanup('backups', 'all')}
+                      loading={cleaning === 'backups'}
+                      icon={<DeleteOutlined />}
+                    >
+                      全部清理
+                    </Button>
+                  </div>
+
+                  {/* 备份文件展开列表 */}
+                  {showBackupFiles && (
+                    <div style={{ marginTop: 12, borderTop: '1px solid var(--glass-border)', paddingTop: 12 }}>
+                      {backupFilesLoading ? (
+                        <div style={{ textAlign: 'center', padding: 16 }}><Spin size="small" /></div>
+                      ) : backupFiles.length === 0 ? (
+                        <Text type="secondary" style={{ fontSize: 12 }}>暂无备份文件</Text>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {backupFiles.map(f => {
+                            const sizeBytes = parseInt(f.fileSizeBytes)
+                            const sizeMb = sizeBytes >= 1048576
+                              ? `${(sizeBytes / 1048576).toFixed(1)} MB`
+                              : sizeBytes >= 1024
+                              ? `${(sizeBytes / 1024).toFixed(1)} KB`
+                              : `${sizeBytes} B`
+                            const modifiedDate = new Date(parseInt(f.lastModified)).toLocaleString('zh-CN', {
+                              month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+                            })
+                            return (
+                              <div key={f.filePath} style={{
+                                display: 'flex', alignItems: 'center', gap: 8,
+                                padding: '6px 10px',
+                                borderRadius: 6,
+                                background: 'var(--glass-panel)',
+                                border: '1px solid var(--glass-border)',
+                              }}>
+                                <SaveOutlined style={{ color: '#722ed1', flexShrink: 0 }} />
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 12, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {f.fileName}
+                                  </div>
+                                  <Text type="secondary" style={{ fontSize: 11 }}>{sizeMb} · {modifiedDate}</Text>
+                                </div>
+                                <Button
+                                  size="small"
+                                  icon={<DownloadOutlined />}
+                                  href={backupApi.downloadUrl(f.filePath)}
+                                  style={{ flexShrink: 0 }}
+                                />
+                                <Button
+                                  size="small"
+                                  danger
+                                  icon={<DeleteOutlined />}
+                                  loading={deletingBackup === f.filePath}
+                                  onClick={() => handleDeleteBackupFile(f)}
+                                  style={{ flexShrink: 0 }}
+                                />
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* 任务日志 */}
