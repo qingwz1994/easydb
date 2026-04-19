@@ -661,9 +661,10 @@ fun Route.sqlRoutes() {
 
     get("/history") {
         val connectionId = call.request.queryParameters["connectionId"]
-        val keyword = call.request.queryParameters["keyword"]
-        val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 100
-        call.ok(historyStore.list(connectionId, keyword, limit))
+        val database     = call.request.queryParameters["database"]     // 可选：按库过滤
+        val keyword      = call.request.queryParameters["keyword"]
+        val limit        = call.request.queryParameters["limit"]?.toIntOrNull() ?: 100
+        call.ok(historyStore.list(connectionId, database, keyword, limit))
     }
 
     delete("/history") {

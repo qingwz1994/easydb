@@ -230,7 +230,11 @@ data class CompareOptions(
     val ignoreAutoIncrement: Boolean = true,
     val ignoreCharset: Boolean = false,
     val ignoreCollation: Boolean = false,
-    val includeDropStatements: Boolean = false
+    val includeDropStatements: Boolean = false,
+ val compareViews: Boolean = true,
+ val compareProcedures: Boolean = true,
+ val compareFunctions: Boolean = true,
+ val compareTriggers: Boolean = true
 )
 
 @Serializable
@@ -239,7 +243,12 @@ data class CompareResult(
     val targetDatabase: String,
     val totalTables: Int,
     val diffCount: Int,
-    val tables: List<TableCompareResult>
+    val tables: List<TableCompareResult>,
+    // 扫展对象（默认空，旧客户端向后兼容）
+    val views:      List<ObjectCompareResult> = emptyList(),
+    val procedures: List<ObjectCompareResult> = emptyList(),
+    val functions:  List<ObjectCompareResult> = emptyList(),
+    val triggers:   List<ObjectCompareResult> = emptyList()
 )
 
 @Serializable
@@ -250,6 +259,20 @@ data class TableCompareResult(
     val columnDiffs: List<ColumnDiff> = emptyList(),
     val indexDiffs: List<IndexDiff> = emptyList(),
     val sql: String = "",
+    val summary: String = ""
+)
+
+/**
+ * 非表对象（视图、存储过程、函数、触发器）的对比结果
+ * status: only_in_source | only_in_target | different | identical
+ */
+@Serializable
+data class ObjectCompareResult(
+    val name: String,
+    val objectType: String,    // view | procedure | function | trigger
+    val status: String,
+    val sourceDdl: String = "",
+    val targetDdl: String = "",
     val summary: String = ""
 )
 

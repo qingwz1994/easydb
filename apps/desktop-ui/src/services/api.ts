@@ -235,8 +235,11 @@ export const sqlApi = {
       method: 'POST',
       body: JSON.stringify(config),
     }),
-  historyList: (connectionId: string) =>
-    request(`/api/sql/history?connectionId=${connectionId}`),
+  historyList: (connectionId: string, database?: string) => {
+    const params = new URLSearchParams({ connectionId })
+    if (database) params.set('database', database)
+    return request(`/api/sql/history?${params}`)
+  },
   /** 清空指定连接下的 SQL 历史（不影响其他连接） */
   historyClearByConnection: (connectionId: string) =>
     request(`/api/sql/history?connectionId=${connectionId}`, { method: 'DELETE' }),

@@ -266,6 +266,11 @@ export interface CompareOptions {
   ignoreCharset: boolean
   ignoreCollation: boolean
   includeDropStatements: boolean
+  // 扩展对象开关（默认全开）
+  compareViews?: boolean
+  compareProcedures?: boolean
+  compareFunctions?: boolean
+  compareTriggers?: boolean
 }
 
 // 结构对比结果
@@ -275,6 +280,21 @@ export interface CompareResult {
   totalTables: number
   diffCount: number
   tables: TableCompareResult[]
+  // 扩展对象
+  views:      ObjectCompareResult[]
+  procedures: ObjectCompareResult[]
+  functions:  ObjectCompareResult[]
+  triggers:   ObjectCompareResult[]
+}
+
+/** 非表对象对比结果（视图/存储过程/函数/触发器） */
+export interface ObjectCompareResult {
+  name: string
+  objectType: 'view' | 'procedure' | 'function' | 'trigger'
+  status: 'only_in_source' | 'only_in_target' | 'different' | 'identical'
+  sourceDdl: string
+  targetDdl: string
+  summary: string
 }
 
 export interface TableCompareResult {

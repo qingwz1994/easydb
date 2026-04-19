@@ -36,6 +36,8 @@ interface SqlHistoryEntry {
 interface SqlHistoryDrawerProps {
   open: boolean
   connectionId: string
+  /** 传入当前选中的数据库名，不传则展示该连接全部历史 */
+  database?: string
   onClose: () => void
   /** 点击"填入编辑器"时的回调，传入 sql 文本 */
   onApply: (sql: string) => void
@@ -44,6 +46,7 @@ interface SqlHistoryDrawerProps {
 export const SqlHistoryDrawer: React.FC<SqlHistoryDrawerProps> = ({
   open,
   connectionId,
+  database,
   onClose,
   onApply,
 }) => {
@@ -53,17 +56,17 @@ export const SqlHistoryDrawer: React.FC<SqlHistoryDrawerProps> = ({
   const [loading, setLoading] = useState(false)
   const [clearing, setClearing] = useState(false)
 
-  // 每次打开时拉取一次（最多 100 条），之后前端过滤，不重复请求
+  // 打开 或 database 变化时重新拉取
+  // database 由外部按「按库过滤」开关决定是否传入
   useEffect(() => {
     if (!open || !connectionId) return
     setKeyword('')
     setLoading(true)
-    // request<T>() 直接返回解包后的 T，无需 .data
-    ;(sqlApi.historyList(connectionId) as Promise<SqlHistoryEntry[]>)
+    ;(sqlApi.historyList(connectionId, database) as Promise<SqlHistoryEntry[]>)
       .then(items => setAllItems(items ?? []))
       .catch(() => setAllItems([]))
       .finally(() => setLoading(false))
-  }, [open, connectionId])
+  }, [open, connectionId, database])
 
   // 前端实时过滤，无防抖问题（数据量 ≤ 100 条，useMemo 足够）
   const filtered = useMemo(() => {
@@ -117,9 +120,14 @@ export const SqlHistoryDrawer: React.FC<SqlHistoryDrawerProps> = ({
     toast.success('SQL 已填入编辑器')
   }
 
+  // 抽屉标题：明确告知用户当前是「全连接」还是「仅当前库」
+  const drawerTitle = database
+    ? `SQL 历史 · ${database}`
+    : 'SQL 历史记录（全部数据库）'
+
   return (
     <Drawer
-      title="SQL 历史记录（当前连接）"
+      title={drawerTitle}
       width={500}
       open={open}
       onClose={onClose}

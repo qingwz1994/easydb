@@ -29,7 +29,7 @@ import { useNavigate } from 'react-router-dom'
 import type { ColumnsType } from 'antd/es/table'
 import type {
   ConnectionConfig, CompareConfig, CompareOptions,
-  CompareResult, ColumnDiff, IndexDiff,
+  CompareResult, ColumnDiff, IndexDiff, ObjectCompareResult,
 } from '@/types'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useSqlEditorStore } from '@/stores/sqlEditorStore'
@@ -83,13 +83,19 @@ export const StructureComparePage: React.FC = () => {
     ignoreCharset: false,
     ignoreCollation: false,
     includeDropStatements: false,
+    compareViews: true,
+    compareProcedures: true,
+    compareFunctions: true,
+    compareTriggers: true,
   })
 
   // 结果状态
   const [comparing, setComparing] = useState(false)
   const [result, setResult] = useState<CompareResult | null>(null)
   const [selectedTable, setSelectedTable] = useState<string | null>(null)
+  const [selectedObject, setSelectedObject] = useState<{ name: string; type: string } | null>(null)
   const [filter, setFilter] = useState<string>('all')
+  const [objectTab, setObjectTab] = useState<string>('tables') // 左侧 Tabs 激活项
 
   const handleConnectionSelect = async (connId: string, type: 'source' | 'target') => {
     const conn = connections.find((c) => c.id === connId)
@@ -172,10 +178,12 @@ export const StructureComparePage: React.FC = () => {
       }
       const res = await compareApi.execute(config) as CompareResult
       setResult(res)
+      setObjectTab('tables')
       // 自动选中第一个差异对象
       const firstDiff = res.tables.find((t) => t.status !== 'identical')
       if (firstDiff) setSelectedTable(firstDiff.tableName)
       else if (res.tables.length > 0) setSelectedTable(res.tables[0].tableName)
+      setSelectedObject(null)
     } catch (e) {
       handleApiError(e, '结构对比失败')
     } finally {
@@ -295,6 +303,12 @@ export const StructureComparePage: React.FC = () => {
           包含删除语句 (Include Drop Statements)
         </Text>
       </Checkbox>
+      <Divider style={{ margin: '4px 0' }} />
+      <Text type="secondary" style={{ fontSize: 12 }}>扩展对象</Text>
+      <Checkbox checked={options.compareViews ?? true} onChange={(e) => setOptions({ ...options, compareViews: e.target.checked })}>视图 (Views)</Checkbox>
+      <Checkbox checked={options.compareProcedures ?? true} onChange={(e) => setOptions({ ...options, compareProcedures: e.target.checked })}>存储过程 (Procedures)</Checkbox>
+      <Checkbox checked={options.compareFunctions ?? true} onChange={(e) => setOptions({ ...options, compareFunctions: e.target.checked })}>函数 (Functions)</Checkbox>
+      <Checkbox checked={options.compareTriggers ?? true} onChange={(e) => setOptions({ ...options, compareTriggers: e.target.checked })}>触发器 (Triggers)</Checkbox>
     </div>
   )
 
@@ -389,7 +403,7 @@ export const StructureComparePage: React.FC = () => {
         </div>
       ) : (
         <Layout style={{ flex: 1, overflow: 'hidden' }}>
-          {/* 左侧：差异对象列表 */}
+          {/* 左侧：差异对象列表（Tabs 组织） */}
           <Sider width={300} style={{
             background: 'var(--glass-panel)',
             backdropFilter: 'var(--glass-blur-sm)',
@@ -417,31 +431,80 @@ export const StructureComparePage: React.FC = () => {
               </div>
             </div>
 
-            <List
+            {/* 多类型 Tabs */}
+            <Tabs
+              activeKey={objectTab}
+              onChange={(key) => { setObjectTab(key); setSelectedTable(null); setSelectedObject(null) }}
               size="small"
-              dataSource={filteredTables}
-              renderItem={(item) => (
-                <List.Item
-                  style={{
-                    padding: '8px 16px',
-                    cursor: 'pointer',
-                    background: selectedTable === item.tableName ? token.colorPrimaryBg : undefined,
-                  }}
-                  onClick={() => setSelectedTable(item.tableName)}
-                >
-                  <div style={{ width: '100%' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Text strong style={{ fontSize: 13 }}>{item.tableName}</Text>
-                      <Tag color={statusTagMap[item.status]?.color} style={{ margin: 0 }}>
-                        {statusTagMap[item.status]?.label}
-                      </Tag>
-                    </div>
-                    {item.summary && item.status !== 'identical' && (
-                      <Text type="secondary" style={{ fontSize: 11 }}>{item.summary}</Text>
-                    )}
-                  </div>
-                </List.Item>
-              )}
+              style={{ padding: '0 4px' }}
+              items={[
+                {
+                  key: 'tables',
+                  label: `表 (${result.tables.length})`,
+                  children: (
+                    <List
+                      size="small"
+                      dataSource={filteredTables}
+                      renderItem={(item) => (
+                        <List.Item
+                          style={{
+                            padding: '8px 16px', cursor: 'pointer',
+                            background: selectedTable === item.tableName ? token.colorPrimaryBg : undefined,
+                          }}
+                          onClick={() => { setSelectedTable(item.tableName); setSelectedObject(null) }}
+                        >
+                          <div style={{ width: '100%' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <Text strong style={{ fontSize: 13 }}>{item.tableName}</Text>
+                              <Tag color={statusTagMap[item.status]?.color} style={{ margin: 0 }}>
+                                {statusTagMap[item.status]?.label}
+                              </Tag>
+                            </div>
+                            {item.summary && item.status !== 'identical' && (
+                              <Text type="secondary" style={{ fontSize: 11 }}>{item.summary}</Text>
+                            )}
+                          </div>
+                        </List.Item>
+                      )}
+                    />
+                  ),
+                },
+                ...(
+                  [['views', '视图'], ['procedures', '存储过程'], ['functions', '函数'], ['triggers', '触发器']] as const
+                ).map(([key, label]) => {
+                  const items = (result[key as keyof typeof result] as ObjectCompareResult[]) ?? []
+                  return {
+                    key,
+                    label: `${label} (${items.length})`,
+                    children: (
+                      <List
+                        size="small"
+                        dataSource={items}
+                        locale={{ emptyText: `无${label}` }}
+                        renderItem={(item) => (
+                          <List.Item
+                            style={{
+                              padding: '8px 16px', cursor: 'pointer',
+                              background: selectedObject?.name === item.name && selectedObject?.type === key ? token.colorPrimaryBg : undefined,
+                            }}
+                            onClick={() => { setSelectedObject({ name: item.name, type: key }); setSelectedTable(null) }}
+                          >
+                            <div style={{ width: '100%' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <Text strong style={{ fontSize: 13 }}>{item.name}</Text>
+                                <Tag color={statusTagMap[item.status]?.color} style={{ margin: 0 }}>
+                                  {statusTagMap[item.status]?.label}
+                                </Tag>
+                              </div>
+                              <Text type="secondary" style={{ fontSize: 11 }}>{item.summary}</Text>
+                            </div>
+                          </List.Item>
+                        )}
+                      />
+                    ),
+                  }
+                }),
+              ]}
             />
           </Sider>
 
@@ -472,118 +535,119 @@ export const StructureComparePage: React.FC = () => {
               <div>
                 {/* 对象标题 */}
                 <div style={{
-                  marginBottom: 16,
-                  paddingBottom: 12,
+                  marginBottom: 16, paddingBottom: 12,
                   borderBottom: '1px solid var(--glass-border)',
                 }}>
                   <Space size={8}>
                     <Title level={5} style={{ margin: 0 }}>{selectedDetail.tableName}</Title>
-                    <Tag color={statusTagMap[selectedDetail.status]?.color}>
-                      {statusTagMap[selectedDetail.status]?.label}
-                    </Tag>
+                    <Tag color={statusTagMap[selectedDetail.status]?.color}>{statusTagMap[selectedDetail.status]?.label}</Tag>
                     {selectedDetail.risk !== 'low' && (
-                      <Tag color={riskTagMap[selectedDetail.risk]?.color}>
-                        {riskTagMap[selectedDetail.risk]?.label}
-                      </Tag>
+                      <Tag color={riskTagMap[selectedDetail.risk]?.color}>{riskTagMap[selectedDetail.risk]?.label}</Tag>
                     )}
                   </Space>
                   {selectedDetail.summary && (
-                    <div style={{ marginTop: 4 }}>
-                      <Text type="secondary">{selectedDetail.summary}</Text>
-                    </div>
+                    <div style={{ marginTop: 4 }}><Text type="secondary">{selectedDetail.summary}</Text></div>
                   )}
                 </div>
-
-                {/* 差异详情 Tab */}
+                {/* 字段/索引对比 */}
                 {(selectedDetail.status === 'different') && (
-                  <Tabs
-                    size="small"
-                    items={[
-                      {
-                        key: 'columns',
-                        label: `字段对比 (${selectedDetail.columnDiffs.filter((c) => c.status !== 'identical').length} 差异)`,
-                        children: (
-                          <Table
-                            columns={columnDiffColumns}
-                            dataSource={selectedDetail.columnDiffs}
-                            rowKey="columnName"
-                            size="small"
-                            pagination={false}
-                            rowClassName={(r) => r.status !== 'identical' ? 'diff-row' : ''}
-                          />
-                        ),
-                      },
-                      {
-                        key: 'indexes',
-                        label: `索引对比 (${selectedDetail.indexDiffs.filter((i) => i.status !== 'identical').length} 差异)`,
-                        children: (
-                          <Table
-                            columns={indexDiffColumns}
-                            dataSource={selectedDetail.indexDiffs}
-                            rowKey="indexName"
-                            size="small"
-                            pagination={false}
-                          />
-                        ),
-                      },
-                    ]}
-                  />
+                  <Tabs size="small" items={[
+                    {
+                      key: 'columns',
+                      label: `字段对比 (${selectedDetail.columnDiffs.filter((c) => c.status !== 'identical').length} 差异)`,
+                      children: (<Table columns={columnDiffColumns} dataSource={selectedDetail.columnDiffs} rowKey="columnName" size="small" pagination={false} rowClassName={(r) => r.status !== 'identical' ? 'diff-row' : ''} />),
+                    },
+                    {
+                      key: 'indexes',
+                      label: `索引对比 (${selectedDetail.indexDiffs.filter((i) => i.status !== 'identical').length} 差异)`,
+                      children: (<Table columns={indexDiffColumns} dataSource={selectedDetail.indexDiffs} rowKey="indexName" size="small" pagination={false} />),
+                    },
+                  ]} />
                 )}
-
                 {/* SQL 预览 */}
                 {selectedDetail.sql && (
-                  <Card
-                    size="small"
-                    title="生成 SQL"
-                    style={{ marginTop: 16 }}
-                    extra={
-                      <Space>
-                        <Button size="small" icon={<CopyOutlined />} onClick={handleCopySql}>复制</Button>
-                        <Button size="small" icon={<DownloadOutlined />} onClick={handleExportSql}>导出</Button>
-                        <Button size="small" type="primary" icon={<SendOutlined />} onClick={() => handleSendToEditor(selectedDetail.sql)}>发送到编辑器</Button>
-                      </Space>
-                    }
+                  <Card size="small" title="生成 SQL" style={{ marginTop: 16 }}
+                    extra={<Space>
+                      <Button size="small" icon={<CopyOutlined />} onClick={handleCopySql}>复制</Button>
+                      <Button size="small" icon={<DownloadOutlined />} onClick={handleExportSql}>导出</Button>
+                      <Button size="small" type="primary" icon={<SendOutlined />} onClick={() => handleSendToEditor(selectedDetail.sql)}>发送到编辑器</Button>
+                    </Space>}
                   >
                     {selectedDetail.risk === 'high' && (
-                      <Alert
-                        type="warning"
-                        showIcon
-                        icon={<WarningOutlined />}
+                      <Alert type="warning" showIcon icon={<WarningOutlined />}
                         message="高风险操作：包含 DROP 语句，请仔细审核后再执行"
-                        style={{ marginBottom: 12 }}
-                      />
+                        style={{ marginBottom: 12 }} />
                     )}
-                    <pre style={{
-                      background: 'var(--glass-panel)',
-                      padding: 12,
-                      borderRadius: 6,
-                      fontSize: 12,
-                      fontFamily: 'Monaco, Consolas, monospace',
-                      overflow: 'auto',
-                      maxHeight: 400,
-                      whiteSpace: 'pre-wrap',
-                      margin: 0,
-                    }}>
+                    <pre style={{ background: 'var(--glass-panel)', padding: 12, borderRadius: 6, fontSize: 12, fontFamily: 'Monaco, Consolas, monospace', overflow: 'auto', maxHeight: 400, whiteSpace: 'pre-wrap', margin: 0 }}>
                       {selectedDetail.sql}
                     </pre>
                   </Card>
                 )}
-
                 {!selectedDetail.sql && selectedDetail.status === 'identical' && (
                   <div style={{ textAlign: 'center', padding: 40, color: token.colorTextSecondary }}>
                     <CheckCircleOutlined style={{ fontSize: 32, marginBottom: 8 }} />
                     <div>结构一致，无需生成 SQL</div>
                   </div>
                 )}
-
-                {/* 底部提示 */}
-                <Alert
-                  type="info"
-                  style={{ marginTop: 16 }}
-                  message="当前对比以「源连接」为准，系统分别读取两端元数据完成分析，不要求源实例与目标实例之间直接互通。生成 SQL 默认仅供人工审核与手动执行。"
-                />
+                <Alert type="info" style={{ marginTop: 16 }} message="当前对比以「源连接」为准，系统分别读取两端元数据完成分析，不要求源实例与目标实例之间直接互通。生成 SQL 默认仅供人工审核与手动执行。" />
               </div>
-            ) : (
+            ) : selectedObject && result ? (() => {
+              // 非表对象详情： DDL 双栏对比
+              const objList = (result[selectedObject.type as keyof typeof result] as ObjectCompareResult[]) ?? []
+              const obj = objList.find(o => o.name === selectedObject.name)
+              if (!obj) return null
+              return (
+                <div>
+                  <div style={{ marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid var(--glass-border)' }}>
+                    <Space size={8}>
+                      <Title level={5} style={{ margin: 0 }}>{obj.name}</Title>
+                      <Tag color="blue">{obj.objectType}</Tag>
+                      <Tag color={statusTagMap[obj.status]?.color}>{statusTagMap[obj.status]?.label}</Tag>
+                    </Space>
+                    <div style={{ marginTop: 4 }}><Text type="secondary">{obj.summary}</Text></div>
+                  </div>
+
+                  {/* DDL 对比双栏 */}
+                  {(obj.status === 'different' || obj.status === 'only_in_source' || obj.status === 'only_in_target') && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
+                      <div>
+                        <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>源端 DDL</Text>
+                        <pre style={{
+                          background: obj.sourceDdl ? token.colorSuccessBg : token.colorFillSecondary,
+                          border: `1px solid ${token.colorBorderSecondary}`,
+                          borderRadius: token.borderRadius, padding: 10, fontSize: 11,
+                          fontFamily: 'Menlo, Monaco, monospace', whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-all', maxHeight: 360, overflow: 'auto', margin: 0,
+                          color: token.colorText,
+                        }}>
+                          {obj.sourceDdl || '(源端不存在)'}
+                        </pre>
+                      </div>
+                      <div>
+                        <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 4 }}>目标端 DDL</Text>
+                        <pre style={{
+                          background: obj.targetDdl ? token.colorWarningBg : token.colorFillSecondary,
+                          border: `1px solid ${token.colorBorderSecondary}`,
+                          borderRadius: token.borderRadius, padding: 10, fontSize: 11,
+                          fontFamily: 'Menlo, Monaco, monospace', whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-all', maxHeight: 360, overflow: 'auto', margin: 0,
+                          color: token.colorText,
+                        }}>
+                          {obj.targetDdl || '(目标端不存在)'}
+                        </pre>
+                      </div>
+                    </div>
+                  )}
+                  {obj.status === 'identical' && (
+                    <div style={{ textAlign: 'center', padding: 40, color: token.colorTextSecondary }}>
+                      <CheckCircleOutlined style={{ fontSize: 32, marginBottom: 8 }} />
+                      <div>DDL 定义一致</div>
+                    </div>
+                  )}
+                  <Alert type="info" style={{ marginTop: 8 }} message="DDL 对比已自动过滤 DEFINER、注释、多余空白，仅显示实质内容差异。" />
+                </div>
+              )
+            })() : (
               <div style={{ textAlign: 'center', padding: 40, color: token.colorTextSecondary }}>
                 <DiffOutlined style={{ fontSize: 32, marginBottom: 8 }} />
                 <div>请在左侧选择一个对象查看差异</div>

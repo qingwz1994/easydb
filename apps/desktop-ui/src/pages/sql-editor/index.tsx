@@ -30,6 +30,7 @@ import { useWorkbenchStore } from '@/stores/workbenchStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useSqlEditorStore } from '@/stores/sqlEditorStore'
 import { sqlApi, metadataApi, connectionApi } from '@/services/api'
+import { useAppSettingsStore } from '@/stores/appSettingsStore'
 import { EmptyState } from '@/components/EmptyState'
 import { SqlResultPanel } from '@/components/SqlResultPanel'
 import { handleApiError, toast } from '@/utils/notification'
@@ -64,6 +65,8 @@ const extractAllTableNames = (sql: string): string[] => {
 
 export const SqlEditorPage: React.FC = () => {
   const { token } = theme.useToken()
+  const sqlHistoryEnabled          = useAppSettingsStore((s) => s.sqlHistoryEnabled)
+  const sqlHistoryFilterByDatabase = useAppSettingsStore((s) => s.sqlHistoryFilterByDatabase)
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
   const completionDisposableRef = useRef<{ dispose: () => void } | null>(null)
 
@@ -469,7 +472,7 @@ export const SqlEditorPage: React.FC = () => {
                   size="small"
                   icon={<HistoryOutlined />}
                   onClick={() => setHistoryOpen(true)}
-                  disabled={!currentConnId}
+                  disabled={!currentConnId || !sqlHistoryEnabled}
                 >
                   历史
                 </Button>
@@ -666,6 +669,7 @@ export const SqlEditorPage: React.FC = () => {
       <SqlHistoryDrawer
         open={historyOpen}
         connectionId={currentConnId ?? ''}
+        database={sqlHistoryFilterByDatabase ? (currentDatabase ?? undefined) : undefined}
         onClose={() => setHistoryOpen(false)}
         onApply={(sql) => {
           // 将历史 SQL 填入当前激活的 Monaco Editor

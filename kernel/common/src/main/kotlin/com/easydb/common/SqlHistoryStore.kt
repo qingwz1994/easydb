@@ -52,12 +52,13 @@ class SqlHistoryStore(
         scheduleSave()
     }
 
-    /** 获取历史列表（支持按 connectionId 和关键词筛选） */
-    fun list(connectionId: String? = null, keyword: String? = null, limit: Int = 100): List<SqlHistoryEntry> {
+    /** 获取历史列表（支持按 connectionId、database 和关键词筛选） */
+    fun list(connectionId: String? = null, database: String? = null, keyword: String? = null, limit: Int = 100): List<SqlHistoryEntry> {
         return synchronized(entries) {
             entries
                 .filter { connectionId == null || it.connectionId == connectionId }
-                .filter { keyword == null || it.sql.contains(keyword, ignoreCase = true) }
+                .filter { database == null     || it.database    == database      }
+                .filter { keyword == null      || it.sql.contains(keyword, ignoreCase = true) }
                 .take(limit)
         }
     }

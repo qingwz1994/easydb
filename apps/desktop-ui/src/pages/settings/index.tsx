@@ -29,6 +29,7 @@ import {
   type UpdateInfo,
 } from '@/utils/updater'
 import { useThemeStore, type ThemeMode } from '@/stores/themeStore'
+import { useAppSettingsStore } from '@/stores/appSettingsStore'
 import { storageApi, backupApi } from '@/services/api'
 
 const { Title, Text, Paragraph } = Typography
@@ -65,6 +66,11 @@ export const SettingsPage: React.FC = () => {
 
   const themeMode = useThemeStore((s) => s.themeMode)
   const setThemeMode = useThemeStore((s) => s.setThemeMode)
+
+  const sqlHistoryEnabled          = useAppSettingsStore((s) => s.sqlHistoryEnabled)
+  const sqlHistoryFilterByDatabase = useAppSettingsStore((s) => s.sqlHistoryFilterByDatabase)
+  const setSqlHistoryEnabled          = useAppSettingsStore((s) => s.setSqlHistoryEnabled)
+  const setSqlHistoryFilterByDatabase = useAppSettingsStore((s) => s.setSqlHistoryFilterByDatabase)
 
   // 存储管理状态
   const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null)
@@ -277,6 +283,34 @@ export const SettingsPage: React.FC = () => {
                 avatar={<Avatar size="large" icon={<AppstoreOutlined />} style={{ backgroundColor: token.colorErrorBg, color: token.colorError }}/>}
                 title={<Text strong>语法动态高亮</Text>}
                 description="激活复杂的 SQL 语法着色以及关键字识别"
+              />
+            </List.Item>
+
+            {/* ── SQL 历史 ──────────────────────────────────── */}
+            <List.Item actions={[
+              <Switch
+                checked={sqlHistoryEnabled}
+                onChange={setSqlHistoryEnabled}
+              />
+            ]}>
+              <List.Item.Meta
+                avatar={<Avatar size="large" icon={<RetweetOutlined />} style={{ backgroundColor: token.colorSuccessBg, color: token.colorSuccess }} />}
+                title={<Text strong>SQL 历史记录</Text>}
+                description="记录每次 SQL 执行的语句、耗时和结果，可在编辑器工具栏「历史」按钮查看"
+              />
+            </List.Item>
+
+            <List.Item actions={[
+              <Switch
+                checked={sqlHistoryFilterByDatabase}
+                onChange={setSqlHistoryFilterByDatabase}
+                disabled={!sqlHistoryEnabled}
+              />
+            ]}>
+              <List.Item.Meta
+                avatar={<Avatar size="large" icon={<DatabaseOutlined />} style={{ backgroundColor: token.colorWarningBg, color: token.colorWarning }} />}
+                title={<Text strong>历史按当前数据库过滤</Text>}
+                description="开启后历史记录仅显示当前库的 SQL；关闭则展示该连接所有数据库的历史"
               />
             </List.Item>
           </List>
