@@ -742,7 +742,7 @@ class MysqlBinlogTracker : ChangeTracker {
                     }
                     isTableDdl(upperSql) -> {
                         val dbName = data.database ?: session.config.database ?: ""
-                        handleTableDdlEvent(event, session, dbName, rawSql, upperSql)
+                        handleTableDdlEvent(header, currentFile, session, dbName, rawSql, upperSql)
                     }
                     // 其他语句（SET、GRANT、非表级 DDL 等）暴在v1 不输入
                 }
@@ -795,7 +795,8 @@ class MysqlBinlogTracker : ChangeTracker {
 
     /** 为表级 DDL 事件创建 ChangeEvent 并发出 */
     private fun handleTableDdlEvent(
-        event: com.github.shyiko.mysql.binlog.event.Event,
+        header: EventHeaderV4,
+        currentFile: String?,
         session: TrackerSession,
         database: String,
         rawSql: String,
@@ -807,7 +808,6 @@ class MysqlBinlogTracker : ChangeTracker {
         // 应用数据库过滤（表名为空时不应用表白名单）
         if (!matchesFilter(session, database, tableName, eventType)) return
 
-        val header = event.header as? com.github.shyiko.mysql.binlog.event.EventHeaderV4
         val changeEvent = ChangeEvent(
             id          = java.util.UUID.randomUUID().toString(),
             timestamp   = System.currentTimeMillis(),
@@ -819,15 +819,15 @@ class MysqlBinlogTracker : ChangeTracker {
             sourceInfo  = ChangeEventSource(
                 type     = "mysql_binlog",
                 file     = currentFile,
-                position = header?.position,
-                serverId = header?.serverId
+                position = header.position,
+                serverId = header.serverId
             ),
             ddlSql        = rawSql,
             ddlObjectType = "TABLE",
             ddlRisk       = risk
         )
         session.lastProcessedFile     = currentFile
-        session.lastProcessedPosition = header?.position ?: 0L
+        session.lastProcessedPosition = header.position
         emitEvent(session, changeEvent)
     }
 
