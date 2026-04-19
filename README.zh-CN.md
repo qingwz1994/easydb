@@ -6,14 +6,14 @@
 
 <p align="center">
   <strong>开源、跨平台的数据库管理工具</strong><br>
-  连接管理 · 对象浏览 · SQL 编辑器 · 数据迁移 · 数据同步 · 数据导出 · 备份恢复 · 存储过程执行 · 任务中心 · 安全连接
+  连接管理 · 对象浏览 · SQL 编辑器 · 数据追踪 · DDL 审计 · 结构对比 · 数据迁移 · 数据同步 · 数据导出 · 备份恢复 · 任务中心 · 安全连接
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="Platform">
   <img src="https://img.shields.io/badge/database-MySQL-4479A1?logo=mysql&logoColor=white" alt="MySQL">
-  <img src="https://img.shields.io/badge/version-1.4.0--dev-green" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.5.0--dev-green" alt="Version">
 </p>
 
 <p align="center">
@@ -53,6 +53,28 @@
 - **智能补全**：表名、字段名、SQL 关键字、MySQL 函数
 - 上下文感知：自动识别 FROM/JOIN 子句中的表并提示字段
 - 支持选中部分执行、`⌘+Enter` 快捷执行
+- **SQL 历史**：可按库开关、可搜索、一键重新执行（可在设置中开关）
+
+### 🔍 数据追踪（CDC）
+- 实时 Binlog 事件采集：INSERT / UPDATE / DELETE（行级）
+- 回放模式：对历史 Binlog 文件进行回放，可配置起止位点
+- 服务端分页：后端全量存储事件、前端按需拉取
+- UPDATE 事件列级 Diff 视图，Diff 模式可隐藏未变列
+- 回滚 SQL 生成：将 DML 反向生成 DELETE/INSERT/UPDATE，可下载 `.sql`
+- 正向重放 SQL 生成
+- **DDL 审计**：从 Binlog QUERY 事件采集表级 DDL
+  - 5 种 DDL 类型：`CREATE TABLE` / `ALTER TABLE` / `DROP TABLE` / `TRUNCATE TABLE` / `RENAME TABLE`
+  - 风险分级：low / medium / high / critical 四档
+  - 保留原始 SQL，完整审计轨迹
+  - DDL 独立详情面板（仅查看，不支持回滚/重放）
+  - 事件列表支持 DDL 筛选，统计面板展示 DDL 计数
+  - 选中包含 DDL 事件时回滚/重放按钮自动跳过并提示
+
+### 🆚 结构对比
+- 两个 MySQL 实例之间的表级结构对比
+- 扩展对象对比：视图 · 存储过程 · 函数 · 触发器
+- DDL 归一化：对比前屏蔽 DEFINER、注释、多余空白
+- 非表对象支持双栏 DDL 对比展示
 
 ### 🚀 数据迁移
 - 向导式操作：选择连接 → 选择对象 → 配置策略 → 确认执行
@@ -209,8 +231,8 @@ easydb/
 | v1.3.0 | ✅ 已发布 | 深色模式、SQL 文件导入、存储管理、查询收藏、快捷键体系、导出取消优化、自动更新检查、视图/存储过程/函数/触发器浏览 |
 | v1.3.1 | ✅ 已发布 | **数据库备份恢复**（完整备份、表级选择、一致性快照、SHA-256 校验、恢复策略、恢复模式） |
 | v1.3.2 | ✅ 已发布 | 备份文件管理、**存储过程执行**、参数面板 |
-| **v1.4.0** | ✅ 已发布 | **安全连接**（凭据 AES-256-GCM 加密、SSH 隧道真正接入、SSL/TLS 参数接入 JDBC） |
-| **v1.5.0** | 🚧 规划中 | SQL 历史前端入口、结构对比扩展（视图/过程/函数）、慢查询分析、国际化 (i18n) |
+| v1.4.0 | ✅ 已发布 | **安全连接**（凭据 AES-256-GCM 加密、SSH 隧道真正接入、SSL/TLS 参数接入 JDBC） |
+| **v1.5.0** | ✅ 已发布 | **SQL 历史**（按库浏览开关、搜索、重执行）· **结构对比扩展**（视图/过程/函数/触发器，DDL 归一化）· **DDL 审计**（Binlog 表级 DDL 采集、5 类 DDL、风险分级、原始 SQL 保留） |
 
 ## 🤝 参与贡献
 

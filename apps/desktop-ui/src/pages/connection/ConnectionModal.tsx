@@ -179,7 +179,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                         <Select
                           options={[
                             { value: 'password', label: '密码' },
-                            { value: 'privateKey', label: '私鑰' },
+                            { value: 'privateKey', label: '私钥' },
                           ]}
                           onChange={(v) => setSshAuthType(v as 'password' | 'privateKey')}
                         />
@@ -190,12 +190,12 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                           <Input.Password placeholder="SSH 密码" />
                         </Form.Item>
                       )}
-                      {/* 私鑰认证：输入私鑰文件路径 */}
+                      {/* 私钥认证：输入私钥文件路径 */}
                       {sshAuthType === 'privateKey' && (
                         <Form.Item
                           name={['ssh', 'privateKeyPath']}
-                          label="私鑰文件路径"
-                          rules={[{ required: sshAuthType === 'privateKey', message: '请输入私鑰文件路径' }]}
+                          label="私钥文件路径"
+                          rules={[{ required: sshAuthType === 'privateKey', message: '请输入私钥文件路径' }]}
                           extra="示例：~/.ssh/id_rsa 或 /Users/you/.ssh/id_ed25519"
                         >
                           <Input placeholder="/Users/you/.ssh/id_rsa" />

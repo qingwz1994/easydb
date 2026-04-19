@@ -6,14 +6,14 @@
 
 <p align="center">
   <strong>Open-source, cross-platform database management tool</strong><br>
-  Connection Management · Object Browser · SQL Editor · Data Migration · Data Sync · Data Export · Backup &amp; Restore · Stored Procedure Execution · Task Center · Secure Connection
+  Connection Management · Object Browser · SQL Editor · Data Tracker · DDL Audit · Structure Diff · Data Migration · Data Sync · Data Export · Backup &amp; Restore · Task Center · Secure Connection
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="Platform">
   <img src="https://img.shields.io/badge/database-MySQL-4479A1?logo=mysql&logoColor=white" alt="MySQL">
-  <img src="https://img.shields.io/badge/version-1.4.0--dev-green" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.5.0--dev-green" alt="Version">
 </p>
 
 <p align="center">
@@ -53,6 +53,28 @@
 - **Smart auto-completion**: table names, column names, SQL keywords, MySQL functions
 - Context-aware: auto-detects tables in FROM/JOIN clauses and suggests columns
 - Execute selected text or full script with `⌘+Enter`
+- **SQL History**: configurable per-database query history, searchable, re-run with one click (can be toggled per-database in Settings)
+
+### 🔍 Data Tracker (CDC)
+- Real-time Binlog event capture: INSERT / UPDATE / DELETE (row-level)
+- Replay mode: replay historical Binlog files with configurable start/end positions
+- Server-side pagination — backend stores all events, frontend pulls on demand
+- Per-column diff view for UPDATE events, diff-only mode hides unchanged columns
+- Rollback SQL generation: reverse DML to DELETE/INSERT/UPDATE; download as `.sql`
+- Forward replay SQL generation
+- **DDL Audit** _(v1.5 new)_: captures table-level DDL from Binlog QUERY events
+  - 5 DDL types: `CREATE TABLE` / `ALTER TABLE` / `DROP TABLE` / `TRUNCATE TABLE` / `RENAME TABLE`
+  - Risk classification: low / medium / high / critical
+  - Raw SQL preserved for full audit trail
+  - Dedicated DDL detail panel (no rollback/replay — read-only audit)
+  - DDL filter in event list, DDL count in statistics panel
+  - DDL events excluded from rollback/replay SQL generation
+
+### 🆚 Structure Diff
+- Table-level structure comparison between two MySQL instances
+- Extended object comparison: Views · Stored Procedures · Functions · Triggers
+- DDL normalization: strips DEFINER, comments, and whitespace before diff
+- Side-by-side DDL comparison for non-table objects
 
 ### 🚀 Data Migration
 - Wizard-style workflow: Select Connection → Select Objects → Configure Strategy → Execute
@@ -207,10 +229,10 @@ easydb/
 | v1.1.0 | ✅ Released | Connection search/filter, data export, task log improvements |
 | v1.2.0 | ✅ Released | Data preview filter/sort/pagination, inline editing, schema diff, multi-tab |
 | v1.3.0 | ✅ Released | Dark mode, SQL file import, storage management, query favorites, keyboard shortcuts, export cancellation, auto-update, view/procedure/function/trigger browser |
-| v1.3.1 | ✅ Released | **Database backup &amp; restore** (full backup, table-level selection, consistency snapshot, SHA-256 checksum, restore strategies, restore modes) |
+| v1.3.1 | ✅ Released | **Database backup & restore** (full backup, table-level selection, consistency snapshot, SHA-256 checksum, restore strategies, restore modes) |
 | v1.3.2 | ✅ Released | Backup file management, **stored procedure execution**, parameter inspector |
-| **v1.4.0** | ✅ Released | **Secure Connection** — AES-256-GCM credential encryption, SSH tunnel integration, SSL/TLS JDBC parameters |
-| **v1.5.0** | 🚧 Planned | SQL history UI, schema diff extension (views/procedures/functions), slow query analysis, i18n |
+| v1.4.0 | ✅ Released | **Secure Connection** — AES-256-GCM credential encryption, SSH tunnel integration, SSL/TLS JDBC parameters |
+| **v1.5.0** | ✅ Released | **SQL History** (per-database toggle, search, re-run) · **Structure Diff Extension** (views/procedures/functions/triggers, DDL normalization) · **DDL Audit** (Binlog table-level DDL capture, 5 DDL types, risk classification, raw SQL) |
 
 ## 🤝 Contributing
 
