@@ -115,18 +115,19 @@ class MysqlMetadataAdapter : MetadataAdapter {
             stmt.executeQuery().use { rs ->
                 while (rs.next()) {
                     result.add(RoutineInfo(
-                        name = rs.getString("ROUTINE_NAME"),
-                        type = rs.getString("ROUTINE_TYPE"),
-                        definer = rs.getString("DEFINER"),
-                        created = rs.getString("CREATED"),
+                        name     = rs.getString("ROUTINE_NAME"),
+                        type     = rs.getString("ROUTINE_TYPE"),
+                        definer  = rs.getString("DEFINER"),
+                        created  = rs.getString("CREATED"),
                         modified = rs.getString("LAST_ALTERED"),
-                        comment = rs.getString("ROUTINE_COMMENT")
+                        comment  = rs.getString("ROUTINE_COMMENT")?.takeIf { it.isNotBlank() }
                     ))
                 }
             }
         }
         return result
     }
+
 
     override fun getTableDefinition(session: DatabaseSession, database: String, table: String): TableDefinition {
         val columns = try { getColumns(session, database, table) } catch (_: Exception) { emptyList() }

@@ -30,6 +30,7 @@ interface DatabaseAdapter {
     fun dialectAdapter(): DialectAdapter
     fun syncAdapter(): SyncAdapter
     fun migrationAdapter(): MigrationAdapter
+    fun procedureAdapter(): ProcedureAdapter  // 存储过程/函数适配器
 }
 
 // ─── 连接适配器 ───────────────────────────────────────────
@@ -156,3 +157,51 @@ data class TableVerifyResult(
 data class TaskStartResult(
     val taskId: String
 )
+
+// ─── 存储过程 / 函数适配器接口 ──────────────────────────────
+
+/**
+ * 存储过程/函数适配器。
+ * 每个数据库实现这 4 个方法，执行引擎（ProcedureExecuteService）只做纯 JDBC 标准操作。
+ * 扩展方式：新增 PgProcedureAdapter / DmProcedureAdapter 实现此接口即可。
+ */
+interface ProcedureAdapter {
+
+    /**
+     * 查询存储过程或函数的参数元数据。
+     * 各数据库系统表不同，必须由各自实现：
+     *   MySQL → INFORMATION_SCHEMA.PARAMETERS
+     *   PG    → pg_catalog.pg_proc + pg_type
+     *   DM    → ALL_ARGUMENTS（兼容 Oracle）
+     */
+    fun inspect(
+        session: DatabaseSession,
+        database: String,
+        name: String,
+        type: String    // "PROCEDURE" | "FUNCTION"
+    ): ProcedureInspectResult
+
+    /**
+     * 生成 CALL 语句（含 ? 占位符，用于 CallableStatement / PreparedStatement）。
+     *   MySQL → CALL `db`.`proc`(?, ?, ?)
+     *   PG    → CALL "schema"."proc"($1, $2, $3)
+     *   DM    → CALL db.proc(?, ?, ?)
+     */
+    fun buildCallSql(database: String, name: String, paramCount: Int): String
+
+    /**
+     * 生成函数调用 SQL（作为 SELECT 表达式）。
+     *   MySQL → SELECT `db`.`func`(?, ?) AS `result`
+     *   PG    → SELECT "schema"."func"($1, $2) AS result
+     *   DM    → SELECT db.func(?, ?) AS result FROM dual
+     */
+    fun buildFunctionCallSql(database: String, name: String, paramCount: Int): String
+
+    /**
+     * 生成切换目标数据库的 SQL。
+     *   MySQL → USE `db`
+     *   PG    → SET search_path TO "schema"
+     *   DM    → 返回空字符串（连接串中指定）
+     */
+    fun buildSwitchDatabaseSql(database: String): String
+}

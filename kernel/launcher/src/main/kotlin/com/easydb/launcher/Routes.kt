@@ -78,6 +78,11 @@ fun Application.configureRoutes() {
                 restoreRoutes()
             }
 
+            // 存储过程 / 函数执行
+            route("/procedure") {
+                procedureRoutes()
+            }
+
             // 存储管理
             route("/storage") {
                 storageRoutes()

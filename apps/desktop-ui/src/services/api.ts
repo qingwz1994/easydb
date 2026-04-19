@@ -335,3 +335,85 @@ export const storageApi = {
       body: JSON.stringify({ target, mode, days: days ?? 3 }),
     }),
 }
+
+// ─── 存储过程 / 函数执行 ─────────────────────────────────
+export const procedureApi = {
+  /**
+   * 查询存储过程或函数的参数元数据
+   * @returns ProcedureInspectResult
+   */
+  inspect: (data: {
+    connectionId: string
+    database: string
+    name: string
+    type: 'PROCEDURE' | 'FUNCTION'
+  }) =>
+    request('/api/procedure/inspect', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  /**
+   * 执行存储过程或函数
+   * @returns ProcedureExecuteResult
+   */
+  execute: (data: ProcedureExecuteRequest) =>
+    request('/api/procedure/execute', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+}
+
+// ─── 存储过程类型定义（对应后端 DataModels.kt）─────────────
+
+export interface ProcedureParam {
+  name: string
+  ordinalPosition: number
+  mode: 'IN' | 'OUT' | 'INOUT' | 'RETURNS'
+  dataType: string
+  dtdIdentifier: string | null
+  characterMaxLength: number | null
+  numericPrecision: number | null
+  numericScale: number | null
+}
+
+export interface ProcedureInspectResult {
+  name: string
+  type: 'PROCEDURE' | 'FUNCTION'
+  database: string
+  definer: string | null
+  comment: string | null
+  params: ProcedureParam[]
+  ddl: string | null
+}
+
+export interface ProcedureParamValue {
+  name: string
+  value: string | null
+  mode: string
+}
+
+export interface ProcedureExecuteRequest {
+  connectionId: string
+  database: string
+  name: string
+  type: 'PROCEDURE' | 'FUNCTION'
+  params: ProcedureParamValue[]
+}
+
+export interface ProcedureResultSet {
+  index: number
+  columns: string[]
+  rows: Record<string, string | null>[]
+  rowCount: number
+}
+
+export interface ProcedureExecuteResult {
+  success: boolean
+  duration: number
+  outParams: Record<string, string | null>
+  resultSets: ProcedureResultSet[]
+  warningCount: number
+  error: string | null
+}
+

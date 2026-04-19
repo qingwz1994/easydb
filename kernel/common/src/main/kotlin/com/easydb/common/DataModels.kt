@@ -304,3 +304,68 @@ data class DataEditResult(
     val affectedRows: Int = 0,
     val errors: List<String> = emptyList()
 )
+
+// ─── 存储过程 / 函数执行模型 ────────────────────────────────
+
+/** 单个参数元数据（来自 INFORMATION_SCHEMA.PARAMETERS 或数据库本地等价物）*/
+@Serializable
+data class ProcedureParam(
+    val name: String,
+    val ordinalPosition: Int,
+    val mode: String,                       // "IN" | "OUT" | "INOUT" | "RETURNS"
+    val dataType: String,                   // "INT" | "VARCHAR" | "DECIMAL" | "DATE" | ...
+    val characterMaxLength: Long? = null,
+    val numericPrecision: Int? = null,
+    val numericScale: Int? = null,
+    val dtdIdentifier: String? = null       // 完整类型描述，如 "varchar(255)"
+)
+
+/** inspect 接口响应：参数列表 + DDL + comment */
+@Serializable
+data class ProcedureInspectResult(
+    val name: String,
+    val type: String,                       // "PROCEDURE" | "FUNCTION"
+    val database: String,
+    val definer: String? = null,
+    val comment: String? = null,
+    val params: List<ProcedureParam>,
+    val ddl: String? = null
+)
+
+/** execute 接口中单个参数的传值 */
+@Serializable
+data class ProcedureParamValue(
+    val name: String,
+    val value: String?,                     // null 表示传 NULL
+    val mode: String = "IN"                 // "IN" | "INOUT" | "OUT"
+)
+
+/** execute 接口请求体 */
+@Serializable
+data class ProcedureExecuteRequest(
+    val connectionId: String,
+    val database: String,
+    val name: String,
+    val type: String = "PROCEDURE",         // "PROCEDURE" | "FUNCTION"
+    val params: List<ProcedureParamValue> = emptyList()
+)
+
+/** 单个结果集（一次 CALL 可能返回多个） */
+@Serializable
+data class ProcedureResultSet(
+    val index: Int,                         // 第几个结果集，从 0 开始
+    val columns: List<String>,
+    val rows: List<Map<String, String?>>,
+    val rowCount: Int
+)
+
+/** execute 接口响应 */
+@Serializable
+data class ProcedureExecuteResult(
+    val success: Boolean,
+    val duration: Long,
+    val outParams: Map<String, String?> = emptyMap(),   // OUT / INOUT 参数回显
+    val resultSets: List<ProcedureResultSet> = emptyList(),
+    val warningCount: Int = 0,
+    val error: String? = null
+)

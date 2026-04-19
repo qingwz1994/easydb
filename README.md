@@ -35,6 +35,16 @@
 - Stored procedure / function / trigger DDL viewer
 - Table structure designer and DDL viewer
 
+### ⚙️ Stored Procedure Execution
+- Right-click menu entry in workbench object tree
+- Auto-load parameter metadata (IN/OUT/INOUT, data types)
+- Type-aware input components (integer, decimal, boolean, date, datetime, text)
+- NULL checkbox for each parameter
+- OUT parameter value display after execution
+- Multi-result-set support with tabbed display
+- Function return value display
+- Execution duration tracking
+
 ### ✏️ SQL Editor
 - Powered by Monaco Editor with syntax highlighting
 - **Smart auto-completion**: table names, column names, SQL keywords, MySQL functions
@@ -191,8 +201,8 @@ easydb/
 | v1.2.0 | ✅ Released | Data preview filter/sort/pagination, inline editing, schema diff, multi-tab |
 | v1.3.0 | ✅ Released | Dark mode, SQL file import, storage management, query favorites, keyboard shortcuts, export cancellation, auto-update, view/procedure/function/trigger browser |
 | v1.3.1 | ✅ Released | **Database backup & restore** (full backup, table-level selection, consistency snapshot, SHA-256 checksum, restore strategies, restore modes) |
-| **v1.3.2** | 🚧 In Progress | Backup file management, stored procedure execution, parameter inspector |
-| v1.4.0 | 📋 Planned | Slow query analysis, i18n, performance monitoring |
+| v1.3.2 | ✅ Released | Backup file management, **stored procedure execution**, parameter inspector |
+| **v1.4.0** | 🚧 In Progress | Slow query analysis, i18n, performance monitoring |
 
 ## 🤝 Contributing
 

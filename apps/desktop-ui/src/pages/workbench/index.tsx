@@ -48,6 +48,7 @@ import RestoreDatabaseModal from '@/components/RestoreDatabaseModal'
 import { TableDesigner } from '@/components/TableDesigner'
 import { QueryEditorPane } from '@/components/QueryEditorPane'
 import { ShortcutsModal } from '@/components/ShortcutsModal'
+import { CallProcedurePanel, type CallProcedureTarget } from '@/components/CallProcedurePanel'
 import { formatHotkey } from '@/utils/osUtils'
 
 const { Sider, Content } = Layout
@@ -341,6 +342,7 @@ export const WorkbenchPage: React.FC = () => {
   const [restoreModal, setRestoreModal] = useState<{ connectionId: string; connectionName: string; database: string } | null>(null)
 
   const [showShortcuts, setShowShortcuts] = useState(false)
+  const [callProcedureTarget, setCallProcedureTarget] = useState<CallProcedureTarget | null>(null)
 
   const storeAddTab = useSqlEditorStore((s) => s.addTab)
 
@@ -1154,9 +1156,30 @@ export const WorkbenchPage: React.FC = () => {
       const objInfo = dbObjects.find(o => o.name === objName)
       const objType = objInfo?.type ?? 'table'
 
-      // 非表对象（视图/存储过程/函数/触发器）：仅提供查看 DDL
+      // 非表对象（视图/存储过程/函数/触发器）
       if (objType !== 'table') {
-        return [
+        const isProcOrFunc = objType === 'procedure' || objType === 'function'
+        const menuItems: MenuProps['items'] = []
+
+        // 存储过程/函数：执行入口（排在第一位）
+        if (isProcOrFunc) {
+          menuItems.push({
+            key: 'call-procedure',
+            icon: <span style={{ fontSize: 14 }}>{objType === 'function' ? '⨍' : '⚙'}</span>,
+            label: objType === 'function' ? '调用函数...' : '执行存储过程...',
+            onClick: () => {
+              setCallProcedureTarget({
+                connectionId: connId,
+                database: dbName,
+                name: objName,
+                type: objType === 'function' ? 'FUNCTION' : 'PROCEDURE',
+              })
+            },
+          })
+          menuItems.push({ type: 'divider' } as const)
+        }
+
+        menuItems.push(
           {
             key: 'view-ddl',
             icon: <FileText size={14} />,
@@ -1172,7 +1195,8 @@ export const WorkbenchPage: React.FC = () => {
             label: '刷新',
             onClick: () => loadTables(connId, dbName),
           },
-        ]
+        )
+        return menuItems
       }
 
       // 表对象：完整菜单
@@ -2204,6 +2228,14 @@ export const WorkbenchPage: React.FC = () => {
         open={showShortcuts}
         onCancel={() => setShowShortcuts(false)}
       />
+
+      {/* 存储过程/函数执行弹窗 */}
+      {callProcedureTarget && (
+        <CallProcedurePanel
+          target={callProcedureTarget}
+          onClose={() => setCallProcedureTarget(null)}
+        />
+      )}
     </Layout>
 
     {/* 树节点右键菜单 - 放在 Layout 外部确保 fixed 定位生效 */}
