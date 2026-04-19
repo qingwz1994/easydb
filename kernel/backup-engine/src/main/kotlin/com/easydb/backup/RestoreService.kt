@@ -55,30 +55,43 @@ class RestoreService(
                 restoreConn.createStatement().use { it.execute("SET FOREIGN_KEY_CHECKS=0") }
                 restoreConn.createStatement().use { it.execute("SET UNIQUE_CHECKS=0") }
 
-                // 1. Tables structure (5-15%)
-                val totalTables = manifest.tables.size
-                val structureProgressRange = 10 // 5-15%
-                for ((idx, table) in manifest.tables.withIndex()) {
-                    if (reporter.isCancelled()) throw Exception("Task cancelled")
-                    val p = 5 + (structureProgressRange * (idx + 1)) / totalTables.coerceAtLeast(1)
-                    reporter.onProgress(p, "Restoring table structure: ${table.tableName}")
-                    reporter.onLog("INFO", "Creating table ${table.tableName}...")
-
-                    // Drop existing table first to handle partial restore leftovers
-                    restoreConn.createStatement().use { it.execute("DROP TABLE IF EXISTS `${table.tableName}`") }
-
-                    val tableDdl = extractString(table.ddlFile)
-                    if (tableDdl != null) {
-                        restoreConn.createStatement().use { it.execute(tableDdl) }
-                    }
-                }
-
-                // 2. Table Data (15-85%)
+                // Determine tables to restore (apply selectedTables filter for both structure and data)
                 val tablesToRestore = if (config.selectedTables.isEmpty()) manifest.tables
                     else manifest.tables.filter { config.selectedTables.contains(it.tableName) }
-                val totalTablesForData = tablesToRestore.size
-                val dataProgressStart = 15
-                val dataProgressRange = 70 // 15-85%
+
+                val mode = config.mode ?: "restore_all"
+                val restoreStructure = mode == "restore_all" || mode == "structure_only"
+                val restoreData = mode == "restore_all" || mode == "data_only"
+
+                // 1. Tables structure (restore_all: 5-15%, structure_only: 5-40%, data_only: skip)
+                if (restoreStructure) {
+                    val structureProgressEnd = if (mode == "structure_only") 40 else 15
+                    val structureProgressRange = structureProgressEnd - 5
+                    val totalTables = tablesToRestore.size
+                    for ((idx, table) in tablesToRestore.withIndex()) {
+                        if (reporter.isCancelled()) throw Exception("Task cancelled")
+                        val p = 5 + (structureProgressRange * (idx + 1)) / totalTables.coerceAtLeast(1)
+                        reporter.onProgress(p, "Restoring table structure: ${table.tableName}")
+                        reporter.onLog("INFO", "Creating table ${table.tableName}...")
+
+                        // Drop existing table first to handle partial restore leftovers
+                        restoreConn.createStatement().use { it.execute("DROP TABLE IF EXISTS `${table.tableName}`") }
+
+                        val tableDdl = extractString(table.ddlFile)
+                        if (tableDdl != null) {
+                            restoreConn.createStatement().use { it.execute(tableDdl) }
+                        }
+                    }
+                } else {
+                    reporter.onLog("INFO", "Skipping structure restore (data_only mode)")
+                }
+
+                // 2. Table Data (restore_all: 15-85%, data_only: 5-95%, structure_only: skip)
+                if (restoreData) {
+                    val dataProgressStart = if (mode == "data_only") 5 else 15
+                    val dataProgressEnd = if (mode == "data_only") 95 else 85
+                    val dataProgressRange = dataProgressEnd - dataProgressStart
+                    val totalTablesForData = tablesToRestore.size
                 var sqlCount = 0
                 var globalSqlCount = 0L
                 for ((tableIdx, table) in tablesToRestore.withIndex()) {
@@ -136,75 +149,83 @@ class RestoreService(
                     }
                     // Mark this table complete
                     val tableCompleteProgress = dataProgressStart + (dataProgressRange * (tableIdx + 1)) / totalTablesForData.coerceAtLeast(1)
-                    reporter.onProgress(tableCompleteProgress.coerceAtMost(84), "Table ${table.tableName} restored")
+                    reporter.onProgress(tableCompleteProgress.coerceAtMost(dataProgressEnd - 1), "Table ${table.tableName} restored")
                     reporter.onLog("INFO", "Table ${table.tableName} restored ($tableSqlCount batches)")
                 }
+                } else {
+                    reporter.onLog("INFO", "Skipping data restore (structure_only mode)")
+                }
 
-                // 3. Routines (85-90%)
+                // 3. Routines (restore_all: 85-90%, structure_only: 40-50%, data_only: skip)
                 val routines = manifest.objects.filter { it.type == "procedure" || it.type == "function" }
-                if (routines.isNotEmpty()) {
-                    reporter.onProgress(85, "Restoring routines")
+                if (restoreStructure && routines.isNotEmpty()) {
+                    val routinesProgressStart = if (mode == "structure_only") 40 else 85
+                    val routinesProgressEnd = if (mode == "structure_only") 50 else 90
+                    reporter.onProgress(routinesProgressStart, "Restoring routines")
                     reporter.onLog("INFO", "Restoring ${routines.size} routines...")
-                }
-                for ((idx, obj) in routines.withIndex()) {
-                    if (reporter.isCancelled()) throw Exception("Task cancelled")
-                    val p = 85 + (5 * (idx + 1)) / routines.size.coerceAtLeast(1)
-                    reporter.onProgress(p, "Restoring routine: ${obj.name}")
+                    for ((idx, obj) in routines.withIndex()) {
+                        if (reporter.isCancelled()) throw Exception("Task cancelled")
+                        val p = routinesProgressStart + ((routinesProgressEnd - routinesProgressStart) * (idx + 1)) / routines.size.coerceAtLeast(1)
+                        reporter.onProgress(p, "Restoring routine: ${obj.name}")
 
-                    // Drop existing routine first
-                    val dropSql = if (obj.type == "procedure") {
-                        "DROP PROCEDURE IF EXISTS `${obj.name}`"
-                    } else {
-                        "DROP FUNCTION IF EXISTS `${obj.name}`"
+                        // Drop existing routine first
+                        val dropSql = if (obj.type == "procedure") {
+                            "DROP PROCEDURE IF EXISTS `${obj.name}`"
+                        } else {
+                            "DROP FUNCTION IF EXISTS `${obj.name}`"
+                        }
+                        restoreConn.createStatement().use { it.execute(dropSql) }
+
+                        val ddl = extractString(obj.ddlFile)
+                        if (ddl != null) {
+                            val replaced = ddl.replace("`${manifest.database}`", "`${config.targetDatabase}`")
+                            restoreConn.createStatement().use { it.execute(replaced) }
+                        }
                     }
-                    restoreConn.createStatement().use { it.execute(dropSql) }
-
-                    val ddl = extractString(obj.ddlFile)
-                    if (ddl != null) {
-                        val replaced = ddl.replace("`${manifest.database}`", "`${config.targetDatabase}`")
-                        restoreConn.createStatement().use { it.execute(replaced) }
-                    }
                 }
 
-                // 4. Views (90-95%)
+                // 4. Views (restore_all: 90-95%, structure_only: 50-60%, data_only: skip)
                 val views = manifest.objects.filter { it.type == "view" }
-                if (views.isNotEmpty()) {
-                    reporter.onProgress(90, "Restoring views")
+                if (restoreStructure && views.isNotEmpty()) {
+                    val viewsProgressStart = if (mode == "structure_only") 50 else 90
+                    val viewsProgressEnd = if (mode == "structure_only") 60 else 95
+                    reporter.onProgress(viewsProgressStart, "Restoring views")
                     reporter.onLog("INFO", "Restoring ${views.size} views...")
-                }
-                for ((idx, obj) in views.withIndex()) {
-                    if (reporter.isCancelled()) throw Exception("Task cancelled")
-                    val p = 90 + (5 * (idx + 1)) / views.size.coerceAtLeast(1)
-                    reporter.onProgress(p, "Restoring view: ${obj.name}")
+                    for ((idx, obj) in views.withIndex()) {
+                        if (reporter.isCancelled()) throw Exception("Task cancelled")
+                        val p = viewsProgressStart + ((viewsProgressEnd - viewsProgressStart) * (idx + 1)) / views.size.coerceAtLeast(1)
+                        reporter.onProgress(p, "Restoring view: ${obj.name}")
 
-                    // Drop existing view first
-                    restoreConn.createStatement().use { it.execute("DROP VIEW IF EXISTS `${obj.name}`") }
+                        // Drop existing view first
+                        restoreConn.createStatement().use { it.execute("DROP VIEW IF EXISTS `${obj.name}`") }
 
-                    val ddl = extractString(obj.ddlFile)
-                    if (ddl != null) {
-                        val replaced = ddl.replace("`${manifest.database}`", "`${config.targetDatabase}`")
-                        restoreConn.createStatement().use { it.execute(replaced) }
+                        val ddl = extractString(obj.ddlFile)
+                        if (ddl != null) {
+                            val replaced = ddl.replace("`${manifest.database}`", "`${config.targetDatabase}`")
+                            restoreConn.createStatement().use { it.execute(replaced) }
+                        }
                     }
                 }
 
-                // 5. Triggers (95-100%)
+                // 5. Triggers (restore_all: 95-100%, structure_only: 60-100%, data_only: skip)
                 val triggers = manifest.objects.filter { it.type == "trigger" }
-                if (triggers.isNotEmpty()) {
-                    reporter.onProgress(95, "Restoring triggers")
+                if (restoreStructure && triggers.isNotEmpty()) {
+                    val triggersProgressStart = if (mode == "structure_only") 60 else 95
+                    reporter.onProgress(triggersProgressStart, "Restoring triggers")
                     reporter.onLog("INFO", "Restoring ${triggers.size} triggers...")
-                }
-                for ((idx, obj) in triggers.withIndex()) {
-                    if (reporter.isCancelled()) throw Exception("Task cancelled")
-                    val p = 95 + (5 * (idx + 1)) / triggers.size.coerceAtLeast(1)
-                    reporter.onProgress(p, "Restoring trigger: ${obj.name}")
+                    for ((idx, obj) in triggers.withIndex()) {
+                        if (reporter.isCancelled()) throw Exception("Task cancelled")
+                        val p = triggersProgressStart + ((100 - triggersProgressStart) * (idx + 1)) / triggers.size.coerceAtLeast(1)
+                        reporter.onProgress(p, "Restoring trigger: ${obj.name}")
 
-                    // Drop existing trigger first
-                    restoreConn.createStatement().use { it.execute("DROP TRIGGER IF EXISTS `${obj.name}`") }
+                        // Drop existing trigger first
+                        restoreConn.createStatement().use { it.execute("DROP TRIGGER IF EXISTS `${obj.name}`") }
 
-                    val ddl = extractString(obj.ddlFile)
-                    if (ddl != null) {
-                        val replaced = ddl.replace("`${manifest.database}`", "`${config.targetDatabase}`")
-                        restoreConn.createStatement().use { it.execute(replaced) }
+                        val ddl = extractString(obj.ddlFile)
+                        if (ddl != null) {
+                            val replaced = ddl.replace("`${manifest.database}`", "`${config.targetDatabase}`")
+                            restoreConn.createStatement().use { it.execute(replaced) }
+                        }
                     }
                 }
 
