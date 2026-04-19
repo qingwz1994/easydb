@@ -237,6 +237,9 @@ export const sqlApi = {
     }),
   historyList: (connectionId: string) =>
     request(`/api/sql/history?connectionId=${connectionId}`),
+  /** 清空指定连接下的 SQL 历史（不影响其他连接） */
+  historyClearByConnection: (connectionId: string) =>
+    request(`/api/sql/history?connectionId=${connectionId}`, { method: 'DELETE' }),
 }
 
 // ─── 数据迁移 ────────────────────────────────────────────

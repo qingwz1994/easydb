@@ -21,7 +21,7 @@ import {
 } from 'antd'
 import {
   PlayCircleOutlined, ClearOutlined,
-  CodeOutlined, PlusOutlined, StarOutlined, FolderOpenOutlined
+  CodeOutlined, PlusOutlined, StarOutlined, FolderOpenOutlined, HistoryOutlined
 } from '@ant-design/icons'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
@@ -43,6 +43,7 @@ import {
 } from './queryPreview'
 import { SaveScriptModal } from './SaveScriptModal'
 import { SavedScriptsModal } from './SavedScriptsModal'
+import { SqlHistoryDrawer } from './SqlHistoryDrawer'
 import { formatHotkey } from '@/utils/osUtils'
 
 const { Content } = Layout
@@ -85,6 +86,7 @@ export const SqlEditorPage: React.FC = () => {
   const [loadingMoreKey, setLoadingMoreKey] = useState<string | null>(null)
   const [saveModalOpen, setSaveModalOpen] = useState(false)
   const [listModalOpen, setListModalOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [databases, setDatabases] = useState<string[]>([])
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null)
 
@@ -462,6 +464,16 @@ export const SqlEditorPage: React.FC = () => {
               <Button size="small" icon={<StarOutlined />} onClick={() => setSaveModalOpen(true)} disabled={!activeEditorTab?.sql?.trim()}>
                 收藏
               </Button>
+              <Tooltip title="查看当前连接的 SQL 执行历史">
+                <Button
+                  size="small"
+                  icon={<HistoryOutlined />}
+                  onClick={() => setHistoryOpen(true)}
+                  disabled={!currentConnId}
+                >
+                  历史
+                </Button>
+              </Tooltip>
               <Tooltip title={`执行当前/已选 SQL (${formatHotkey(['Cmd', 'Enter'])})`}>
                 <Button type="primary" size="small" icon={<PlayCircleOutlined />} loading={executing} onClick={handleExecute} disabled={!activeEditorTab?.sql?.trim() || !activeEditorTab.connectionId || !activeEditorTab.database}>
                   执行
@@ -646,6 +658,22 @@ export const SqlEditorPage: React.FC = () => {
           if (activeTabKey) {
             updateTabSql(activeTabKey, script.content)
             toast.success('已应用收藏脚本到当前编辑区')
+          }
+        }}
+      />
+
+      {/* SQL 历史抽屉 */}
+      <SqlHistoryDrawer
+        open={historyOpen}
+        connectionId={currentConnId ?? ''}
+        onClose={() => setHistoryOpen(false)}
+        onApply={(sql) => {
+          // 将历史 SQL 填入当前激活的 Monaco Editor
+          if (editorRef.current) {
+            editorRef.current.setValue(sql)
+            editorRef.current.focus()
+          } else if (activeTabKey) {
+            updateTabSql(activeTabKey, sql)
           }
         }}
       />

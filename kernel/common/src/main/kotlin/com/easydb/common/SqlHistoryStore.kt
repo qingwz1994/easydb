@@ -62,10 +62,18 @@ class SqlHistoryStore(
         }
     }
 
-    /** 清空历史 */
+    /** 清空全部历史 */
     fun clear() {
         synchronized(entries) { entries.clear() }
         saveToDiskNow()
+    }
+
+    /** 按连接 ID 清空历史（不影响其他连接） */
+    fun clearByConnection(connectionId: String) {
+        synchronized(entries) {
+            entries.removeAll { it.connectionId == connectionId }
+        }
+        scheduleSave()
     }
 
     // ─── 异步防抖保存 ───────────────────────────────────────

@@ -667,7 +667,12 @@ fun Route.sqlRoutes() {
     }
 
     delete("/history") {
-        ServiceRegistry.sqlHistoryStore.clear()
+        val connectionId = call.request.queryParameters["connectionId"]
+        if (!connectionId.isNullOrBlank()) {
+            ServiceRegistry.sqlHistoryStore.clearByConnection(connectionId)
+        } else {
+            ServiceRegistry.sqlHistoryStore.clear()
+        }
         call.ok(true)
     }
 }
