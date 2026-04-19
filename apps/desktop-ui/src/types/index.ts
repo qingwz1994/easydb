@@ -381,7 +381,8 @@ export interface ChangeEvent {
   timestamp: number
   database: string
   table: string
-  eventType: 'INSERT' | 'UPDATE' | 'DELETE'
+  /** INSERT | UPDATE | DELETE | DDL_CREATE_TABLE | DDL_ALTER_TABLE | DDL_DROP_TABLE | DDL_TRUNCATE_TABLE | DDL_RENAME_TABLE | DDL_OTHER */
+  eventType: string
   columns: string[]
   rowsBefore?: Record<string, string | null>[]
   rowsAfter?: Record<string, string | null>[]
@@ -392,7 +393,11 @@ export interface ChangeEvent {
     position?: number
     serverId?: number
   }
-  transactionId?: string  // 事务 ID，来自 QUERY:BEGIN / XID 事件
+  transactionId?: string
+  // DDL 专属字段（DML 事件为 undefined）
+  ddlSql?: string
+  ddlObjectType?: string
+  ddlRisk?: 'low' | 'medium' | 'high' | 'critical'
 }
 
 export interface TrackerSessionConfig {
@@ -462,6 +467,7 @@ export interface HistoryStats {
   insertCount: number
   updateCount: number
   deleteCount: number
+  ddlCount: number    // DDL 事件计数
   tables: string[]
   timeRange: number[]  // [minTimestamp, maxTimestamp]
 }

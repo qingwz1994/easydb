@@ -24,11 +24,30 @@ import type { Dayjs } from 'dayjs'
 const { Text } = Typography
 const { RangePicker } = DatePicker
 
-// 事件类型颜色映射
+// DML 事件类型颜色映射
 const eventTypeConfig: Record<string, { color: string; label: string }> = {
   INSERT: { color: '#52c41a', label: 'INSERT' },
   UPDATE: { color: '#1890ff', label: 'UPDATE' },
   DELETE: { color: '#ff4d4f', label: 'DELETE' },
+}
+
+// DDL 事件类型映射（单独走风险色）
+const ddlTypeConfig: Record<string, { color: string; label: string; riskColor: string }> = {
+  DDL_CREATE_TABLE:   { color: '#13c2c2', label: 'CREATE TABLE',   riskColor: 'cyan'   },
+  DDL_ALTER_TABLE:    { color: '#fa8c16', label: 'ALTER TABLE',    riskColor: 'orange' },
+  DDL_DROP_TABLE:     { color: '#f5222d', label: 'DROP TABLE',     riskColor: 'red'    },
+  DDL_TRUNCATE_TABLE: { color: '#f5222d', label: 'TRUNCATE TABLE', riskColor: 'red'    },
+  DDL_RENAME_TABLE:   { color: '#fa8c16', label: 'RENAME TABLE',   riskColor: 'orange' },
+  DDL_OTHER:          { color: '#8c8c8c', label: 'DDL',            riskColor: 'default'},
+}
+
+const isDdlEvent = (e: ChangeEvent) => e.eventType.startsWith('DDL_')
+
+const ddlRiskConfig: Record<string, { color: string; label: string }> = {
+  low:      { color: 'green',  label: '低风险' },
+  medium:   { color: 'orange', label: '中风险' },
+  high:     { color: 'red',    label: '高风险' },
+  critical: { color: '#cf1322',label: '极危险' },
 }
 
 export const DataTrackerPage: React.FC = () => {
@@ -417,7 +436,7 @@ export const DataTrackerPage: React.FC = () => {
   }
 
   const doGenerateRollback = () => {
-    // 只对当前页选中的事件生成回滚 SQL（它们已经在 currentPageData 中）
+    // 只对当前页选中的事件生成回滚 SQL
     const selectedEvents = currentPageData
       .filter(e => selectedEventIds.has(e.id))
       .sort((a, b) => b.timestamp - a.timestamp)
@@ -427,12 +446,17 @@ export const DataTrackerPage: React.FC = () => {
       return
     }
 
+    // DDL 事件跳过 + 提示
+    const dmlEvents = selectedEvents.filter(e => !isDdlEvent(e))
+    const ddlSkipped = selectedEvents.length - dmlEvents.length
+
     const sqlStatements: string[] = []
     const warnings: string[] = []
+    if (ddlSkipped > 0) warnings.push(`已跳过 ${ddlSkipped} 个 DDL 事件，v1 不支持 DDL 回滚。`)
 
     sqlStatements.push('-- ====== EasyDB 回滚 SQL ======')
     sqlStatements.push(`-- 生成时间: ${new Date().toLocaleString('zh-CN', { hour12: false })}`)
-    sqlStatements.push(`-- 事件数量: ${selectedEvents.length}`)
+    sqlStatements.push(`-- 事件数量: ${dmlEvents.length}`)
     sqlStatements.push('-- 请仔细核对后在事务中执行')
     sqlStatements.push('')
     sqlStatements.push('BEGIN;')
@@ -442,7 +466,7 @@ export const DataTrackerPage: React.FC = () => {
     const tableSet = new Set<string>()
     let totalRows = 0
 
-    for (const event of selectedEvents) {
+    for (const event of dmlEvents) {
       const db = event.database
       const table = event.table
       tableSet.add(`${db}.${table}`)
@@ -530,12 +554,17 @@ export const DataTrackerPage: React.FC = () => {
       return
     }
 
+    // DDL 事件跳过 + 提示
+    const dmlEvents = selectedEvents.filter(e => !isDdlEvent(e))
+    const ddlSkipped = selectedEvents.length - dmlEvents.length
+
     const sqlStatements: string[] = []
     const warnings: string[] = []
+    if (ddlSkipped > 0) warnings.push(`已跳过 ${ddlSkipped} 个 DDL 事件，v1 不支持 DDL 重放。`)
 
     sqlStatements.push('-- ====== EasyDB 正向重放 SQL ======')
     sqlStatements.push(`-- 生成时间: ${new Date().toLocaleString('zh-CN', { hour12: false })}`)
-    sqlStatements.push(`-- 事件数量: ${selectedEvents.length}`)
+    sqlStatements.push(`-- 事件数量: ${dmlEvents.length}`)
     sqlStatements.push('-- 请仔细核对后在事务中执行')
     sqlStatements.push('')
     sqlStatements.push('BEGIN;')
@@ -545,7 +574,7 @@ export const DataTrackerPage: React.FC = () => {
     const tableSet = new Set<string>()
     let totalRows = 0
 
-    for (const event of selectedEvents) {
+    for (const event of dmlEvents) {
       const db = event.database
       const table = event.table
       tableSet.add(`${db}.${table}`)
@@ -692,8 +721,12 @@ export const DataTrackerPage: React.FC = () => {
     {
       title: '操作',
       dataIndex: 'eventType',
-      width: 90,
+      width: 130,
       render: (type: string) => {
+        if (type.startsWith('DDL_')) {
+          const ddlCfg = ddlTypeConfig[type] || ddlTypeConfig.DDL_OTHER
+          return <Tag color={ddlCfg.color} style={{ fontWeight: 600, fontSize: 11 }}>{ddlCfg.label}</Tag>
+        }
         const config = eventTypeConfig[type]
         return <Tag color={config?.color} style={{ fontWeight: 600, fontSize: 11 }}>{config?.label || type}</Tag>
       },
@@ -740,7 +773,48 @@ export const DataTrackerPage: React.FC = () => {
 
   // ─── 详情面板 ────────────────────────────────────────────────
 
-  const renderDetailPanel = (record: ChangeEvent) => {
+  /** DDL 事件独立详情面板 */
+  const renderDdlDetailPanel = (record: ChangeEvent) => {
+    const ddlCfg = ddlTypeConfig[record.eventType] || ddlTypeConfig.DDL_OTHER
+    const riskCfg = ddlRiskConfig[record.ddlRisk || 'medium']
+    return (
+      <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+        {/* 标题行 */}
+        <div style={{ padding: '10px 14px', borderBottom: `1px solid ${token.colorBorderSecondary}`,
+          display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <Tag color={ddlCfg.color} style={{ margin: 0, fontSize: 11, fontWeight: 600 }}>{ddlCfg.label}</Tag>
+          <Tag color={riskCfg.color} style={{ margin: 0, fontSize: 11 }}>{riskCfg.label}</Tag>
+          {record.ddlObjectType && <Tag color="default" style={{ margin: 0, fontSize: 10 }}>{record.ddlObjectType}</Tag>}
+          <Text strong style={{ fontSize: 13 }}>{record.database}{record.table ? `.${record.table}` : ''}</Text>
+          <Text style={{ fontSize: 11, color: isDark ? '#595959' : '#bfbfbf', marginLeft: 'auto', fontFamily: 'monospace' }}>
+            {new Date(record.timestamp).toLocaleString('zh-CN', { hour12: false })}
+          </Text>
+        </div>
+        {/* 属性行 */}
+        <div style={{ padding: '8px 14px', display: 'flex', gap: 24, flexWrap: 'wrap',
+          borderBottom: `1px solid ${token.colorBorderSecondary}`, fontSize: 12 }}>
+          <span><Text type="secondary">数据库：</Text><Text code>{record.database}</Text></span>
+          {record.table && <span><Text type="secondary">对象：</Text><Text code>{record.table}</Text></span>}
+          {record.sourceInfo?.file && <span><Text type="secondary">Binlog：</Text><Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{record.sourceInfo.file}:{record.sourceInfo.position}</Text></span>}
+        </div>
+        {/* 原始 SQL */}
+        <div style={{ flex: 1, overflow: 'auto', padding: 14 }}>
+          <Text type="secondary" style={{ fontSize: 11, display: 'block', marginBottom: 6 }}>DDL 审计 —— 原始 SQL</Text>
+          <pre style={{
+            background: isDark ? '#141414' : '#fafafa',
+            border: `1px solid ${token.colorBorderSecondary}`,
+            borderRadius: token.borderRadius, padding: 12, fontSize: 12,
+            fontFamily: "'SFMono-Regular', Consolas, monospace",
+            whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0,
+            color: token.colorText,
+          }}>{record.ddlSql || '(无 SQL 记录)'}</pre>
+          <Alert type="info" style={{ marginTop: 10, fontSize: 11 }}
+            message="DDL 审计事件仅支持查看，v1 不支持生成回滚 / 重放 SQL。" />
+        </div>
+      </div>
+    )
+  }
+
     const cols = record.columns || []
     const style = typeStyles[record.eventType as keyof typeof typeStyles] || typeStyles.UPDATE
 
@@ -1157,6 +1231,7 @@ export const DataTrackerPage: React.FC = () => {
               { value: 'INSERT', label: 'INS' },
               { value: 'UPDATE', label: 'UPD' },
               { value: 'DELETE', label: 'DEL' },
+              { value: 'DDL', label: 'DDL' },
             ]}
             size="small"
             block
@@ -1282,28 +1357,38 @@ export const DataTrackerPage: React.FC = () => {
 
           <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>操作</Text>
           <Space direction="vertical" style={{ width: '100%' }} size={8}>
-            <Button
-              icon={<RollbackOutlined />}
-              size="small"
-              block
-              onClick={handleGenerateRollback}
-              disabled={selectedEventIds.size === 0}
-            >
-              生成回滚 SQL ({selectedEventIds.size})
-            </Button>
-            <Button
-              icon={<PlayCircleOutlined />}
-              size="small"
-              block
-              onClick={handleGenerateForward}
-              disabled={selectedEventIds.size === 0}
-            >
-              生成重放 SQL ({selectedEventIds.size})
-            </Button>
+            {(() => {
+              const selectedArr = currentPageData.filter(e => selectedEventIds.has(e.id))
+              const hasDdl = selectedArr.some(e => isDdlEvent(e))
+              const dmlOnly = selectedArr.filter(e => !isDdlEvent(e))
+              return (
+                <>
+                  <Tooltip title={hasDdl ? 'DDL 审计事件将被跳过' : ''} placement="right">
+                    <Button
+                      icon={<RollbackOutlined />}
+                      size="small" block
+                      onClick={handleGenerateRollback}
+                      disabled={selectedEventIds.size === 0 || dmlOnly.length === 0}
+                    >
+                      生成回滚 SQL ({dmlOnly.length})
+                    </Button>
+                  </Tooltip>
+                  <Tooltip title={hasDdl ? 'DDL 审计事件将被跳过' : ''} placement="right">
+                    <Button
+                      icon={<PlayCircleOutlined />}
+                      size="small" block
+                      onClick={handleGenerateForward}
+                      disabled={selectedEventIds.size === 0 || dmlOnly.length === 0}
+                    >
+                      生成重放 SQL ({dmlOnly.length})
+                    </Button>
+                  </Tooltip>
+                </>
+              )
+            })()}
             <Button
               icon={<FileTextOutlined />}
-              size="small"
-              block
+              size="small" block
               onClick={() => {
                 const allIds = new Set(currentPageData.map(e => e.id))
                 setSelectedEventIds(prev => prev.size === allIds.size ? new Set() : allIds)
@@ -1324,7 +1409,7 @@ export const DataTrackerPage: React.FC = () => {
                   const count = type === 'INSERT' ? stats.insertCount
                     : type === 'UPDATE' ? stats.updateCount
                     : stats.deleteCount
-                  const total = stats.insertCount + stats.updateCount + stats.deleteCount
+                  const total = stats.insertCount + stats.updateCount + stats.deleteCount + (stats.ddlCount ?? 0)
                   const barWidth = total > 0 ? (count / total) * 100 : 0
                   return (
                     <div key={type} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
@@ -1343,6 +1428,20 @@ export const DataTrackerPage: React.FC = () => {
                     </div>
                   )
                 })}
+                {/* DDL 一行 */}
+                {(stats.ddlCount ?? 0) > 0 && (() => {
+                  const total = stats.insertCount + stats.updateCount + stats.deleteCount + stats.ddlCount
+                  const barWidth = total > 0 ? (stats.ddlCount / total) * 100 : 0
+                  return (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                      <Tag color="#fa8c16" style={{ fontSize: 10, margin: 0, padding: '0 4px', lineHeight: '18px', minWidth: 44, textAlign: 'center' }}>DDL</Tag>
+                      <div style={{ flex: 1, height: 6, borderRadius: 3, background: diffColors.border, overflow: 'hidden' }}>
+                        <div style={{ width: `${barWidth}%`, height: '100%', borderRadius: 3, background: '#fa8c16', transition: 'width 0.3s ease' }} />
+                      </div>
+                      <Text style={{ fontSize: 11, fontFamily: 'monospace', minWidth: 36, textAlign: 'right' }}>{stats.ddlCount.toLocaleString()}</Text>
+                    </div>
+                  )
+                })()}
               </div>
             </>
           )}
@@ -1587,7 +1686,9 @@ export const DataTrackerPage: React.FC = () => {
             style={{
               width: 420, flexShrink: 0, overflow: 'hidden',
               display: 'flex', flexDirection: 'column',
-              borderLeft: `3px solid ${(typeStyles[selectedEvent.eventType as keyof typeof typeStyles] || typeStyles.UPDATE).border}`,
+              borderLeft: isDdlEvent(selectedEvent)
+                ? `3px solid ${ddlTypeConfig[selectedEvent.eventType]?.color || '#fa8c16'}`
+                : `3px solid ${(typeStyles[selectedEvent.eventType as keyof typeof typeStyles] || typeStyles.UPDATE).border}`,
             }}
             styles={{ body: { padding: 0, flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' } }}
             extra={
@@ -1596,7 +1697,7 @@ export const DataTrackerPage: React.FC = () => {
             }
             title={<Text style={{ fontSize: 12 }}>事件详情</Text>}
           >
-            {renderDetailPanel(selectedEvent)}
+            {isDdlEvent(selectedEvent) ? renderDdlDetailPanel(selectedEvent) : renderDetailPanel(selectedEvent)}
           </Card>
         )}
       </div>

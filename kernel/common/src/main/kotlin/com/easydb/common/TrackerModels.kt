@@ -22,14 +22,18 @@ data class ChangeEvent(
     val id: String,                                    // UUID
     val timestamp: Long,                               // 事件时间戳（毫秒）
     val database: String,                              // 数据库名
-    val table: String,                                 // 表名
-    val eventType: String,                             // INSERT | UPDATE | DELETE
+    val table: String,                                 // 表名（DDL 主对象名，无法解析时为空字符串）
+    val eventType: String,                             // INSERT | UPDATE | DELETE | DDL_*
     val columns: List<String> = emptyList(),            // 列名列表
     val rowsBefore: List<Map<String, String?>>? = null, // UPDATE/DELETE 的旧值
     val rowsAfter: List<Map<String, String?>>? = null,  // INSERT/UPDATE 的新值
     val rowCount: Int = 0,                             // 影响行数
     val sourceInfo: ChangeEventSource? = null,          // 来源信息（binlog 位点等）
-    val transactionId: String? = null                  // 事务 ID（来自 XID 事件，用于事务分组）
+    val transactionId: String? = null,                 // 事务 ID（来自 XID 事件，用于事务分组）
+    // DDL 专属字段（DML 事件中均为 null）
+    val ddlSql: String? = null,                        // 原始 DDL 语句
+    val ddlObjectType: String? = null,                 // TABLE（v1 仅支持表级）
+    val ddlRisk: String? = null                        // low | medium | high | critical
 )
 
 @Serializable
@@ -164,6 +168,7 @@ data class HistoryStats(
     val insertCount: Long = 0,
     val updateCount: Long = 0,
     val deleteCount: Long = 0,
+    val ddlCount: Long = 0,                              // DDL 事件计数
     val tables: List<String> = emptyList(),             // 所有涉及的表名（去重）
     val timeRange: List<Long> = emptyList()             // [minTimestamp, maxTimestamp]
 )
