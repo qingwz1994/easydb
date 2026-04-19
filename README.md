@@ -6,14 +6,14 @@
 
 <p align="center">
   <strong>Open-source, cross-platform database management tool</strong><br>
-  Connection Management · Object Browser · SQL Editor · Data Migration · Data Sync · Data Export · Task Center · Storage Management
+  Connection Management · Object Browser · SQL Editor · Data Migration · Data Sync · Data Export · Backup &amp; Restore · Stored Procedure Execution · Task Center · Secure Connection
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="Platform">
   <img src="https://img.shields.io/badge/database-MySQL-4479A1?logo=mysql&logoColor=white" alt="MySQL">
-  <img src="https://img.shields.io/badge/version-1.3.2--dev-green" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.4.0--dev-green" alt="Version">
 </p>
 
 <p align="center">
@@ -26,7 +26,9 @@
 
 ### 🔌 Connection Management
 - Create, edit, test, group, and search MySQL connections
-- SSH tunnel support
+- **SSH Tunnel**: JSch local port forwarding — bypass jump servers to access internal databases (password & private key authentication)
+- **SSL/TLS Encryption**: CA certificate verification, mutual TLS authentication (PEM format, no JKS conversion needed)
+- **Encrypted Credential Storage**: Connection passwords encrypted at rest with AES-256-GCM (machine-bound key); API responses automatically masked
 
 ### 🗂️ Database Workbench
 - Object tree browser with categorized nodes: Tables · Views · Stored Procedures · Functions · Triggers
@@ -36,14 +38,15 @@
 - Table structure designer and DDL viewer
 
 ### ⚙️ Stored Procedure Execution
-- Right-click menu entry in workbench object tree
-- Auto-load parameter metadata (IN/OUT/INOUT, data types)
+- Right-click menu entry in workbench object tree (⚙ Execute Procedure / ⨍ Call Function)
+- Auto-load parameter metadata (IN/OUT/INOUT direction, data types)
 - Type-aware input components (integer, decimal, boolean, date, datetime, text)
 - NULL checkbox for each parameter
 - OUT parameter value display after execution
 - Multi-result-set support with tabbed display
 - Function return value display
 - Execution duration tracking
+- ProcedureAdapter architecture — extendable to PostgreSQL / DM (KingbaseES)
 
 ### ✏️ SQL Editor
 - Powered by Monaco Editor with syntax highlighting
@@ -67,7 +70,7 @@
 - Support export cancellation with automatic cleanup of incomplete files
 - Direct download of exported files
 
-### 💾 Database Backup & Restore
+### 💾 Database Backup &amp; Restore
 - **Backup**
   - Create standard backup packages (.edbkp) with structure, data, and checksums
   - Three backup modes: full, structure-only, data-only
@@ -85,7 +88,7 @@
 
 ### 📥 SQL File Import
 - Native file picker (Tauri system dialog)
-- Drag & drop upload / manual path input
+- Drag &amp; drop upload / manual path input
 - Stream-based import, no memory pressure for large files
 - Execution stats: success, failure, skip counts
 - Progress tracking, log viewer, cancellation support
@@ -113,11 +116,15 @@
 │  │ Launcher │  │   Common   │  │   Drivers    │ │
 │  │  (Ktor)  │  │ Interfaces │  │ MySQL (SPI)  │ │
 │  └──────────┘  └────────────┘  └──────────────┘ │
+│  ┌──────────────────────────────────────────────┐│
+│  │           SSH / SSL Security Layer           ││
+│  │  CredentialCipher · SshTunnelManager · JDBC  ││
+│  └──────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────┘
          │                           │
     ┌────┴────┐                ┌─────┴─────┐
     │~/.easydb│                │  MySQL DB  │
-    │ Local   │                │           │
+    │AES-256  │                │  via SSH   │
     └─────────┘                └───────────┘
 ```
 
@@ -186,7 +193,7 @@ easydb/
 │   ├── common/              # Interfaces + core services
 │   ├── drivers/mysql/       # MySQL driver (connection/metadata/migration/sync)
 │   ├── launcher/            # HTTP server entry (Ktor)
-│   ├── tunnel/              # SSH tunnel
+│   ├── tunnel/              # SSH tunnel (JSch)
 │   └── api/                 # Protocol definitions
 ├── scripts/                 # Build scripts
 └── docs/                    # Documentation
@@ -200,9 +207,10 @@ easydb/
 | v1.1.0 | ✅ Released | Connection search/filter, data export, task log improvements |
 | v1.2.0 | ✅ Released | Data preview filter/sort/pagination, inline editing, schema diff, multi-tab |
 | v1.3.0 | ✅ Released | Dark mode, SQL file import, storage management, query favorites, keyboard shortcuts, export cancellation, auto-update, view/procedure/function/trigger browser |
-| v1.3.1 | ✅ Released | **Database backup & restore** (full backup, table-level selection, consistency snapshot, SHA-256 checksum, restore strategies, restore modes) |
+| v1.3.1 | ✅ Released | **Database backup &amp; restore** (full backup, table-level selection, consistency snapshot, SHA-256 checksum, restore strategies, restore modes) |
 | v1.3.2 | ✅ Released | Backup file management, **stored procedure execution**, parameter inspector |
-| **v1.4.0** | 🚧 In Progress | Slow query analysis, i18n, performance monitoring |
+| **v1.4.0** | ✅ Released | **Secure Connection** — AES-256-GCM credential encryption, SSH tunnel integration, SSL/TLS JDBC parameters |
+| **v1.5.0** | 🚧 Planned | SQL history UI, schema diff extension (views/procedures/functions), slow query analysis, i18n |
 
 ## 🤝 Contributing
 

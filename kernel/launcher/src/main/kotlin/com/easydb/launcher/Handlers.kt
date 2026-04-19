@@ -44,20 +44,20 @@ fun Route.connectionRoutes() {
     val connMgr = ServiceRegistry.connectionManager
     val querySessionMgr = ServiceRegistry.sqlQuerySessionManager
 
-    // 获取连接列表
+    // 获取连接列表（密码脱敏）
     get("/list") {
-        call.ok(store.getAll())
+        call.ok(store.getAll().map { it.masked() })
     }
 
-    // 新建连接
+    // 新建连接（返回脱敏）
     post("/create") {
         val config = call.receive<ConnectionConfig>()
         val newConfig = config.copy(id = UUID.randomUUID().toString())
         store.save(newConfig)
-        call.ok(newConfig)
+        call.ok(newConfig.masked())
     }
 
-    // 编辑连接
+    // 编辑连接（返回脱敏）
     put("/{id}") {
         val id = call.parameters["id"] ?: return@put call.fail("INVALID_ID", "缺少连接 ID")
         val config = call.receive<ConnectionConfig>()
@@ -66,7 +66,7 @@ fun Route.connectionRoutes() {
             return@put
         }
         val updated = store.save(config.copy(id = id))
-        call.ok(updated)
+        call.ok(updated.masked())
     }
 
     // 删除连接
@@ -85,7 +85,7 @@ fun Route.connectionRoutes() {
         call.ok(result)
     }
 
-    // 打开连接（建立会话并设置上下文）
+    // 打开连接（建立会话 + SSH 隧道 → 工作会话）
     post("/{id}/open") {
         val id = call.parameters["id"] ?: return@post call.fail("INVALID_ID", "缺少连接 ID")
         val config = store.getById(id)
@@ -93,10 +93,30 @@ fun Route.connectionRoutes() {
 
         try {
             querySessionMgr.closeByConnectionId(id)
-            connMgr.openSession(adapter.connectionAdapter(), config)
+
+            // 如果开启了 SSH 隧道，先建隧道，再用本地转发端口连接 MySQL
+            // 注意：需先赋给局部 val，绕过 Kotlin 跨模块 smart cast 限制
+            val sshConfig = config.ssh
+            val effectiveConfig = if (sshConfig != null && sshConfig.enabled) {
+                val sshMgr = ServiceRegistry.sshTunnelManager
+                val localPort = sshMgr.openTunnel(
+                    tunnelId   = id,
+                    sshConfig  = sshConfig,     // 局部 val，smart cast 可用
+                    remoteHost = config.host,
+                    remotePort = config.port
+                )
+                // 用本地转发地址替换原始 主机:port，其余配置保持不变
+                config.copy(host = "127.0.0.1", port = localPort)
+            } else {
+                config
+            }
+
+            connMgr.openSession(adapter.connectionAdapter(), effectiveConfig)
             store.updateStatus(id, "connected")
-            call.ok(store.getById(id)!!)
+            call.ok(store.getById(id)!!.masked())
         } catch (e: Exception) {
+            // 建隧道失败时确保隧道被关闭
+            ServiceRegistry.sshTunnelManager.closeTunnel(id)
             call.fail("CONNECT_FAILED", e.message ?: "打开连接失败")
         }
     }

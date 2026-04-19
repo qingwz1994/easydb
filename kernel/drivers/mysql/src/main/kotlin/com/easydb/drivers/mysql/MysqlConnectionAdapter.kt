@@ -59,7 +59,8 @@ class MysqlConnectionAdapter : ConnectionAdapter {
 
     companion object {
         /**
-         * 创建 JDBC 连接
+         * 创建 JDBC 连接。
+         * 自动读取 config.ssl 配置，映射到 MySQL JDBC SSL 参数。
          */
         fun createJdbcConnection(config: ConnectionConfig): Connection {
             Class.forName("com.mysql.cj.jdbc.Driver")
@@ -68,19 +69,65 @@ class MysqlConnectionAdapter : ConnectionAdapter {
                 setProperty("user", config.username)
                 setProperty("password", config.password)
                 setProperty("connectTimeout", "5000")
-                setProperty("socketTimeout", "300000") // 设置为5分钟，绝对不能设置为 0 (无限等待)，否则在防火墙丢包或连接数被打满时会导致后端线程永久挂起
-                setProperty("useSSL", "false")
+                setProperty("socketTimeout", "300000") // 5 分钟，防止防火墙丢包时线程永久挂起
                 setProperty("allowPublicKeyRetrieval", "true")
-                setProperty("allowMultiQueries", "true") // 支持多语句执行
+                setProperty("allowMultiQueries", "true")        // 支持多语句执行
                 setProperty("serverTimezone", "UTC")
                 setProperty("characterEncoding", "UTF-8")
-                setProperty("rewriteBatchedStatements", "true") // 批量写入优化：合并为多值 INSERT
+                setProperty("rewriteBatchedStatements", "true") // 批量写入：合并为多值 INSERT
                 setProperty("cachePrepStmts", "true")
+
+                // SSL 配置（P0 功能）——读取 config.ssl，替换原硬编码 useSSL=false
+                buildSslProps(config.ssl).forEach { k, v ->
+                    setProperty(k as String, v as String)
+                }
             }
 
             val db = config.database?.let { "/$it" } ?: ""
             val url = "jdbc:mysql://${config.host}:${config.port}$db"
             return DriverManager.getConnection(url, props)
         }
+
+        /**
+         * 构建 SSL Properties。
+         *
+         * 映射关系：
+         *   ssl.enabled=false          → useSSL=false
+         *   ssl.enabled=true,
+         *     rejectUnauthorized=false → useSSL=true, verifyServerCertificate=false（仅加密）
+         *     rejectUnauthorized=true,
+         *       caPath                 → useSSL=true, serverSslCert=<caPath>（验证 CA）
+         *         certPath+keyPath     → 额外客户端双向认证（clientCertificateKeyStoreUrl）
+         */
+        fun buildSslProps(ssl: SslConfig?): Properties {
+            val p = Properties()
+            if (ssl == null || !ssl.enabled) {
+                p.setProperty("useSSL", "false")
+                return p
+            }
+
+            p.setProperty("useSSL", "true")
+            p.setProperty("requireSSL", "true")
+
+            if (!ssl.rejectUnauthorized) {
+                // 仅加密通道，不验证服务端证书（适合自签名场景）
+                p.setProperty("verifyServerCertificate", "false")
+            } else {
+                // 验证服务端 CA 证书
+                p.setProperty("verifyServerCertificate", "true")
+                ssl.caPath?.let { ca ->
+                    // MySQL JDBC 8.x 支持直接使用 PEM 文件，无需 JKS 转换
+                    p.setProperty("serverSslCert", ca)
+                }
+
+                // 客户端双向认证（可选：certPath + keyPath 同时存在）
+                if (!ssl.certPath.isNullOrBlank() && !ssl.keyPath.isNullOrBlank()) {
+                    p.setProperty("clientCertificateKeyStoreUrl", "file:${ssl.certPath}")
+                    p.setProperty("clientCertificateKeyStoreType", "PKCS12")
+                }
+            }
+            return p
+        }
     }
 }
+

@@ -6,14 +6,14 @@
 
 <p align="center">
   <strong>开源、跨平台的数据库管理工具</strong><br>
-  连接管理 · 对象浏览 · SQL 编辑器 · 数据迁移 · 数据同步 · 数据导出 · 任务中心 · 存储管理
+  连接管理 · 对象浏览 · SQL 编辑器 · 数据迁移 · 数据同步 · 数据导出 · 备份恢复 · 存储过程执行 · 任务中心 · 安全连接
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="Platform">
   <img src="https://img.shields.io/badge/database-MySQL-4479A1?logo=mysql&logoColor=white" alt="MySQL">
-  <img src="https://img.shields.io/badge/version-1.3.2--dev-green" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.4.0--dev-green" alt="Version">
 </p>
 
 <p align="center">
@@ -26,7 +26,9 @@
 
 ### 🔌 连接管理
 - 支持 MySQL 连接的创建、编辑、测试、分组、搜索
-- SSH 隧道连接支持
+- **SSH 隧道**：JSch 本地端口转发，真正绕过跳板机访问内网数据库（密码/私钥双认证）
+- **SSL/TLS 加密**：支持 CA 证书验证、客户端双向认证（PEM 格式直读）
+- **凭据加密存储**：连接密码 AES-256-GCM 加密落盘，机器 ID 绑定密钥；API 响应自动脱敏
 
 ### 🗂️ 数据库工作台
 - 对象树分类浏览：表 · 视图 · 存储过程 · 函数 · 触发器
@@ -36,7 +38,7 @@
 - 表结构设计器、DDL 查看
 
 ### ⚙️ 存储过程执行
-- 工作台对象树右键菜单入口
+- 工作台对象树右键菜单入口（⚙ 执行存储过程 / ⨍ 调用函数）
 - 自动加载参数元数据（IN/OUT/INOUT 方向、数据类型）
 - 类型感知输入组件（整数、小数、布尔、日期、文本）
 - 每个参数支持 NULL 复选框
@@ -44,6 +46,7 @@
 - 多结果集 Tab 形式展示
 - 函数返回值单独显示
 - 执行耗时统计
+- ProcedureAdapter 架构，支持扩展 PostgreSQL / 达梦
 
 ### ✏️ SQL 编辑器
 - 基于 Monaco Editor，支持语法高亮
@@ -113,11 +116,15 @@
 │  │ Launcher │  │   Common   │  │   Drivers    │ │
 │  │  (Ktor)  │  │  接口 + 模型 │  │ MySQL (SPI) │ │
 │  └──────────┘  └────────────┘  └──────────────┘ │
+│  ┌──────────────────────────────────────────────┐│
+│  │           SSH/SSL 安全层                     ││
+│  │  CredentialCipher · SshTunnelManager · JDBC  ││
+│  └──────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────┘
          │                           │
     ┌────┴────┐                ┌─────┴─────┐
     │~/.easydb│                │  MySQL DB  │
-    │本地持久化│                │           │
+    │ AES加密  │                │  via SSH   │
     └─────────┘                └───────────┘
 ```
 
@@ -186,7 +193,7 @@ easydb/
 │   ├── common/              # 接口定义 + 核心服务
 │   ├── drivers/mysql/       # MySQL 驱动（连接/元数据/迁移/同步）
 │   ├── launcher/            # HTTP 服务入口（Ktor）
-│   ├── tunnel/              # SSH 隧道
+│   ├── tunnel/              # SSH 隧道（JSch）
 │   └── api/                 # 协议定义
 ├── scripts/                 # 构建脚本
 └── docs/                    # 项目文档
@@ -202,7 +209,8 @@ easydb/
 | v1.3.0 | ✅ 已发布 | 深色模式、SQL 文件导入、存储管理、查询收藏、快捷键体系、导出取消优化、自动更新检查、视图/存储过程/函数/触发器浏览 |
 | v1.3.1 | ✅ 已发布 | **数据库备份恢复**（完整备份、表级选择、一致性快照、SHA-256 校验、恢复策略、恢复模式） |
 | v1.3.2 | ✅ 已发布 | 备份文件管理、**存储过程执行**、参数面板 |
-| **v1.4.0** | 🚧 进行中 | 慢查询分析、国际化 (i18n)、性能监控 |
+| **v1.4.0** | ✅ 已发布 | **安全连接**（凭据 AES-256-GCM 加密、SSH 隧道真正接入、SSL/TLS 参数接入 JDBC） |
+| **v1.5.0** | 🚧 规划中 | SQL 历史前端入口、结构对比扩展（视图/过程/函数）、慢查询分析、国际化 (i18n) |
 
 ## 🤝 参与贡献
 

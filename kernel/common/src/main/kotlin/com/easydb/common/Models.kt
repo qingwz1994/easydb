@@ -99,3 +99,16 @@ data class DatabaseCapabilities(
     val supportsStoredProcedures: Boolean = false,
     val supportsTriggers: Boolean = false
 )
+
+// ─── 安全辅助 ───────────────────────────────────
+
+/**
+ * 返回密码脱敏的副本（用于 API 响应）。
+ * 内存中的原始对象保持明文不变。
+ */
+fun ConnectionConfig.masked(): ConnectionConfig = copy(
+    password = if (password.isNotBlank()) "***" else "",
+    ssh = ssh?.copy(
+        password = if (!ssh.password.isNullOrBlank()) "***" else null
+    )
+)

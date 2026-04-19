@@ -2,6 +2,7 @@ package com.easydb.launcher
 
 import com.easydb.common.*
 import com.easydb.drivers.mysql.MysqlDatabaseAdapter
+import com.easydb.tunnel.SshTunnelManager
 
 /**
  * 服务注册中心
@@ -18,4 +19,5 @@ object ServiceRegistry {
     val sqlHistoryStore = SqlHistoryStore()
     val scriptManager = ScriptManager()
     val changeTracker: ChangeTracker = MysqlBinlogTracker()
+    val sshTunnelManager = SshTunnelManager()   // SSH 隧道管理器（P0）
 }
