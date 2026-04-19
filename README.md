@@ -13,7 +13,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="Platform">
   <img src="https://img.shields.io/badge/database-MySQL-4479A1?logo=mysql&logoColor=white" alt="MySQL">
-  <img src="https://img.shields.io/badge/version-1.3.1-green" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.3.2--dev-green" alt="Version">
 </p>
 
 <p align="center">
@@ -73,9 +73,12 @@
   - Table-level selection: restore specific tables
   - Real-time progress, log output, cancellation support
 
-### 📥 SQL 文件导入
-- 上传并执行 `.sql` 文件
-- 导入进度跟踪和中途取消
+### 📥 SQL File Import
+- Native file picker (Tauri system dialog)
+- Drag & drop upload / manual path input
+- Stream-based import, no memory pressure for large files
+- Execution stats: success, failure, skip counts
+- Progress tracking, log viewer, cancellation support
 
 ### 📋 Task Center
 - Unified management for migration, sync, export, and import tasks
@@ -84,7 +87,8 @@
 
 ### ⚙️ Settings
 - Dark / Light / System theme switching
-- Storage management: disk usage visualization, categorized cleanup (exports / logs / task records)
+- Storage management: disk usage visualization, categorized cleanup (exports / logs / backups / task records)
+- Backup file management: list view, individual delete, batch cleanup by days
 - Auto-update check
 
 ## 🛠️ Tech Stack
@@ -185,9 +189,9 @@ easydb/
 | v1.0 | ✅ Released | MySQL connection → Workbench → SQL Editor → Migration → Sync → Task Center |
 | v1.1.0 | ✅ Released | Connection search/filter, data export, task log improvements |
 | v1.2.0 | ✅ Released | Data preview filter/sort/pagination, inline editing, schema diff, multi-tab |
-| v1.3.0 | ✅ Released | Dark mode, SQL file import, storage management, query favorites, keyboard shortcuts, export cancellation, auto-update, **view/procedure/function/trigger browser** |
-| **v1.3.1** | ✅ Released | **Database backup & restore** (full backup, table-level selection, consistency snapshot, SHA-256 checksum, restore strategies) |
-| **v1.3.2** | 🚧 In Progress | Stored procedure execution, parameter inspector |
+| v1.3.0 | ✅ Released | Dark mode, SQL file import, storage management, query favorites, keyboard shortcuts, export cancellation, auto-update, view/procedure/function/trigger browser |
+| v1.3.1 | ✅ Released | **Database backup & restore** (full backup, table-level selection, consistency snapshot, SHA-256 checksum, restore strategies, restore modes) |
+| **v1.3.2** | 🚧 In Progress | Backup file management, stored procedure execution, parameter inspector |
 | v1.4.0 | 📋 Planned | Slow query analysis, i18n, performance monitoring |
 
 ## 🤝 Contributing
