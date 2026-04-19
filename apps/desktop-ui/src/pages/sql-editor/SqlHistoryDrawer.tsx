@@ -8,7 +8,7 @@
  */
 import React, { useState, useEffect, useMemo } from 'react'
 import {
-  Drawer, Input, List, Button, Space, Tag, Spin, Empty, Modal, Typography, Tooltip,
+  Drawer, Input, List, Button, Space, Tag, Spin, Empty, Modal, Typography, Tooltip, theme,
 } from 'antd'
 import {
   SearchOutlined, DeleteOutlined, CopyOutlined, EnterOutlined,
@@ -18,6 +18,7 @@ import { sqlApi } from '@/services/api'
 import { toast } from '@/utils/notification'
 
 const { Text } = Typography
+const { useToken } = theme
 
 // 与后端 SqlHistoryEntry 对齐（executedAt 是字符串，type 是 query|update|error）
 interface SqlHistoryEntry {
@@ -46,6 +47,7 @@ export const SqlHistoryDrawer: React.FC<SqlHistoryDrawerProps> = ({
   onClose,
   onApply,
 }) => {
+  const { token } = useToken()
   const [allItems, setAllItems] = useState<SqlHistoryEntry[]>([])
   const [keyword, setKeyword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -122,14 +124,14 @@ export const SqlHistoryDrawer: React.FC<SqlHistoryDrawerProps> = ({
       open={open}
       onClose={onClose}
       styles={{
-        // 强制不透明，防止下层工具栏透出
+        // colorBgElevated 是 Ant Design 弹层面板的标准背景 token，自动适配明暗主题
         header: {
-          background: '#1e1e2e',
-          borderBottom: '1px solid rgba(255,255,255,0.1)',
+          background: token.colorBgElevated,
+          borderBottom: `1px solid ${token.colorBorderSecondary}`,
           padding: '12px 16px',
         },
         body: {
-          background: '#1e1e2e',
+          background: token.colorBgElevated,
           padding: '12px 16px',
           display: 'flex',
           flexDirection: 'column',
@@ -192,13 +194,13 @@ export const SqlHistoryDrawer: React.FC<SqlHistoryDrawerProps> = ({
                     wordBreak: 'break-all',
                     fontSize: 12,
                     margin: '0 0 6px',
-                    background: '#13131f',
+                    background: token.colorFillTertiary,
                     padding: '6px 10px',
-                    borderRadius: 6,
-                    border: '1px solid rgba(255,255,255,0.08)',
+                    borderRadius: token.borderRadius,
+                    border: `1px solid ${token.colorBorderSecondary}`,
                     fontFamily: 'Menlo, Monaco, "Courier New", monospace',
                     lineHeight: 1.5,
-                    color: '#e2e8f0',
+                    color: token.colorText,
                   }}>
                     {item.sql}
                   </pre>
