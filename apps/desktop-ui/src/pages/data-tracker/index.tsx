@@ -815,6 +815,7 @@ export const DataTrackerPage: React.FC = () => {
     )
   }
 
+  const renderDetailPanel = (record: ChangeEvent) => {
     const cols = record.columns || []
     const style = typeStyles[record.eventType as keyof typeof typeStyles] || typeStyles.UPDATE
 
