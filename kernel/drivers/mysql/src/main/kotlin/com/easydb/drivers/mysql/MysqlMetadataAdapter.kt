@@ -293,7 +293,7 @@ class MysqlMetadataAdapter : MetadataAdapter {
      * @param objectType: table, view, procedure, function, trigger
      * 注意：SHOW CREATE TRIGGER 返回列为 (Trigger, sql_mode, SQL Original Statement, ...)
      */
-    fun getObjectDdl(session: DatabaseSession, database: String, name: String, objectType: String): String {
+    override fun getObjectDdl(session: DatabaseSession, database: String, name: String, objectType: String): String {
         val conn = session.getJdbcConnection()
         val cmd = when (objectType) {
             "view" -> "SHOW CREATE VIEW `$database`.`$name`"
