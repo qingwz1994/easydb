@@ -71,8 +71,10 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
         lastError.message.includes('NetworkError') ||
         lastError.message.includes('ERR_CONNECTION_REFUSED')
 
-      // 处理 NOT_CONNECTED 错误：自动重连并重试
-      if (lastError instanceof ApiError && lastError.code === 'NOT_CONNECTED') {
+      // 处理 NOT_CONNECTED / CONNECTION_LOST 错误：自动重连并重试
+      if (lastError instanceof ApiError &&
+          (lastError.code === 'NOT_CONNECTED' || lastError.code === 'CONNECTION_LOST')) {
+
         const connectionId = extractConnectionId(path)
         if (connectionId && attempt < MAX_RETRIES) {
           try {

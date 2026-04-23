@@ -97,6 +97,11 @@ fun Application.configureRoutes() {
             route("/tracker") {
                 trackerRoutes()
             }
+
+            // 慢查询分析
+            route("/slow-query") {
+                slowQueryRoutes()
+            }
         }
     }
 }

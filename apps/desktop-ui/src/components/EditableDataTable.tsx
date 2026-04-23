@@ -791,6 +791,14 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
           event.preventDefault()
           handleRowSelect(Math.max(currentIndex - 1, 0))
         }
+
+        // Delete 键：删除当前选中行（不删除已标记删除的行）
+        if (event.key === 'Delete' && isEditable && selectedRowRef.current >= 0) {
+          event.preventDefault()
+          const idx = selectedRowRef.current
+          const alreadyDeleted = pendingRows.some(p => p.type === 'delete' && p.rowIndex === idx)
+          if (!alreadyDeleted) deleteRow(idx)
+        }
       }}
       style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', position: 'relative' }}
     >
@@ -916,10 +924,26 @@ export const EditableDataTable: React.FC<EditableDataTableProps> = ({
           }}
         >
           <Text type="secondary" style={{ fontSize: 12 }}>
-            单击选中，双击编辑，Enter 确认，Esc 取消，Tab 切换
+            单击选中，双击编辑，Enter 确认，Esc 取消，Tab 切换，Delete 删除行
           </Text>
           <Space size={8} wrap>
             <Button size="small" icon={<PlusOutlined />} onClick={addRow}>新增行</Button>
+            <Button
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => {
+                const idx = selectedRowRef.current
+                if (idx < 0 || idx >= effectiveData.length) {
+                  toast.error('请先单击选中一行')
+                  return
+                }
+                const alreadyDeleted = pendingRows.some(p => p.type === 'delete' && p.rowIndex === idx)
+                if (!alreadyDeleted) deleteRow(idx)
+              }}
+            >
+              删除行
+            </Button>
             <Button size="small" icon={<UndoOutlined />} onClick={undoAll} disabled={!hasChanges}>撤销</Button>
             <Button size="small" icon={<ExclamationCircleOutlined />} onClick={previewSql} disabled={!hasChanges}>预览 SQL</Button>
             <Button size="small" type="primary" icon={<SaveOutlined />} onClick={save} loading={saving} disabled={!hasChanges}>

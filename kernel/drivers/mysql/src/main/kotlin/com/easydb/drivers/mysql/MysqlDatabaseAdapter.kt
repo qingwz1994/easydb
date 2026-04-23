@@ -14,6 +14,7 @@ class MysqlDatabaseAdapter : DatabaseAdapter {
     private val syncAdapter        = MysqlSyncAdapter()
     private val migrationAdapter   = MysqlMigrationAdapter()
     private val procedureAdapter_  = MysqlProcedureAdapter()   // 存储过程/函数适配器
+    private val slowQueryAnalyzer_ = MysqlSlowQueryAnalyzer()  // 慢查询分析适配器
 
     override fun dbType(): DbType = DbType.MYSQL
 
@@ -31,5 +32,7 @@ class MysqlDatabaseAdapter : DatabaseAdapter {
     override fun dialectAdapter(): DialectAdapter        = dialectAdapter
     override fun syncAdapter(): SyncAdapter              = syncAdapter
     override fun migrationAdapter(): MigrationAdapter   = migrationAdapter
-    override fun procedureAdapter(): ProcedureAdapter   = procedureAdapter_
+    override fun procedureAdapter(): ProcedureAdapter    = procedureAdapter_
+    override fun slowQueryAnalyzer(): SlowQueryAnalyzer? = slowQueryAnalyzer_
+
 }

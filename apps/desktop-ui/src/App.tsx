@@ -28,6 +28,7 @@ import { TaskCenterPage } from '@/pages/task-center'
 import { SettingsPage } from '@/pages/settings'
 import { StructureComparePage } from '@/pages/structure-compare'
 import { DataTrackerPage } from '@/pages/data-tracker'
+import { SlowQueryPage } from '@/pages/slow-query'
 import { checkForUpdate, getAutoCheckEnabled } from '@/utils/updater'
 import { useThemeStore } from '@/stores/themeStore'
 
@@ -106,6 +107,7 @@ const App: React.FC = () => {
               <Route path="/task-center" element={<TaskCenterPage />} />
               <Route path="/structure-compare" element={<StructureComparePage />} />
               <Route path="/data-tracker" element={<DataTrackerPage />} />
+              <Route path="/slow-query" element={<SlowQueryPage />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Routes>
           </MainLayout>

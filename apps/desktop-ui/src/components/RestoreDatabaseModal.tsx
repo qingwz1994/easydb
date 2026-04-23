@@ -363,7 +363,7 @@ export default function RestoreDatabaseModal({
           </Space>
         ) : step === 1 ? (
           <Space>
-            <Button onClick={() => { setStep(0); setInspectResult(null); setTables([]); setSelectedTableKeys([]) }}>
+            <Button onClick={() => { setStep(0); setInspectResult(null); setTables([]); setSelectedKeys([]) }}>
               重新选择文件
             </Button>
             <Button type="primary" danger={!checksumOk || !fileValid}

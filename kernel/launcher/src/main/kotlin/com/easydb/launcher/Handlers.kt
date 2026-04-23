@@ -930,11 +930,21 @@ private suspend fun getSessionOrFail(
             call.fail("INVALID_ID", "缺少连接 ID")
             return null
         }
-    return connMgr.getSession(connectionId)
-        ?: run {
+
+    // 区分「从未打开」和「已断开/重连失败」两种情况
+    val isActive = connMgr.activeConnectionIds().contains(connectionId)
+    val session = connMgr.getSession(connectionId)
+
+    if (session == null) {
+        if (isActive) {
+            // 连接在 entries 中存在但 session 无效（重连失败）
+            call.fail("CONNECTION_LOST", "数据库连接已断开，请点击「重新连接」后重试")
+        } else {
             call.fail("NOT_CONNECTED", "连接未打开，请先打开连接")
-            return null
         }
+        return null
+    }
+    return session
 }
 
 // ─── 系统路由 ──────────────────────────────────────────────

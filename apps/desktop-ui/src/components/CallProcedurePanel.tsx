@@ -29,7 +29,7 @@ interface ParamInputProps {
   onNullChange: (isNull: boolean) => void
 }
 
-const ParamInput: React.FC<ParamInputProps> = ({ param, value, isNull, onChange, onNullChange }) => {
+const ParamInput: React.FC<ParamInputProps> = ({ param, value, isNull, onChange }) => {
   const dt = param.dataType.toUpperCase()
   const isOut = param.mode === 'OUT'
 

@@ -31,6 +31,13 @@ interface DatabaseAdapter {
     fun syncAdapter(): SyncAdapter
     fun migrationAdapter(): MigrationAdapter
     fun procedureAdapter(): ProcedureAdapter  // 存储过程/函数适配器
+
+    /**
+     * 慢查询分析适配器（可选）。
+     * MySQL 返回 [MysqlSlowQueryAnalyzer] 实例，其他数据库先返回 null。
+     * 调用方应先检查是否为 null 再决定是否展示功能入口。
+     */
+    fun slowQueryAnalyzer(): SlowQueryAnalyzer? = null
 }
 
 // ─── 连接适配器 ───────────────────────────────────────────

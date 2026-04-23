@@ -143,7 +143,6 @@ export default function BackupDatabaseModal({
   const [duration, setDuration] = useState<number | null>(null)
   const [logs, setLogs] = useState<TaskLog[]>([])
   const [resultFilePath, setResultFilePath] = useState<string | null>(null)
-  const [resultFileName, setResultFileName] = useState<string | null>(null)
   const [pollRetry, setPollRetry] = useState(0)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pollingRef = useRef(false)
@@ -281,7 +280,6 @@ export default function BackupDatabaseModal({
           setProgress(100)
           setStep(2)
           setResultFilePath(info.result?.payload?.filePath ?? null)
-          setResultFileName(info.result?.payload?.fileName ?? null)
         }
       }
     } catch {
@@ -325,7 +323,7 @@ export default function BackupDatabaseModal({
     setStep(0); setTaskStatus('pending'); setProgress(0)
     setProgressMsg(''); setStartedAt(null); setDuration(null)
     setPollRetry(0); setTaskId(null); setLogs([])
-    setResultFilePath(null); setResultFileName(null)
+    setResultFilePath(null)
     setEstimate(null); setEstimateLoading(false)
     setSelectedKeys([]); setTableSearch(''); setOutputPath('')
     onClose()
