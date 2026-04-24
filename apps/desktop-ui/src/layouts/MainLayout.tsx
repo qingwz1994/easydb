@@ -20,7 +20,6 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import {
   ApiOutlined,
   DatabaseOutlined,
-  CodeOutlined,
   SwapOutlined,
   SyncOutlined,
   DiffOutlined,
@@ -45,7 +44,6 @@ const { Text } = Typography
 const menuItems = [
   { key: '/connection', icon: <ApiOutlined />, label: '连接管理' },
   { key: '/workbench', icon: <DatabaseOutlined />, label: '工作台' },
-  { key: '/sql-editor', icon: <CodeOutlined />, label: 'SQL 编辑器' },
   { key: '/migration', icon: <SwapOutlined />, label: '数据迁移' },
   { key: '/sync', icon: <SyncOutlined />, label: '数据同步' },
   { key: '/structure-compare', icon: <DiffOutlined />, label: '结构对比' },
@@ -58,7 +56,6 @@ const menuItems = [
 const pageTitle: Record<string, string> = {
   '/connection': '连接管理',
   '/workbench': '工作台',
-  '/sql-editor': 'SQL 编辑器',
   '/migration': '数据迁移',
   '/sync': '数据同步',
   '/structure-compare': '结构对比',
@@ -87,13 +84,11 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   const setSiderCollapsed = useWorkbenchStore((s) => s.setSiderCollapsed)
 
   const currentTitle = pageTitle[location.pathname] ?? ''
-  const isSqlEditor = location.pathname === '/sql-editor'
 
   useEffect(() => {
     const defaultCommands = [
       { id: 'nav-conn', title: '前往 连接管理', category: 'Navigation', icon: <ApiOutlined />, action: () => navigate('/connection') },
       { id: 'nav-wb', title: '前往 工作台', category: 'Navigation', icon: <DatabaseOutlined />, action: () => navigate('/workbench') },
-      { id: 'nav-sql', title: '前往 SQL 编辑器', category: 'Navigation', icon: <CodeOutlined />, action: () => navigate('/sql-editor') },
       { id: 'nav-mig', title: '前往 数据迁移', category: 'Navigation', icon: <SwapOutlined />, action: () => navigate('/migration') },
       { id: 'nav-sync', title: '前往 数据同步', category: 'Navigation', icon: <SyncOutlined />, action: () => navigate('/sync') },
       { id: 'nav-comp', title: '前往 结构对比', category: 'Navigation', icon: <DiffOutlined />, action: () => navigate('/structure-compare') },
@@ -114,11 +109,11 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
     }
   }, [navigate, themeMode, setThemeMode, registerCommand, unregisterCommand])
 
-  // 面包屑项（SQL 编辑器内部有自己的上下文，不显示全局上下文）
+  // 面包屑项
   const breadcrumbItems = [
     { title: currentTitle },
-    ...(!isSqlEditor && activeConnectionName ? [{ title: activeConnectionName }] : []),
-    ...(!isSqlEditor && activeDatabase ? [{ title: activeDatabase }] : []),
+    ...(activeConnectionName ? [{ title: activeConnectionName }] : []),
+    ...(activeDatabase ? [{ title: activeDatabase }] : []),
   ]
 
   return (
@@ -229,7 +224,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
 
           {/* 右侧：当前连接状态 */}
           <Space size={12}>
-            {!isSqlEditor && activeConnectionName ? (
+            {activeConnectionName ? (
               <>
                 <Text type="secondary" style={{ fontSize: 13 }}>
                   <DatabaseOutlined style={{ marginRight: 4 }} />
@@ -238,11 +233,11 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                 </Text>
                 <ConnectionStatusTag status="connected" />
               </>
-            ) : !isSqlEditor ? (
+            ) : (
               <Text type="secondary" style={{ fontSize: 13 }}>
                 未连接
               </Text>
-            ) : null}
+            )}
           </Space>
         </Header>
 

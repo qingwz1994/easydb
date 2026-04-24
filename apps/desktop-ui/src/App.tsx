@@ -21,7 +21,6 @@ import zhCN from 'antd/locale/zh_CN'
 import { MainLayout } from '@/layouts/MainLayout'
 import { ConnectionPage } from '@/pages/connection'
 import { WorkbenchPage } from '@/pages/workbench'
-import { SqlEditorPage } from '@/pages/sql-editor'
 import { MigrationPage } from '@/pages/migration'
 import { SyncPage } from '@/pages/sync'
 import { TaskCenterPage } from '@/pages/task-center'
@@ -101,7 +100,7 @@ const App: React.FC = () => {
               <Route path="/" element={<Navigate to="/connection" replace />} />
               <Route path="/connection" element={<ConnectionPage />} />
               <Route path="/workbench" element={<WorkbenchPage />} />
-              <Route path="/sql-editor" element={<SqlEditorPage />} />
+              <Route path="/sql-editor" element={<Navigate to="/workbench" replace />} />
               <Route path="/migration" element={<MigrationPage />} />
               <Route path="/sync" element={<SyncPage />} />
               <Route path="/task-center" element={<TaskCenterPage />} />

@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react'
-import { Layout, Button, Space, Typography, Tabs, Select, Spin, theme } from 'antd'
-import { PlayCircleOutlined, ClearOutlined } from '@ant-design/icons'
+import { Layout, Button, Space, Typography, Tabs, Select, Spin, theme, Tooltip } from 'antd'
+import { PlayCircleOutlined, ClearOutlined, StarOutlined, FolderOpenOutlined, HistoryOutlined } from '@ant-design/icons'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
 import type { SqlResult, EditabilityStatus } from '@/types'
@@ -12,6 +12,11 @@ import { EditableDataTable } from '@/components/EditableDataTable'
 import { analyzeEditability, extractAllTableNames } from '@/utils/editabilityAnalyzer'
 import { handleApiError, toast } from '@/utils/notification'
 import { createSqlCompletionProvider, clearCompletionCache } from '../pages/sql-editor/sqlCompletionProvider'
+import { SaveScriptModal } from '../pages/sql-editor/SaveScriptModal'
+import { SavedScriptsModal } from '../pages/sql-editor/SavedScriptsModal'
+import { SqlHistoryDrawer } from '../pages/sql-editor/SqlHistoryDrawer'
+import { useAppSettingsStore } from '@/stores/appSettingsStore'
+import { formatHotkey } from '@/utils/osUtils'
 import {
   DEFAULT_SQL_PREVIEW_PAGE_SIZE,
   isPreviewableSql,
@@ -26,9 +31,11 @@ const { Text } = Typography
 
 interface QueryEditorPaneProps {
   queryId: string
+  /** 开启高级 SQL 工具（收藏脚本、SQL 历史等）。默认开启。 */
+  showAdvancedTools?: boolean
 }
 
-export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => {
+export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId, showAdvancedTools = true }) => {
   const { token } = theme.useToken()
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null)
@@ -39,6 +46,13 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
   
   const activeEditorTab = useSqlEditorStore(useCallback(s => s.tabs.find(t => t.key === queryId), [queryId]))
   const storeUpdateTab = useSqlEditorStore((s) => s.updateTab)
+
+  // Advanced tools state
+  const sqlHistoryEnabled          = useAppSettingsStore((s) => s.sqlHistoryEnabled)
+  const sqlHistoryFilterByDatabase = useAppSettingsStore((s) => s.sqlHistoryFilterByDatabase)
+  const [saveModalOpen, setSaveModalOpen] = useState(false)
+  const [listModalOpen, setListModalOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
   
   const [executing, setExecuting] = useState(false)
   const [loadingMoreKey, setLoadingMoreKey] = useState<string | null>(null)
@@ -347,6 +361,7 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
   let queryIndex = 0
 
   return (
+    <>
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* 快捷连接栏 */}
       <div style={{
@@ -387,9 +402,36 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
           />
         </Space>
         <Space>
-          <Button type="primary" size="small" icon={<PlayCircleOutlined />} loading={executing} onClick={handleExecute} disabled={!activeEditorTab?.sql?.trim() || !activeEditorTab.connectionId || !activeEditorTab.database}>
-            执行
-          </Button>
+          {showAdvancedTools && (
+            <>
+              <Button size="small" icon={<FolderOpenOutlined />} onClick={() => setListModalOpen(true)}>
+                打开收藏
+              </Button>
+              <Button size="small" icon={<StarOutlined />} onClick={() => setSaveModalOpen(true)} disabled={!activeEditorTab?.sql?.trim()}>
+                收藏
+              </Button>
+              <Tooltip title="查看当前连接的 SQL 执行历史">
+                <Button
+                  size="small"
+                  icon={<HistoryOutlined />}
+                  onClick={() => setHistoryOpen(true)}
+                  disabled={!activeEditorTab?.connectionId || !sqlHistoryEnabled}
+                >
+                  历史
+                </Button>
+              </Tooltip>
+              <Tooltip title={`执行当前/已选 SQL (${formatHotkey(['Cmd', 'Enter'])})`}>
+                <Button type="primary" size="small" icon={<PlayCircleOutlined />} loading={executing} onClick={handleExecute} disabled={!activeEditorTab?.sql?.trim() || !activeEditorTab.connectionId || !activeEditorTab.database}>
+                  执行
+                </Button>
+              </Tooltip>
+            </>
+          )}
+          {!showAdvancedTools && (
+            <Button type="primary" size="small" icon={<PlayCircleOutlined />} loading={executing} onClick={handleExecute} disabled={!activeEditorTab?.sql?.trim() || !activeEditorTab.connectionId || !activeEditorTab.database}>
+              执行
+            </Button>
+          )}
           <Button size="small" icon={<ClearOutlined />} onClick={handleClear}>清空</Button>
         </Space>
       </div>
@@ -560,5 +602,45 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
         />
       </Content>
     </div>
+
+    {/* 高级工具模态框（收藏脚本 / SQL 历史） */}
+    {showAdvancedTools && activeEditorTab && (
+      <>
+        <SaveScriptModal
+          open={saveModalOpen}
+          initialSql={activeEditorTab.sql}
+          database={activeEditorTab.database}
+          onCancel={() => setSaveModalOpen(false)}
+          onSuccess={() => setSaveModalOpen(false)}
+        />
+        <SavedScriptsModal
+          open={listModalOpen}
+          onCancel={() => setListModalOpen(false)}
+          onSelect={(script) => {
+            storeUpdateTab(queryId, { sql: script.content })
+            editorRef.current?.setValue(script.content)
+            editorRef.current?.focus()
+            setListModalOpen(false)
+            toast.success('已加载收藏脚本到编辑区')
+          }}
+        />
+        <SqlHistoryDrawer
+          open={historyOpen}
+          connectionId={activeEditorTab.connectionId ?? ''}
+          database={sqlHistoryFilterByDatabase ? (activeEditorTab.database ?? undefined) : undefined}
+          onClose={() => setHistoryOpen(false)}
+          onApply={(sql) => {
+            if (editorRef.current) {
+              editorRef.current.setValue(sql)
+              editorRef.current.focus()
+            } else {
+              storeUpdateTab(queryId, { sql })
+            }
+            setHistoryOpen(false)
+          }}
+        />
+      </>
+    )}
+  </>
   )
 }

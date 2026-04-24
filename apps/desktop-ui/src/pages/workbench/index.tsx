@@ -55,6 +55,9 @@ const { Sider, Content } = Layout
 const { Text } = Typography
 type TreeDataNode = DataNode & { 'data-node-key'?: string }
 
+/** 每次 previewRows 加载的行数（与后端 limit 对齐） */
+const PREVIEW_PAGE_SIZE = 1000
+
 /** 分类列表视图 — 独立组件，搜索状态通过 props 持久化 */
 import type { MenuProps } from 'antd'
 
@@ -345,6 +348,39 @@ export const WorkbenchPage: React.FC = () => {
   const [callProcedureTarget, setCallProcedureTarget] = useState<CallProcedureTarget | null>(null)
 
   const storeAddTab = useSqlEditorStore((s) => s.addTab)
+  const consumePendingSql = useSqlEditorStore((s) => s.consumePendingSql)
+
+  // --- 消费 pendingSql（来自结构对比等外部入口）---
+  // 挂载时消费一次，填入新 SQL Tab，不自动执行
+  useEffect(() => {
+    const pending = consumePendingSql()
+    if (!pending?.sql) return
+    const queryId = storeAddTab(pending.connectionId, pending.database)
+    const tabKey = `sql:${queryId}`
+    const connId = pending.connectionId
+    const connName = openConnections.find(c => c.id === connId)?.name || 'SQL 工作区'
+    batchUpdate({
+      openTableTabs: {
+        ...useWorkbenchStore.getState().openTableTabs,
+        [tabKey]: {
+          type: 'sql-query',
+          connectionId: connId || '',
+          connectionName: connName,
+          database: pending.database,
+          queryId,
+          label: 'SQL 工作区',
+        }
+      },
+      activeTableTabKey: tabKey,
+    })
+    useSqlEditorStore.getState().updateTab(queryId, {
+      sql: pending.sql,
+      connectionId: connId,
+      database: pending.database,
+    })
+    toast.success('SQL 已加载到工作区，请审核后手动执行')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // --- 自动加载连接列表 ---
   useEffect(() => {
@@ -455,10 +491,12 @@ export const WorkbenchPage: React.FC = () => {
       if (needTab) {
         if (tab === 'data') {
           promises.push(
-            metadataApi.previewRows(connId, dbName, tableName).then((rows: unknown) => {
+            metadataApi.previewRows(connId, dbName, tableName, { limit: PREVIEW_PAGE_SIZE }).then((rows: unknown) => {
               if (seq !== loadSeqRef.current) return
+              const rowArr = rows as Record<string, unknown>[]
               updateTabState(tabKey, (prev) => ({
-                previewRows: rows as Record<string, unknown>[],
+                previewRows: rowArr,
+                hasMoreRows: rowArr.length >= PREVIEW_PAGE_SIZE,
                 loadedTabs: [...prev.loadedTabs, 'data'],
               }))
             })
@@ -506,6 +544,8 @@ export const WorkbenchPage: React.FC = () => {
         indexes: [],
         ddl: '',
         previewRows: [],
+        hasMoreRows: true,
+        loadingMoreRows: false,
         detailTab: defaultTab,
         loadedTabs: [],
       }
@@ -1677,6 +1717,20 @@ export const WorkbenchPage: React.FC = () => {
                     }}
                     style={{ flexShrink: 0, padding: '0 16px' }}
                     tabBarStyle={{ marginBottom: 0 }}
+                    tabBarExtraContent={{
+                      right: (
+                        <Tooltip title="新建 SQL 查询" placement="bottom">
+                          <Button
+                            size="small"
+                            icon={<PlusOutlined />}
+                            style={{ ...quietButtonStyle, marginRight: 4 }}
+                            onClick={() => openSqlEditor()}
+                          >
+                            新建查询
+                          </Button>
+                        </Tooltip>
+                      )
+                    }}
                     items={tabKeys.map((key) => {
                       const tab = openTableTabs[key]
                       const tabLabel = tab.type === 'table'
@@ -1888,11 +1942,40 @@ export const WorkbenchPage: React.FC = () => {
                                   tableName={t.tableName}
                                   columns={t.columns}
                                   dataSource={t.previewRows}
-                                  onRefresh={() => {
-                                    updateTabState(tabKey, (prev) => ({
-                                      loadedTabs: prev.loadedTabs.filter(k => k !== 'data'),
-                                    }))
-                                    loadTabDataForTab(tabKey, t.connectionId, t.database, t.tableName, 'data')
+                                  hasMore={t.hasMoreRows}
+                                  loadingMore={t.loadingMoreRows}
+                                  onLoadMore={async () => {
+                                    // 防止并发
+                                    if (t.loadingMoreRows || !t.hasMoreRows) return
+                                    updateTabState(tabKey, () => ({ loadingMoreRows: true }))
+                                    try {
+                                      const rows = await metadataApi.previewRows(
+                                        t.connectionId, t.database, t.tableName,
+                                        { limit: PREVIEW_PAGE_SIZE, offset: t.previewRows.length }
+                                      ) as Record<string, unknown>[]
+                                      updateTabState(tabKey, (prev) => ({
+                                        previewRows: [...prev.previewRows, ...rows],
+                                        hasMoreRows: rows.length >= PREVIEW_PAGE_SIZE,
+                                        loadingMoreRows: false,
+                                      }))
+                                    } catch (e) {
+                                      updateTabState(tabKey, () => ({ loadingMoreRows: false }))
+                                      handleApiError(e, '加载更多数据失败')
+                                    }
+                                  }}
+                                  onRefresh={async () => {
+                                    try {
+                                      const rows = await metadataApi.previewRows(
+                                        t.connectionId, t.database, t.tableName,
+                                        { limit: PREVIEW_PAGE_SIZE }
+                                      ) as Record<string, unknown>[]
+                                      updateTabState(tabKey, () => ({
+                                        previewRows: rows,
+                                        hasMoreRows: rows.length >= PREVIEW_PAGE_SIZE,
+                                      }))
+                                    } catch (e) {
+                                      handleApiError(e, '刷新数据失败')
+                                    }
                                   }}
                                   onFilter={async (params) => {
                                     try {
@@ -1901,6 +1984,7 @@ export const WorkbenchPage: React.FC = () => {
                                       ) as Record<string, unknown>[]
                                       updateTabState(tabKey, () => ({
                                         previewRows: rows,
+                                        hasMoreRows: false,
                                       }))
                                     } catch (e) {
                                       handleApiError(e, '筛选数据失败')

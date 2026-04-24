@@ -229,11 +229,11 @@ export const StructureComparePage: React.FC = () => {
       .join('\n\n')
   }
 
-  // 发送到 SQL 编辑器
+  // 发送到 SQL 工作区（Workbench 嵌入)
   const handleSendToEditor = (sql: string) => {
     if (!sql) return
     setPendingSql(sql, targetConnId, targetDb)
-    navigate('/sql-editor')
+    navigate('/workbench')
   }
 
   // 导出 SQL 文件
