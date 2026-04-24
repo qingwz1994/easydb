@@ -16,7 +16,7 @@
  */
 import React, { useState, useMemo, useCallback, useRef, useEffect, useLayoutEffect } from 'react'
 import {
-  Table, Input, Button, Space, Tag, Popconfirm, Typography, theme, Modal, AutoComplete, Select, Divider, Tooltip,
+  Table, Input, Button, Space, Tag, Typography, theme, Modal, AutoComplete, Select, Divider, Tooltip,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
