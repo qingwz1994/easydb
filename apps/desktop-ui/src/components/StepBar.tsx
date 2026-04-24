@@ -1,5 +1,5 @@
 import React from 'react'
-import { Steps, theme } from 'antd'
+import { Steps } from 'antd'
 
 interface StepItem {
   /** 步骤标题 */
@@ -22,13 +22,12 @@ export const StepBar: React.FC<StepBarProps> = ({
   current,
   onChange,
 }) => {
-  const { token } = theme.useToken()
-
   return (
     <div style={{
       padding: '16px 24px',
-      background: token.colorBgContainer,
-      borderBottom: `1px solid ${token.colorBorderSecondary}`,
+      background: 'var(--glass-panel)',
+      backdropFilter: 'var(--glass-blur-sm)',
+      borderBottom: '1px solid var(--glass-border)',
     }}>
       <Steps
         current={current}

@@ -9,7 +9,6 @@
 package com.easydb.launcher
 
 import com.easydb.common.*
-import com.easydb.drivers.mysql.MysqlDatabaseSession
 import com.github.shyiko.mysql.binlog.BinaryLogClient
 import com.github.shyiko.mysql.binlog.event.*
 import kotlinx.coroutines.flow.Flow
@@ -84,6 +83,7 @@ class MysqlBinlogTracker : ChangeTracker {
         private var insertCount = 0L
         private var updateCount = 0L
         private var deleteCount = 0L
+        private var ddlCount    = 0L   // DDL 事件计数
         private val tableSet = LinkedHashSet<String>()
         private var minTimestamp = Long.MAX_VALUE
         private var maxTimestamp = Long.MIN_VALUE
@@ -95,12 +95,13 @@ class MysqlBinlogTracker : ChangeTracker {
         fun add(event: ChangeEvent): Boolean {
             events.add(event)
             // 增量更新统计
-            when (event.eventType) {
-                "INSERT" -> insertCount++
-                "UPDATE" -> updateCount++
-                "DELETE" -> deleteCount++
+            when {
+                event.eventType == "INSERT"              -> insertCount++
+                event.eventType == "UPDATE"              -> updateCount++
+                event.eventType == "DELETE"              -> deleteCount++
+                event.eventType.startsWith("DDL_")      -> ddlCount++
             }
-            tableSet.add(event.table)
+            if (event.table.isNotBlank()) tableSet.add(event.table)
             if (event.timestamp < minTimestamp) minTimestamp = event.timestamp
             if (event.timestamp > maxTimestamp) maxTimestamp = event.timestamp
             return true
@@ -129,7 +130,11 @@ class MysqlBinlogTracker : ChangeTracker {
                 filtered = filtered.filter { it.table == filterTable }
             }
             if (!filterType.isNullOrBlank()) {
-                filtered = filtered.filter { it.eventType == filterType }
+                filtered = when (filterType) {
+                    "DDL" -> filtered.filter { it.eventType.startsWith("DDL_") }
+                    "DML" -> filtered.filter { it.eventType == "INSERT" || it.eventType == "UPDATE" || it.eventType == "DELETE" }
+                    else  -> filtered.filter { it.eventType == filterType }
+                }
             }
             if (startTime != null) {
                 filtered = filtered.filter { it.timestamp >= startTime }
@@ -143,6 +148,7 @@ class MysqlBinlogTracker : ChangeTracker {
                     event.database.lowercase().contains(kw)
                         || event.table.lowercase().contains(kw)
                         || event.eventType.lowercase().contains(kw)
+                        || event.ddlSql?.lowercase()?.contains(kw) == true
                         || event.rowsBefore?.any { row -> row.values.any { v -> v?.lowercase()?.contains(kw) == true } } == true
                         || event.rowsAfter?.any { row -> row.values.any { v -> v?.lowercase()?.contains(kw) == true } } == true
                 }
@@ -191,6 +197,7 @@ class MysqlBinlogTracker : ChangeTracker {
                 insertCount = insertCount,
                 updateCount = updateCount,
                 deleteCount = deleteCount,
+                ddlCount    = ddlCount,
                 tables = tableSet.toList(),
                 timeRange = if (events.isEmpty()) emptyList()
                     else listOf(minTimestamp, maxTimestamp)
@@ -204,6 +211,7 @@ class MysqlBinlogTracker : ChangeTracker {
             insertCount = 0
             updateCount = 0
             deleteCount = 0
+            ddlCount    = 0
             tableSet.clear()
             minTimestamp = Long.MAX_VALUE
             maxTimestamp = Long.MIN_VALUE
@@ -212,8 +220,7 @@ class MysqlBinlogTracker : ChangeTracker {
 
     override fun start(session: DatabaseSession, config: TrackerSessionConfig): String {
         val sessionId = UUID.randomUUID().toString()
-        val mysqlSession = session as MysqlDatabaseSession
-        val connConfig = mysqlSession.config
+        val connConfig = session.config
 
         val client = BinaryLogClient(
             connConfig.host,
@@ -402,7 +409,7 @@ class MysqlBinlogTracker : ChangeTracker {
     }
 
     override fun checkServerCompatibility(session: DatabaseSession): TrackerServerCheck {
-        val conn = (session as MysqlDatabaseSession).connection
+        val conn = session.getJdbcConnection()
         val issues = mutableListOf<String>()
         var binlogEnabled = false
         var binlogFormat: String? = null
@@ -506,7 +513,7 @@ class MysqlBinlogTracker : ChangeTracker {
     }
 
     override fun listBinlogFiles(session: DatabaseSession): List<BinlogFileInfo> {
-        val conn = (session as MysqlDatabaseSession).connection
+        val conn = session.getJdbcConnection()
         val files = mutableListOf<BinlogFileInfo>()
         try {
             conn.createStatement().use { stmt ->
@@ -722,12 +729,23 @@ class MysqlBinlogTracker : ChangeTracker {
             // QUERY: DDL 或事务边界
             EventType.QUERY -> {
                 val data = event.getData<QueryEventData>()
-                val sql = data.sql?.trim()?.uppercase()
-                if (sql == "BEGIN") {
-                    // 新事务开始，生成一个新的事务 ID
-                    session.currentTransactionId = UUID.randomUUID().toString().substring(0, 8)
+                val rawSql = data.sql?.trim() ?: return
+                val upperSql = rawSql.uppercase()
+                when {
+                    upperSql == "BEGIN" -> {
+                        session.currentTransactionId = UUID.randomUUID().toString().substring(0, 8)
+                    }
+                    upperSql.startsWith("COMMIT") ||
+                    upperSql.startsWith("ROLLBACK") ||
+                    upperSql.startsWith("SAVEPOINT") -> {
+                        // 事务控制语句，不记录为业务事件
+                    }
+                    isTableDdl(upperSql) -> {
+                        val dbName = data.database ?: session.config.database ?: ""
+                        handleTableDdlEvent(header, currentFile, session, dbName, rawSql, upperSql)
+                    }
+                    // 其他语句（SET、GRANT、非表级 DDL 等）暴在v1 不输入
                 }
-                // 其他 DDL 语句（CREATE/ALTER/DROP 等）暂不处理
             }
 
             else -> { /* 忽略其他事件类型 */ }
@@ -738,11 +756,79 @@ class MysqlBinlogTracker : ChangeTracker {
         val config = session.config
         // 数据库过滤
         if (!config.database.isNullOrBlank() && config.database != database) return false
-        // 表过滤
-        if (config.filterTables.isNotEmpty() && table !in config.filterTables) return false
+        // 表过滤：DDL 事件对象名为空时不应用表白名单（避免误杀）
+        if (config.filterTables.isNotEmpty() && table.isNotBlank() && table !in config.filterTables) return false
         // 类型过滤
         if (config.filterTypes.isNotEmpty() && type !in config.filterTypes) return false
         return true
+    }
+
+    // ── DDL 识别与处理 ────────────────────────────────────────────
+
+    /** 判断是否为 v1 支持的表级 DDL */
+    private fun isTableDdl(upperSql: String): Boolean =
+        upperSql.startsWith("CREATE TABLE") ||
+        upperSql.startsWith("ALTER TABLE") ||
+        upperSql.startsWith("DROP TABLE") ||
+        upperSql.startsWith("TRUNCATE TABLE") ||
+        upperSql.startsWith("TRUNCATE ") ||
+        upperSql.startsWith("RENAME TABLE")
+
+    /** 表级 DDL 类型分类，返回 (eventType, risk) */
+    private fun classifyTableDdl(upperSql: String): Pair<String, String> = when {
+        upperSql.startsWith("CREATE TABLE")                           -> "DDL_CREATE_TABLE" to "low"
+        upperSql.startsWith("ALTER TABLE")                            -> "DDL_ALTER_TABLE"  to "high"
+        upperSql.startsWith("DROP TABLE")                             -> "DDL_DROP_TABLE"   to "critical"
+        upperSql.startsWith("TRUNCATE")                               -> "DDL_TRUNCATE_TABLE" to "critical"
+        upperSql.startsWith("RENAME TABLE")                           -> "DDL_RENAME_TABLE" to "high"
+        else                                                          -> "DDL_OTHER"         to "medium"
+    }
+
+    /** 从 DDL SQL 中简单提取对象名，提取失败时返回空字符串 */
+    private fun extractTableName(upperSql: String): String {
+        return try {
+            // 匹配：关键字 [反引号或空格] 表名 [反引号或空格或句末]
+            val pattern = Regex("""(?:TABLE|TABLES)\s+`?([\w\$]+)`?(?:\s|;|$)""", RegexOption.IGNORE_CASE)
+            pattern.find(upperSql)?.groupValues?.get(1) ?: ""
+        } catch (_: Exception) { "" }
+    }
+
+    /** 为表级 DDL 事件创建 ChangeEvent 并发出 */
+    private fun handleTableDdlEvent(
+        header: EventHeaderV4,
+        currentFile: String?,
+        session: TrackerSession,
+        database: String,
+        rawSql: String,
+        upperSql: String
+    ) {
+        val (eventType, risk) = classifyTableDdl(upperSql)
+        val tableName = extractTableName(upperSql)
+
+        // 应用数据库过滤（表名为空时不应用表白名单）
+        if (!matchesFilter(session, database, tableName, eventType)) return
+
+        val changeEvent = ChangeEvent(
+            id          = java.util.UUID.randomUUID().toString(),
+            timestamp   = System.currentTimeMillis(),
+            database    = database,
+            table       = tableName,
+            eventType   = eventType,
+            rowCount    = 0,
+            transactionId = null,   // DDL 在 v1 不加入事务组
+            sourceInfo  = ChangeEventSource(
+                type     = "mysql_binlog",
+                file     = currentFile,
+                position = header.position,
+                serverId = header.serverId
+            ),
+            ddlSql        = rawSql,
+            ddlObjectType = "TABLE",
+            ddlRisk       = risk
+        )
+        session.lastProcessedFile     = currentFile
+        session.lastProcessedPosition = header.position
+        emitEvent(session, changeEvent)
     }
 
     private fun emitEvent(session: TrackerSession, event: ChangeEvent) {
@@ -804,7 +890,7 @@ class MysqlBinlogTracker : ChangeTracker {
     private fun loadColumnNames(session: TrackerSession, database: String, table: String): List<String> {
         val columns = mutableListOf<String>()
         try {
-            val conn = (session.dbSession as MysqlDatabaseSession).connection
+            val conn = session.dbSession.getJdbcConnection()
             conn.prepareStatement("""
                 SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
                 WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?

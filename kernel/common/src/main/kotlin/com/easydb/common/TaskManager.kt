@@ -239,6 +239,7 @@ class TaskManager(
         val exports: StorageCategoryInfo,
         val logs: StorageCategoryInfo,
         val config: StorageCategoryInfo,
+        val backups: StorageCategoryInfo,
         val totalSize: Long,
         val totalSizeText: String
     )
@@ -254,14 +255,17 @@ class TaskManager(
         val exportsInfo = calcDirInfo(exportDir)
         val logsDir = File(storageDir, "logs")
         val logsInfo = calcDirInfo(logsDir)
+        val backupsDir = File(storageDir, "backups")
+        val backupsInfo = calcDirInfo(backupsDir, filter = { it.extension == "edbkp" })
         val configSize = storageFile.let { if (it.exists()) it.length() else 0L }
         val configInfo = StorageCategoryInfo(configSize, formatSize(configSize), if (storageFile.exists()) 1 else 0)
-        val totalSize = exportsInfo.size + logsInfo.size + configInfo.size
+        val totalSize = exportsInfo.size + logsInfo.size + configInfo.size + backupsInfo.size
         return StorageInfo(
             basePath = storageDir.absolutePath,
             exports = exportsInfo,
             logs = logsInfo,
             config = configInfo,
+            backups = backupsInfo,
             totalSize = totalSize,
             totalSizeText = formatSize(totalSize)
         )
@@ -345,17 +349,35 @@ class TaskManager(
             "tasks" -> {
                 deletedCount = clearCompleted()
             }
+
+            "backups" -> {
+                val backupsDir = File(storageDir, "backups")
+                if (backupsDir.exists()) {
+                    val expireBefore = if (mode == "all") Long.MAX_VALUE
+                        else System.currentTimeMillis() - days.toLong() * 24 * 60 * 60 * 1000
+                    backupsDir.listFiles()?.forEach { file ->
+                        try {
+                            if (file.isFile && file.extension == "edbkp" &&
+                                (mode == "all" || file.lastModified() < expireBefore)) {
+                                freedSize += file.length()
+                                file.delete()
+                                deletedCount++
+                            }
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
         }
 
         return CleanupResult(deletedCount, freedSize, formatSize(freedSize))
     }
 
-    private fun calcDirInfo(dir: File): StorageCategoryInfo {
+    private fun calcDirInfo(dir: File, filter: ((File) -> Boolean)? = null): StorageCategoryInfo {
         if (!dir.exists()) return StorageCategoryInfo(0L, "0 B", 0)
         var totalSize = 0L
         var count = 0
         dir.listFiles()?.forEach { file ->
-            if (file.isFile) {
+            if (file.isFile && (filter == null || filter(file))) {
                 totalSize += file.length()
                 count++
             }

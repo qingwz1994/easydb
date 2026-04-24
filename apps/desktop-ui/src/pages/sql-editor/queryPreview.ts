@@ -13,7 +13,30 @@ export function isPreviewableSql(sql: string): boolean {
   const normalized = normalizeExecutableSql(sql)
   if (!normalized) return false
   if (normalized.includes(';')) return false
-  return /^(select|show|desc|describe|explain|with)\b/i.test(normalized)
+
+  // 必须以 SELECT/WITH 开头（SHOW/DESC/DESCRIBE/EXPLAIN 不支持 LIMIT/OFFSET 包装）
+  if (!/^(select|with)\b/i.test(normalized)) return false
+
+  // 聚合函数查询（COUNT/SUM/AVG/MAX/MIN）通常只返回一行，不需要分页
+  // 例如：SELECT COUNT(*) FROM table, SELECT MAX(id) FROM table
+  if(/\b(COUNT|SUM|AVG|MAX|MIN)\s*\([^)]*\)/i.test(normalized)) {
+    // 但如果有 GROUP BY，可能返回多行，需要分页
+    if (!/\bGROUP\s+BY\b/i.test(normalized)) {
+      return false
+    }
+  }
+
+  // 没有 FROM 子句的 SELECT（如 SELECT 1, SELECT NOW()）只返回一行
+  if (/^select\b/i.test(normalized) && !/\bFROM\b/i.test(normalized)) {
+    return false
+  }
+
+  // 已经包含 LIMIT 的查询，用户已自行控制行数，不需要再包装
+  if(/\bLIMIT\b/i.test(normalized)) {
+    return false
+  }
+
+  return true
 }
 
 export function formatSqlCell(value: unknown): string {
@@ -35,20 +58,6 @@ export function previewSqlCellText(value: unknown, maxChars = DEFAULT_SQL_CELL_D
   const text = stripSqlCellTruncationMarker(formatSqlCell(value))
   if (text.length <= maxChars) return text
   return `${text.slice(0, maxChars)}…`
-}
-
-export function collectSqlQuerySessionIds(...resultGroups: Array<SqlResult[] | null | undefined>): string[] {
-  const sessionIds = new Set<string>()
-
-  resultGroups.forEach((results) => {
-    results?.forEach((result) => {
-      if (result.querySessionId) {
-        sessionIds.add(result.querySessionId)
-      }
-    })
-  })
-
-  return [...sessionIds]
 }
 
 export function mergeSqlPreviewResult(current: SqlResult, next: SqlResult): SqlResult {

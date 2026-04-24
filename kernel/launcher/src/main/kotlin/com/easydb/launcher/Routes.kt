@@ -69,6 +69,19 @@ fun Application.configureRoutes() {
             route("/export") {
                 exportRoutes()
             }
+            
+            // 备份恢复
+            route("/backup") {
+                backupRoutes()
+            }
+            route("/restore") {
+                restoreRoutes()
+            }
+
+            // 存储过程 / 函数执行
+            route("/procedure") {
+                procedureRoutes()
+            }
 
             // 存储管理
             route("/storage") {
@@ -83,6 +96,11 @@ fun Application.configureRoutes() {
             // 数据追踪（Binlog / CDC）
             route("/tracker") {
                 trackerRoutes()
+            }
+
+            // 慢查询分析
+            route("/slow-query") {
+                slowQueryRoutes()
             }
         }
     }

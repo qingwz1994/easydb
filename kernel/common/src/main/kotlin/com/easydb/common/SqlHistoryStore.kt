@@ -52,20 +52,29 @@ class SqlHistoryStore(
         scheduleSave()
     }
 
-    /** 获取历史列表（支持按 connectionId 和关键词筛选） */
-    fun list(connectionId: String? = null, keyword: String? = null, limit: Int = 100): List<SqlHistoryEntry> {
+    /** 获取历史列表（支持按 connectionId、database 和关键词筛选） */
+    fun list(connectionId: String? = null, database: String? = null, keyword: String? = null, limit: Int = 100): List<SqlHistoryEntry> {
         return synchronized(entries) {
             entries
                 .filter { connectionId == null || it.connectionId == connectionId }
-                .filter { keyword == null || it.sql.contains(keyword, ignoreCase = true) }
+                .filter { database == null     || it.database    == database      }
+                .filter { keyword == null      || it.sql.contains(keyword, ignoreCase = true) }
                 .take(limit)
         }
     }
 
-    /** 清空历史 */
+    /** 清空全部历史 */
     fun clear() {
         synchronized(entries) { entries.clear() }
         saveToDiskNow()
+    }
+
+    /** 按连接 ID 清空历史（不影响其他连接） */
+    fun clearByConnection(connectionId: String) {
+        synchronized(entries) {
+            entries.removeAll { it.connectionId == connectionId }
+        }
+        scheduleSave()
     }
 
     // ─── 异步防抖保存 ───────────────────────────────────────

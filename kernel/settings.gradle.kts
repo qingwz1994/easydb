@@ -11,5 +11,6 @@ include(
     "migration-engine",
     "tunnel",
     "task-center",
+    "backup-engine",
     "launcher"
 )

@@ -21,17 +21,17 @@ import zhCN from 'antd/locale/zh_CN'
 import { MainLayout } from '@/layouts/MainLayout'
 import { ConnectionPage } from '@/pages/connection'
 import { WorkbenchPage } from '@/pages/workbench'
-import { SqlEditorPage } from '@/pages/sql-editor'
 import { MigrationPage } from '@/pages/migration'
 import { SyncPage } from '@/pages/sync'
 import { TaskCenterPage } from '@/pages/task-center'
 import { SettingsPage } from '@/pages/settings'
 import { StructureComparePage } from '@/pages/structure-compare'
 import { DataTrackerPage } from '@/pages/data-tracker'
+import { SlowQueryPage } from '@/pages/slow-query'
 import { checkForUpdate, getAutoCheckEnabled } from '@/utils/updater'
 import { useThemeStore } from '@/stores/themeStore'
 
-const fontFamily = "'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+const fontFamily = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
 const fontFamilyCode = "'JetBrains Mono', 'Fira Code', 'SF Mono', monospace"
 
 const App: React.FC = () => {
@@ -78,13 +78,16 @@ const App: React.FC = () => {
       theme={{
         algorithm: isDark ? theme.darkAlgorithm : theme.defaultAlgorithm,
         token: {
-          colorPrimary: isDark ? '#22C55E' : '#22C55E',
-          colorBgBase: isDark ? '#0F172A' : '#FFFFFF',
-          colorBgContainer: isDark ? '#1E293B' : '#FFFFFF',
-          colorBgElevated: isDark ? '#334155' : '#FFFFFF',
-          colorBorder: isDark ? '#475569' : '#E2E8F0',
-          colorBorderSecondary: isDark ? '#334155' : '#F1F5F9',
-          borderRadius: 6,
+          colorPrimary: isDark ? '#818CF8' : '#7C3AED',
+          colorBgBase: isDark ? '#0f0c29' : '#e8d5f5',
+          colorBgContainer: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.40)',
+          colorBgElevated: isDark ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.55)',
+          colorBgLayout: 'transparent',
+          colorBorder: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.50)',
+          colorBorderSecondary: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.35)',
+          colorText: isDark ? 'rgba(255,255,255,0.95)' : 'rgba(0,0,0,0.85)',
+          colorTextSecondary: isDark ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.55)',
+          borderRadius: 12,
           fontSize: 13,
           fontFamily,
           fontFamilyCode,
@@ -97,12 +100,13 @@ const App: React.FC = () => {
               <Route path="/" element={<Navigate to="/connection" replace />} />
               <Route path="/connection" element={<ConnectionPage />} />
               <Route path="/workbench" element={<WorkbenchPage />} />
-              <Route path="/sql-editor" element={<SqlEditorPage />} />
+              <Route path="/sql-editor" element={<Navigate to="/workbench" replace />} />
               <Route path="/migration" element={<MigrationPage />} />
               <Route path="/sync" element={<SyncPage />} />
               <Route path="/task-center" element={<TaskCenterPage />} />
               <Route path="/structure-compare" element={<StructureComparePage />} />
               <Route path="/data-tracker" element={<DataTrackerPage />} />
+              <Route path="/slow-query" element={<SlowQueryPage />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Routes>
           </MainLayout>

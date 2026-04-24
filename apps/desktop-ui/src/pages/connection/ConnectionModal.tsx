@@ -28,6 +28,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   const [form] = Form.useForm()
   const [sshEnabled, setSshEnabled] = useState(false)
   const [sslEnabled, setSslEnabled] = useState(false)
+  const [sshAuthType, setSshAuthType] = useState<'password' | 'privateKey'>('password')
 
   // 弹窗打开时重置表单
   React.useEffect(() => {
@@ -36,6 +37,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
         form.setFieldsValue(editingConnection)
         setSshEnabled(!!editingConnection.ssh?.enabled)
         setSslEnabled(!!editingConnection.ssl?.enabled)
+        setSshAuthType((editingConnection.ssh?.authType as 'password' | 'privateKey') ?? 'password')
       } else {
         form.resetFields()
         form.setFieldsValue({
@@ -43,6 +45,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
         })
         setSshEnabled(false)
         setSslEnabled(false)
+        setSshAuthType('password')
       }
     }
   }, [open, editingConnection, form])
@@ -77,7 +80,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
       footer={(_, { OkBtn, CancelBtn }) => (
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <a onClick={handleTest} style={{ fontSize: 13 }}>
+            <a onClick={handleTest} style={{ fontSize: 13, color: 'var(--edb-accent)' }}>
               {testing ? '测试中...' : '测试连接'}
             </a>
             {testResult && (
@@ -173,14 +176,31 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
                         <Input placeholder="ssh_user" />
                       </Form.Item>
                       <Form.Item name={['ssh', 'authType']} label="认证方式" initialValue="password">
-                        <Select options={[
-                          { value: 'password', label: '密码' },
-                          { value: 'privateKey', label: '私钥' },
-                        ]} />
+                        <Select
+                          options={[
+                            { value: 'password', label: '密码' },
+                            { value: 'privateKey', label: '私钥' },
+                          ]}
+                          onChange={(v) => setSshAuthType(v as 'password' | 'privateKey')}
+                        />
                       </Form.Item>
-                      <Form.Item name={['ssh', 'password']} label="SSH 密码">
-                        <Input.Password placeholder="SSH 密码" />
-                      </Form.Item>
+                      {/* 密码认证 */}
+                      {sshAuthType === 'password' && (
+                        <Form.Item name={['ssh', 'password']} label="SSH 密码">
+                          <Input.Password placeholder="SSH 密码" />
+                        </Form.Item>
+                      )}
+                      {/* 私钥认证：输入私钥文件路径 */}
+                      {sshAuthType === 'privateKey' && (
+                        <Form.Item
+                          name={['ssh', 'privateKeyPath']}
+                          label="私钥文件路径"
+                          rules={[{ required: sshAuthType === 'privateKey', message: '请输入私钥文件路径' }]}
+                          extra="示例：~/.ssh/id_rsa 或 /Users/you/.ssh/id_ed25519"
+                        >
+                          <Input placeholder="/Users/you/.ssh/id_rsa" />
+                        </Form.Item>
+                      )}
                     </>
                   )}
                 </>

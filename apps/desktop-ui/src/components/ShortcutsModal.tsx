@@ -38,7 +38,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ open, onCancel }
               <kbd 
                 key={i}
                 style={{
-                  background: token.colorBgLayout,
+                  background: 'transparent',
                   border: `1px solid ${token.colorBorder}`,
                   borderRadius: 4,
                   padding: '2px 6px',

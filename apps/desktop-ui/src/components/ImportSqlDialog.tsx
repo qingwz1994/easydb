@@ -449,13 +449,13 @@ export const ImportSqlDialog: React.FC<ImportSqlDialogProps> = ({
                 marginTop: 24,
                 height: 280,
                 overflow: 'auto',
-                background: token.colorBgLayout,
+                background: 'transparent',
                 borderRadius: token.borderRadius,
                 padding: '8px 12px',
                 fontFamily: 'monospace',
                 fontSize: 12,
                 lineHeight: 1.6,
-                border: `1px solid ${token.colorBorderSecondary}`,
+                border: '1px solid var(--glass-border)',
               }}
             >
               {logs.length === 0 ? (
@@ -515,13 +515,13 @@ export const ImportSqlDialog: React.FC<ImportSqlDialogProps> = ({
               style={{
                 height: 220,
                 overflow: 'auto',
-                background: token.colorBgLayout,
+                background: 'transparent',
                 borderRadius: token.borderRadius,
                 padding: '8px 12px',
                 fontFamily: 'monospace',
                 fontSize: 12,
                 lineHeight: 1.6,
-                border: `1px solid ${token.colorBorderSecondary}`,
+                border: '1px solid var(--glass-border)',
               }}
             >
               {logs.length === 0 ? (

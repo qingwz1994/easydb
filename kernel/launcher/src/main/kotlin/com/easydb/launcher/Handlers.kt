@@ -44,20 +44,20 @@ fun Route.connectionRoutes() {
     val connMgr = ServiceRegistry.connectionManager
     val querySessionMgr = ServiceRegistry.sqlQuerySessionManager
 
-    // 获取连接列表
+    // 获取连接列表（密码脱敏）
     get("/list") {
-        call.ok(store.getAll())
+        call.ok(store.getAll().map { it.masked() })
     }
 
-    // 新建连接
+    // 新建连接（返回脱敏）
     post("/create") {
         val config = call.receive<ConnectionConfig>()
         val newConfig = config.copy(id = UUID.randomUUID().toString())
         store.save(newConfig)
-        call.ok(newConfig)
+        call.ok(newConfig.masked())
     }
 
-    // 编辑连接
+    // 编辑连接（返回脱敏）
     put("/{id}") {
         val id = call.parameters["id"] ?: return@put call.fail("INVALID_ID", "缺少连接 ID")
         val config = call.receive<ConnectionConfig>()
@@ -66,7 +66,7 @@ fun Route.connectionRoutes() {
             return@put
         }
         val updated = store.save(config.copy(id = id))
-        call.ok(updated)
+        call.ok(updated.masked())
     }
 
     // 删除连接
@@ -85,7 +85,7 @@ fun Route.connectionRoutes() {
         call.ok(result)
     }
 
-    // 打开连接（建立会话并设置上下文）
+    // 打开连接（建立会话 + SSH 隧道 → 工作会话）
     post("/{id}/open") {
         val id = call.parameters["id"] ?: return@post call.fail("INVALID_ID", "缺少连接 ID")
         val config = store.getById(id)
@@ -93,10 +93,30 @@ fun Route.connectionRoutes() {
 
         try {
             querySessionMgr.closeByConnectionId(id)
-            connMgr.openSession(adapter.connectionAdapter(), config)
+
+            // 如果开启了 SSH 隧道，先建隧道，再用本地转发端口连接 MySQL
+            // 注意：需先赋给局部 val，绕过 Kotlin 跨模块 smart cast 限制
+            val sshConfig = config.ssh
+            val effectiveConfig = if (sshConfig != null && sshConfig.enabled) {
+                val sshMgr = ServiceRegistry.sshTunnelManager
+                val localPort = sshMgr.openTunnel(
+                    tunnelId   = id,
+                    sshConfig  = sshConfig,     // 局部 val，smart cast 可用
+                    remoteHost = config.host,
+                    remotePort = config.port
+                )
+                // 用本地转发地址替换原始 主机:port，其余配置保持不变
+                config.copy(host = "127.0.0.1", port = localPort)
+            } else {
+                config
+            }
+
+            connMgr.openSession(adapter.connectionAdapter(), effectiveConfig)
             store.updateStatus(id, "connected")
-            call.ok(store.getById(id)!!)
+            call.ok(store.getById(id)!!.masked())
         } catch (e: Exception) {
+            // 建隧道失败时确保隧道被关闭
+            ServiceRegistry.sshTunnelManager.closeTunnel(id)
             call.fail("CONNECT_FAILED", e.message ?: "打开连接失败")
         }
     }
@@ -253,9 +273,7 @@ fun Route.metadataRoutes() {
                 if (!charset.isNullOrBlank()) append(" CHARACTER SET $charset")
                 if (!collation.isNullOrBlank()) append(" COLLATE $collation")
             }
-            val connField = session.javaClass.getDeclaredField("connection")
-            connField.isAccessible = true
-            val jdbcConn = connField.get(session) as java.sql.Connection
+            val jdbcConn = session.getJdbcConnection()
             jdbcConn.createStatement().use { it.execute(sql) }
             call.ok(true)
         } catch (e: Exception) {
@@ -275,9 +293,7 @@ fun Route.metadataRoutes() {
                 ?: return@post call.fail("INVALID_REQUEST", "缺少 newName 参数")
             val dialect = adapter.dialectAdapter()
             val sql = "RENAME TABLE ${dialect.quoteIdentifier(database)}.${dialect.quoteIdentifier(oldName)} TO ${dialect.quoteIdentifier(database)}.${dialect.quoteIdentifier(newName)}"
-            val connField = session.javaClass.getDeclaredField("connection")
-            connField.isAccessible = true
-            val jdbcConn = connField.get(session) as java.sql.Connection
+            val jdbcConn = session.getJdbcConnection()
             jdbcConn.createStatement().use { it.execute(sql) }
             call.ok(true)
         } catch (e: Exception) {
@@ -382,9 +398,7 @@ fun Route.metadataRoutes() {
             val tableDef = parseTableDefinition(body)
             val ddl = adapter.dialectAdapter().buildCreateTable(tableDef)
 
-            val connField = session.javaClass.getDeclaredField("connection")
-            connField.isAccessible = true
-            val jdbcConn = connField.get(session) as java.sql.Connection
+            val jdbcConn = session.getJdbcConnection()
             jdbcConn.createStatement().use { stmt ->
                 stmt.execute("USE ${adapter.dialectAdapter().quoteIdentifier(database)}")
                 stmt.execute(ddl)
@@ -402,9 +416,7 @@ fun Route.metadataRoutes() {
         val database = call.parameters["database"]!!
         val table = call.parameters["table"]!!
         try {
-            val connField = session.javaClass.getDeclaredField("connection")
-            connField.isAccessible = true
-            val jdbcConn = connField.get(session) as java.sql.Connection
+            val jdbcConn = session.getJdbcConnection()
             val dialect = adapter.dialectAdapter()
             jdbcConn.createStatement().use { stmt ->
                 stmt.execute("USE ${dialect.quoteIdentifier(database)}")
@@ -422,9 +434,7 @@ fun Route.metadataRoutes() {
         val database = call.parameters["database"]!!
         val table = call.parameters["table"]!!
         try {
-            val connField = session.javaClass.getDeclaredField("connection")
-            connField.isAccessible = true
-            val jdbcConn = connField.get(session) as java.sql.Connection
+            val jdbcConn = session.getJdbcConnection()
             val dialect = adapter.dialectAdapter()
             jdbcConn.createStatement().use { stmt ->
                 stmt.execute("USE ${dialect.quoteIdentifier(database)}")
@@ -450,10 +460,8 @@ fun Route.metadataRoutes() {
             call.ok(DataEditResult(success = true, sqlStatements = sqlStatements))
         } else {
             try {
-                // 通过反射获取底层 JDBC 连接（同 SqlExecutionService）
-                val connField = session.javaClass.getDeclaredField("connection")
-                connField.isAccessible = true
-                val jdbcConn = connField.get(session) as java.sql.Connection
+                // 获取底层 JDBC 连接执行 DML
+                val jdbcConn = session.getJdbcConnection()
 
                 var totalAffected = 0
                 jdbcConn.createStatement().use { stmt ->
@@ -481,13 +489,34 @@ fun Route.metadataRoutes() {
 // ─── SQL 执行路由 ──────────────────────────────────────────
 fun Route.sqlRoutes() {
     val connMgr = ServiceRegistry.connectionManager
+    val adapter = ServiceRegistry.mysqlAdapter
+    val store = ServiceRegistry.connectionStore
     val sqlService = ServiceRegistry.sqlService
     val querySessionMgr = ServiceRegistry.sqlQuerySessionManager
     val historyStore = ServiceRegistry.sqlHistoryStore
 
+    /**
+     * 确保 SQL 会话可用：如果连接未打开，自动从 connectionStore 取 config 重连。
+     * 仅用于 SQL 编辑器路由，其他模块（迁移/同步/导出）不使用此逻辑。
+     */
+    fun ensureSqlSession(connectionId: String): DatabaseSession? {
+        // 1. 已有 session 直接返回
+        connMgr.getSqlSession(connectionId)?.let { return it }
+
+        // 2. 尝试自动重连
+        val config = store.getById(connectionId) ?: return null
+        return try {
+            connMgr.openSession(adapter.connectionAdapter(), config)
+            store.updateStatus(connectionId, "connected")
+            connMgr.getSqlSession(connectionId)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     post("/execute") {
         val req = call.receive<SqlExecuteRequest>()
-        val session = connMgr.getSession(req.connectionId)
+        val session = ensureSqlSession(req.connectionId)
         if (session == null) {
             val errorResult = SqlResult(
                 type = "error", duration = 0, sql = req.sql,
@@ -505,7 +534,7 @@ fun Route.sqlRoutes() {
 
     post("/query-preview") {
         val req = call.receive<SqlQueryPreviewRequest>()
-        val session = connMgr.getSession(req.connectionId)
+        val session = ensureSqlSession(req.connectionId)
         if (session == null) {
             val errorResult = SqlResult(
                 type = "error",
@@ -534,7 +563,7 @@ fun Route.sqlRoutes() {
 
     post("/query-session/start") {
         val req = call.receive<SqlQuerySessionStartRequest>()
-        val session = connMgr.getSession(req.connectionId)
+        val session = ensureSqlSession(req.connectionId)
         if (session == null) {
             val errorResult = SqlResult(
                 type = "error",
@@ -556,22 +585,6 @@ fun Route.sqlRoutes() {
         )
         historyStore.add(req.connectionId, req.database, req.sql, result)
         call.ok(result)
-    }
-
-    post("/query-session/fetch") {
-        val req = call.receive<SqlQuerySessionFetchRequest>()
-        call.ok(querySessionMgr.fetch(req.querySessionId, req.pageSize, req.maxCellChars))
-    }
-
-    post("/query-session/status") {
-        val req = call.receive<SqlQuerySessionStatusRequest>()
-        call.ok(querySessionMgr.getStatus(req.querySessionId))
-    }
-
-    post("/query-session/close") {
-        val req = call.receive<SqlQuerySessionCloseRequest>()
-        querySessionMgr.close(req.querySessionId)
-        call.ok(true)
     }
 
     post("/import-file/start") {
@@ -648,13 +661,19 @@ fun Route.sqlRoutes() {
 
     get("/history") {
         val connectionId = call.request.queryParameters["connectionId"]
-        val keyword = call.request.queryParameters["keyword"]
-        val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 100
-        call.ok(historyStore.list(connectionId, keyword, limit))
+        val database     = call.request.queryParameters["database"]     // 可选：按库过滤
+        val keyword      = call.request.queryParameters["keyword"]
+        val limit        = call.request.queryParameters["limit"]?.toIntOrNull() ?: 100
+        call.ok(historyStore.list(connectionId, database, keyword, limit))
     }
 
     delete("/history") {
-        ServiceRegistry.sqlHistoryStore.clear()
+        val connectionId = call.request.queryParameters["connectionId"]
+        if (!connectionId.isNullOrBlank()) {
+            ServiceRegistry.sqlHistoryStore.clearByConnection(connectionId)
+        } else {
+            ServiceRegistry.sqlHistoryStore.clear()
+        }
         call.ok(true)
     }
 }
@@ -702,8 +721,8 @@ fun Route.migrationRoutes() {
             var dedicatedSourceConn: java.sql.Connection? = null
             var dedicatedTargetConn: java.sql.Connection? = null
             try {
-                val sourceConfig = (sourceSession as MysqlDatabaseSession).config
-                val targetConfig = (targetSession as MysqlDatabaseSession).config
+                val sourceConfig = sourceSession.config
+                val targetConfig = targetSession.config
                 dedicatedSourceConn = MysqlConnectionAdapter.createJdbcConnection(sourceConfig)
                 dedicatedTargetConn = MysqlConnectionAdapter.createJdbcConnection(targetConfig)
                 val taskSourceSession = MysqlDatabaseSession(sourceConfig.id, sourceConfig, dedicatedSourceConn)
@@ -780,8 +799,8 @@ fun Route.syncRoutes() {
             var dedicatedSourceConn: java.sql.Connection? = null
             var dedicatedTargetConn: java.sql.Connection? = null
             try {
-                val sourceConfig = (sourceSession as MysqlDatabaseSession).config
-                val targetConfig = (targetSession as MysqlDatabaseSession).config
+                val sourceConfig = sourceSession.config
+                val targetConfig = targetSession.config
                 dedicatedSourceConn = MysqlConnectionAdapter.createJdbcConnection(sourceConfig)
                 dedicatedTargetConn = MysqlConnectionAdapter.createJdbcConnection(targetConfig)
                 val taskSourceSession = MysqlDatabaseSession(sourceConfig.id, sourceConfig, dedicatedSourceConn)
@@ -911,11 +930,21 @@ private suspend fun getSessionOrFail(
             call.fail("INVALID_ID", "缺少连接 ID")
             return null
         }
-    return connMgr.getSession(connectionId)
-        ?: run {
+
+    // 区分「从未打开」和「已断开/重连失败」两种情况
+    val isActive = connMgr.activeConnectionIds().contains(connectionId)
+    val session = connMgr.getSession(connectionId)
+
+    if (session == null) {
+        if (isActive) {
+            // 连接在 entries 中存在但 session 无效（重连失败）
+            call.fail("CONNECTION_LOST", "数据库连接已断开，请点击「重新连接」后重试")
+        } else {
             call.fail("NOT_CONNECTED", "连接未打开，请先打开连接")
-            return null
         }
+        return null
+    }
+    return session
 }
 
 // ─── 系统路由 ──────────────────────────────────────────────

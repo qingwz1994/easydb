@@ -14,7 +14,7 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-import React, { useEffect, useState, useCallback, useRef, useDeferredValue, useMemo, useLayoutEffect, type MouseEvent as ReactMouseEvent } from 'react'
+import React, { useEffect, useState, useCallback, useRef, useDeferredValue, useMemo, useLayoutEffect, type CSSProperties } from 'react'
 import {
   Layout, Tree, Tabs, Table, Typography, Input, Space, Button, Tag, Tooltip, Modal, Dropdown,
   theme, Breadcrumb,
@@ -34,7 +34,7 @@ import { useWorkbenchStore, type TableTabState, type WorkbenchTab } from '@/stor
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useSqlEditorStore } from '@/stores/sqlEditorStore'
 import { useCommandStore } from '@/stores/commandStore'
-import { metadataApi, connectionApi, scriptApi } from '@/services/api'
+import { metadataApi, connectionApi, scriptApi, setReconnectCallback } from '@/services/api'
 import { handleApiError, toast } from '@/utils/notification'
 import { exportTableData } from '@/utils/exportUtils'
 import { EmptyState } from '@/components/EmptyState'
@@ -43,13 +43,20 @@ import { CreateDatabaseModal } from '@/components/CreateDatabaseModal'
 import { EditDatabaseModal } from '@/components/EditDatabaseModal'
 import { ImportSqlDialog } from '@/components/ImportSqlDialog'
 import ExportDatabaseModal from '@/components/ExportDatabaseModal'
+import BackupDatabaseModal from '@/components/BackupDatabaseModal'
+import RestoreDatabaseModal from '@/components/RestoreDatabaseModal'
 import { TableDesigner } from '@/components/TableDesigner'
 import { QueryEditorPane } from '@/components/QueryEditorPane'
 import { ShortcutsModal } from '@/components/ShortcutsModal'
+import { CallProcedurePanel, type CallProcedureTarget } from '@/components/CallProcedurePanel'
 import { formatHotkey } from '@/utils/osUtils'
 
 const { Sider, Content } = Layout
 const { Text } = Typography
+type TreeDataNode = DataNode & { 'data-node-key'?: string }
+
+/** 每次 previewRows 加载的行数（与后端 limit 对齐） */
+const PREVIEW_PAGE_SIZE = 1000
 
 /** 分类列表视图 — 独立组件，搜索状态通过 props 持久化 */
 import type { MenuProps } from 'antd'
@@ -66,6 +73,21 @@ const CategoryListView: React.FC<{
 }> = ({ database, category, objects, objectCategories, onSelectObject, search, onSearchChange }) => {
   const { token } = theme.useToken()
   const deferredSearch = useDeferredValue(search)
+  const compactPanelStyle = useMemo<CSSProperties>(() => ({
+    background: 'var(--glass-panel)',
+    backdropFilter: 'var(--glass-blur-sm)',
+    border: '1px solid var(--glass-border)',
+    borderRadius: token.borderRadiusLG,
+    boxShadow: 'var(--glass-shadow), var(--glass-inner-glow)',
+  }), [token.borderRadiusLG])
+  const summaryCardStyle = useMemo<CSSProperties>(() => ({
+    ...compactPanelStyle,
+    padding: '16px 18px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+    minHeight: 112,
+  }), [compactPanelStyle])
 
   const catDef = objectCategories.find((c) => c.key === category)
   const categoryObjects = objects.filter((t) => catDef?.types.includes(t.type))
@@ -77,7 +99,6 @@ const CategoryListView: React.FC<{
       )
     : categoryObjects
 
-  // 极速计算硬核 DBA 指标
   const isTables = category === 'tables'
 
   const formatBytes = (bytes: number) => {
@@ -141,21 +162,25 @@ const CategoryListView: React.FC<{
           ]
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', padding: '24px 32px', background: token.colorBgLayout }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-        <Space>
-          <Text strong style={{ fontSize: 20, display: 'flex', alignItems: 'center', gap: 8 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', padding: '20px 24px', background: 'transparent' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16, gap: 16 }}>
+        <div>
+          <Text strong style={{ fontSize: 18, display: 'flex', alignItems: 'center', gap: 8 }}>
             {catDef?.icon}
-            <span>{catDef?.label} ({categoryObjects.length})</span>
+            <span>{catDef?.label}</span>
           </Text>
-          <Text type="secondary" style={{ fontSize: 13 }}>/ {database}</Text>
-        </Space>
+          <Space size={8} style={{ marginTop: 6 }} wrap>
+            <Text type="secondary" style={{ fontSize: 12 }}>{database}</Text>
+            <Tag bordered={false} style={{ marginInlineEnd: 0, borderRadius: 999, paddingInline: 10 }}>
+              {categoryObjects.length} 个对象
+            </Tag>
+          </Space>
+        </div>
         <Input
-          placeholder="在此过滤表名称或注释..."
+          placeholder="筛选对象名称或注释"
           prefix={<Search size={14} color={token.colorTextQuaternary} style={{ marginRight: 4 }}/>}
           size="middle"
-          variant="filled"
-          style={{ width: 300, borderRadius: 6 }}
+          style={{ width: 300, borderRadius: 10 }}
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
           allowClear
@@ -163,26 +188,39 @@ const CategoryListView: React.FC<{
       </div>
 
       {isTables && categoryObjects.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 20, flexShrink: 0 }}>
-          <div style={{ background: token.colorBgContainer, padding: '16px 20px', borderRadius: 12, border: `1px solid ${token.colorBorderSecondary}`, display: 'flex', flexDirection: 'column' }}>
-            <Text type="secondary" style={{ fontSize: 12, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}><Zap size={14} color={token.colorPrimary}/> 磁盘存储霸主 (Top 1 物理体积)</Text>
-            <Text strong style={{ fontSize: 16 }}>{topTable?.name}</Text>
-            <Text type="secondary" style={{ fontSize: 12, marginTop: 4 }}>占据 {formatBytes((topTable?.dataLength || 0) + (topTable?.indexLength || 0))} 容量</Text>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12, marginBottom: 16, flexShrink: 0 }}>
+          <div style={summaryCardStyle}>
+            <Text type="secondary" style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Zap size={14} color={token.colorPrimary} />
+              最大存储占用表
+            </Text>
+            <Text strong style={{ fontSize: 16 }}>{topTable?.name ?? '—'}</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {topTable ? formatBytes((topTable.dataLength || 0) + (topTable.indexLength || 0)) : '暂无统计'}
+            </Text>
           </div>
-          <div style={{ background: token.colorBgContainer, padding: '16px 20px', borderRadius: 12, border: `1px solid ${token.colorBorderSecondary}`, display: 'flex', flexDirection: 'column' }}>
-            <Text type="secondary" style={{ fontSize: 12, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}><Database size={14} /> 全库表体积总计</Text>
-            <Text strong style={{ fontSize: 24, fontFamily: 'monospace', lineHeight: 1 }}>{formatBytes(totalDisk)}</Text>
-            <Text type="secondary" style={{ fontSize: 12, marginTop: 6 }}>纯数据与索引体积</Text>
+          <div style={summaryCardStyle}>
+            <Text type="secondary" style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Database size={14} />
+              表空间合计
+            </Text>
+            <Text strong style={{ fontSize: 22, fontFamily: 'var(--font-family-code)', lineHeight: 1.15 }}>{formatBytes(totalDisk)}</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>数据与索引占用总和</Text>
           </div>
-          <div style={{ background: token.colorBgContainer, padding: '16px 20px', borderRadius: 12, border: `1px solid ${token.colorBorderSecondary}`, display: 'flex', flexDirection: 'column' }}>
-            <Text type="secondary" style={{ fontSize: 12, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}><Eye size={14} color={nonInnodbCount > 0 ? token.colorWarning : token.colorSuccess} /> 架构健康度预警</Text>
-            <Text strong style={{ fontSize: 24, lineHeight: 1, color: nonInnodbCount > 0 ? token.colorWarning : token.colorSuccess }}>{nonInnodbCount}</Text>
-            <Text type="secondary" style={{ fontSize: 12, marginTop: 6 }}>非 InnoDB 引擎的表数量</Text>
+          <div style={summaryCardStyle}>
+            <Text type="secondary" style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Eye size={14} color={nonInnodbCount > 0 ? token.colorWarning : token.colorSuccess} />
+              引擎一致性
+            </Text>
+            <Text strong style={{ fontSize: 22, lineHeight: 1.15, color: nonInnodbCount > 0 ? token.colorWarning : token.colorSuccess }}>
+              {nonInnodbCount}
+            </Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>非 InnoDB 表数量</Text>
           </div>
         </div>
       )}
 
-      <div style={{ flex: 1, overflow: 'hidden', background: token.colorBgContainer, borderRadius: 12, border: `1px solid ${token.colorBorderSecondary}` }}>
+      <div style={{ ...compactPanelStyle, flex: 1, overflow: 'hidden' }}>
         <Table
           dataSource={filtered}
           columns={catColumns}
@@ -202,6 +240,24 @@ const CategoryListView: React.FC<{
 
 export const WorkbenchPage: React.FC = () => {
   const { token } = theme.useToken()
+  const panelStyle = useMemo<CSSProperties>(() => ({
+    background: 'var(--glass-panel)',
+    backdropFilter: 'var(--glass-blur-sm)',
+    border: '1px solid var(--glass-border)',
+    borderRadius: token.borderRadiusLG,
+    boxShadow: 'var(--glass-shadow), var(--glass-inner-glow)',
+  }), [token.borderRadiusLG])
+  const compactPanelStyle = useMemo<CSSProperties>(() => ({
+    ...panelStyle,
+    borderRadius: token.borderRadius,
+    boxShadow: '0 8px 24px rgba(15, 23, 42, 0.08)',
+  }), [panelStyle, token.borderRadius])
+  const quietButtonStyle = useMemo<CSSProperties>(() => ({
+    background: 'var(--glass-panel)',
+    borderColor: 'var(--glass-border)',
+    color: token.colorText,
+    boxShadow: 'none',
+  }), [token.colorText])
 
   // --- Store（持久化状态，路由切换不丢失）---
   const openConnections = useWorkbenchStore((s) => s.openConnections)
@@ -258,12 +314,22 @@ export const WorkbenchPage: React.FC = () => {
     return () => { loadSeqRef.current++ }
   }, [])
 
-  // --- 右键菜单状态（单个 Dropdown 代替 N 个）---
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; nodeKey: string } | null>(null)
   // --- Tab 右键菜单 ---
   const [tabCtxMenu, setTabCtxMenu] = useState<{ x: number; y: number; tabKey: string } | null>(null)
 
+  // --- 树节点右键菜单 ---
+  const [treeCtxMenu, setTreeCtxMenu] = useState<{ x: number; y: number; nodeKey: string } | null>(null)
 
+  // ESC 键关闭树节点右键菜单
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setTreeCtxMenu(null)
+    }
+    if (treeCtxMenu) {
+      document.addEventListener('keydown', handleEsc)
+      return () => document.removeEventListener('keydown', handleEsc)
+    }
+  }, [treeCtxMenu])
 
   // --- 新建数据库弹窗状态 ---
   const [createDbModal, setCreateDbModal] = useState<{ connectionId: string; connectionName: string } | null>(null)
@@ -275,10 +341,46 @@ export const WorkbenchPage: React.FC = () => {
   // --- SQL 文件导入弹窗状态 ---
   const [importSqlModal, setImportSqlModal] = useState<{ connectionId: string; connectionName: string; database?: string } | null>(null)
   const [exportModal, setExportModal] = useState<{ connectionId: string; connectionName: string, database: string } | null>(null)
+  const [backupModal, setBackupModal] = useState<{ connectionId: string; connectionName: string; database: string } | null>(null)
+  const [restoreModal, setRestoreModal] = useState<{ connectionId: string; connectionName: string; database: string } | null>(null)
 
   const [showShortcuts, setShowShortcuts] = useState(false)
+  const [callProcedureTarget, setCallProcedureTarget] = useState<CallProcedureTarget | null>(null)
 
   const storeAddTab = useSqlEditorStore((s) => s.addTab)
+  const consumePendingSql = useSqlEditorStore((s) => s.consumePendingSql)
+
+  // --- 消费 pendingSql（来自结构对比等外部入口）---
+  // 挂载时消费一次，填入新 SQL Tab，不自动执行
+  useEffect(() => {
+    const pending = consumePendingSql()
+    if (!pending?.sql) return
+    const queryId = storeAddTab(pending.connectionId, pending.database)
+    const tabKey = `sql:${queryId}`
+    const connId = pending.connectionId
+    const connName = openConnections.find(c => c.id === connId)?.name || 'SQL 工作区'
+    batchUpdate({
+      openTableTabs: {
+        ...useWorkbenchStore.getState().openTableTabs,
+        [tabKey]: {
+          type: 'sql-query',
+          connectionId: connId || '',
+          connectionName: connName,
+          database: pending.database,
+          queryId,
+          label: 'SQL 工作区',
+        }
+      },
+      activeTableTabKey: tabKey,
+    })
+    useSqlEditorStore.getState().updateTab(queryId, {
+      sql: pending.sql,
+      connectionId: connId,
+      database: pending.database,
+    })
+    toast.success('SQL 已加载到工作区，请审核后手动执行')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // --- 自动加载连接列表 ---
   useEffect(() => {
@@ -288,6 +390,14 @@ export const WorkbenchPage: React.FC = () => {
       }).catch(() => {})
     }
   }, [connections.length, setConnections])
+
+  // --- 设置自动重连回调（API 层 NOT_CONNECTED 处理）---
+  useEffect(() => {
+    setReconnectCallback((connectionId: string) => {
+      updateConnection(connectionId, { status: 'connected' })
+    })
+    return () => setReconnectCallback(null)
+  }, [updateConnection])
 
   // --- 加载某个连接的数据库列表 ---
   // 确保连接已打开（自动重连）
@@ -381,10 +491,12 @@ export const WorkbenchPage: React.FC = () => {
       if (needTab) {
         if (tab === 'data') {
           promises.push(
-            metadataApi.previewRows(connId, dbName, tableName).then((rows: unknown) => {
+            metadataApi.previewRows(connId, dbName, tableName, { limit: PREVIEW_PAGE_SIZE }).then((rows: unknown) => {
               if (seq !== loadSeqRef.current) return
+              const rowArr = rows as Record<string, unknown>[]
               updateTabState(tabKey, (prev) => ({
-                previewRows: rows as Record<string, unknown>[],
+                previewRows: rowArr,
+                hasMoreRows: rowArr.length >= PREVIEW_PAGE_SIZE,
                 loadedTabs: [...prev.loadedTabs, 'data'],
               }))
             })
@@ -432,6 +544,8 @@ export const WorkbenchPage: React.FC = () => {
         indexes: [],
         ddl: '',
         previewRows: [],
+        hasMoreRows: true,
+        loadingMoreRows: false,
         detailTab: defaultTab,
         loadedTabs: [],
       }
@@ -725,26 +839,28 @@ export const WorkbenchPage: React.FC = () => {
   // --- 解决切换工作台路由时的海量节点遍历卡顿 ---
   const [deferTree, setDeferTree] = useState(true)
   useEffect(() => {
-    // 延迟 50ms 计算树，让页面骨架先秒切渲染，解决点击“工作台”即卡死的性能瓶颈
+    // 延迟 50ms 计算树，让页面骨架先秒切渲染，解决点击"工作台"即卡死的性能瓶颈
     const timer = setTimeout(() => setDeferTree(false), 50)
     return () => clearTimeout(timer)
   }, [])
 
-  const treeData: DataNode[] = useMemo(() => {
+  const treeData: TreeDataNode[] = useMemo(() => {
     if (deferTree) return [] // 初次渲染不计算
 
-    const scriptsNode: DataNode = {
+    const scriptsNode: TreeDataNode = {
       key: 'saved-scripts',
+      'data-node-key': 'saved-scripts',
       title: <span style={{ fontWeight: 600 }}>📚 收藏脚本</span>,
       children: savedScripts.map(s => ({
         key: `script:${s.id}`,
+        'data-node-key': `script:${s.id}`,
         title: s.name,
         icon: <StarOutlined style={{ color: token.colorWarning }} />,
         isLeaf: true,
       }))
     }
 
-    const connNodes = openConnections.map((conn) => {
+    const connNodes: TreeDataNode[] = openConnections.map((conn) => {
     const connDbs = databasesMap[conn.id] || []
     const isLoading = loadingConns.has(conn.id)
 
@@ -762,7 +878,7 @@ export const WorkbenchPage: React.FC = () => {
         // 数据库名不匹配且子对象也不匹配 → 过滤掉
         if (deferredSearch && !dbNameMatches && !hasMatchingObjects) return null
 
-        const categoryChildren: DataNode[] = objectCategories
+        const categoryChildren: TreeDataNode[] = objectCategories
           .map((cat) => {
             const items = dbObjects.filter(
               (t) => cat.types.includes(t.type)
@@ -770,29 +886,33 @@ export const WorkbenchPage: React.FC = () => {
             )
             return {
               key: `cat:${conn.id}:${db.name}:${cat.key}`,
+              'data-node-key': `cat:${conn.id}:${db.name}:${cat.key}`,
               title: `${cat.label} (${items.length})`,
               icon: cat.icon,
               children: items.map((t) => ({
                 key: `obj:${conn.id}:${db.name}:${t.name}`,
+                'data-node-key': `obj:${conn.id}:${db.name}:${t.name}`,
                 title: t.name,
                 icon: t.type === 'view' ? iconView : t.type === 'trigger' ? iconTrigger : t.type === 'procedure' ? iconProcedure : t.type === 'function' ? iconFunction : iconTable,
                 isLeaf: true,
               })),
-            } as DataNode
+            } as TreeDataNode
           })
           .filter((cat) => !deferredSearch || (cat.children && cat.children.length > 0))
 
         return {
           key: `db:${conn.id}:${db.name}`,
+          'data-node-key': `db:${conn.id}:${db.name}`,
           title: db.name,
           icon: iconDb,
           children: categoryChildren,
-        } as DataNode
+        } as TreeDataNode
       })
-      .filter(Boolean) as DataNode[]
+      .filter(Boolean) as TreeDataNode[]
 
     return {
       key: `conn:${conn.id}`,
+      'data-node-key': `conn:${conn.id}`,
       title: (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', paddingRight: 4 }}>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
@@ -810,8 +930,8 @@ export const WorkbenchPage: React.FC = () => {
         </div>
       ),
       icon: iconConn,
-      children: isLoading ? [{ key: `loading:${conn.id}`, title: '加载中...', isLeaf: true, selectable: false }] : dbChildren,
-    } as DataNode
+      children: isLoading ? [{ key: `loading:${conn.id}`, 'data-node-key': `loading:${conn.id}`, title: '加载中...', isLeaf: true, selectable: false }] : dbChildren,
+    } as TreeDataNode
   })
 
   return [scriptsNode, ...connNodes]
@@ -972,6 +1092,24 @@ export const WorkbenchPage: React.FC = () => {
         },
         { type: 'divider' },
         {
+          key: 'backup-db',
+          icon: <DatabaseOutlined />,
+          label: '备份数据库...',
+          onClick: () => {
+            const conn = openConnections.find((c) => c.id === connId)
+            setBackupModal({ connectionId: connId, connectionName: conn?.name ?? '', database: dbName })
+          }
+        },
+        {
+          key: 'restore-db',
+          icon: <ReloadOutlined />,
+          label: '恢复数据库...',
+          onClick: () => {
+            const conn = openConnections.find((c) => c.id === connId)
+            setRestoreModal({ connectionId: connId, connectionName: conn?.name ?? '', database: dbName })
+          }
+        },
+        {
           key: 'export-db',
           icon: <ExportOutlined />,
           label: '导出数据库...',
@@ -1058,9 +1196,30 @@ export const WorkbenchPage: React.FC = () => {
       const objInfo = dbObjects.find(o => o.name === objName)
       const objType = objInfo?.type ?? 'table'
 
-      // 非表对象（视图/存储过程/函数/触发器）：仅提供查看 DDL
+      // 非表对象（视图/存储过程/函数/触发器）
       if (objType !== 'table') {
-        return [
+        const isProcOrFunc = objType === 'procedure' || objType === 'function'
+        const menuItems: MenuProps['items'] = []
+
+        // 存储过程/函数：执行入口（排在第一位）
+        if (isProcOrFunc) {
+          menuItems.push({
+            key: 'call-procedure',
+            icon: <span style={{ fontSize: 14 }}>{objType === 'function' ? '⨍' : '⚙'}</span>,
+            label: objType === 'function' ? '调用函数...' : '执行存储过程...',
+            onClick: () => {
+              setCallProcedureTarget({
+                connectionId: connId,
+                database: dbName,
+                name: objName,
+                type: objType === 'function' ? 'FUNCTION' : 'PROCEDURE',
+              })
+            },
+          })
+          menuItems.push({ type: 'divider' } as const)
+        }
+
+        menuItems.push(
           {
             key: 'view-ddl',
             icon: <FileText size={14} />,
@@ -1076,7 +1235,8 @@ export const WorkbenchPage: React.FC = () => {
             label: '刷新',
             onClick: () => loadTables(connId, dbName),
           },
-        ]
+        )
+        return menuItems
       }
 
       // 表对象：完整菜单
@@ -1198,9 +1358,11 @@ export const WorkbenchPage: React.FC = () => {
     return []
   }, [openConnections, loadDatabases, loadTables, selectedCtx, setSelectedCtx, handleTableExport, setCreateDbModal, setEditDbModal, setImportSqlModal, setExportModal, openTableDesignerTab, objectsMap, openOrActivateTab, updateTabState, loadTabDataForTab])
 
-  // ctxMenuItems 缓存（必须在 getContextMenuItems 之后）
-  const ctxMenuItems = useMemo(() => ctxMenu ? getContextMenuItems(ctxMenu.nodeKey) : [], [ctxMenu, getContextMenuItems])
-
+  // 延迟计算菜单项：仅在右键触发瞬间计算 1 次（而非 titleRender 中 N 次）
+  const treeCtxMenuItems = useMemo(
+    () => (treeCtxMenu ? getContextMenuItems(treeCtxMenu.nodeKey) : []),
+    [treeCtxMenu, getContextMenuItems]
+  )
   // 可添加的连接列表（排除已在工作台中的）
   const availableConnections = connections.filter(
     (c) => !openConnections.some((o) => o.id === c.id)
@@ -1219,13 +1381,16 @@ export const WorkbenchPage: React.FC = () => {
     : []
 
   return (
-    <Layout style={{ height: '100%' }}>
+    <>
+      <Layout style={{ height: '100%' }}>
       {/* 左侧对象树 */}
       <Sider
         width={280}
         style={{
-          background: token.colorBgContainer,
-          borderRight: `1px solid ${token.colorBorderSecondary}`,
+          background: 'var(--glass-panel)',
+          backdropFilter: 'var(--glass-blur-sm)',
+          borderRight: '1px solid var(--glass-border)',
+          boxShadow: 'none',
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
@@ -1234,8 +1399,11 @@ export const WorkbenchPage: React.FC = () => {
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
         <style>{`
           .workbench-object-tree .ant-tree-node-content-wrapper.ant-tree-node-selected {
-            background: ${token.colorPrimaryBg};
-            color: ${token.colorPrimary};
+            background: ${token.controlItemBgActive} !important;
+            color: ${token.colorText} !important;
+            border: none !important;
+            box-shadow: inset 2px 0 0 ${token.colorPrimary};
+            border-radius: ${token.borderRadiusSM}px;
           }
           .workbench-object-tree .ant-tree-title {
             display: inline-block;
@@ -1250,14 +1418,27 @@ export const WorkbenchPage: React.FC = () => {
             align-items: center;
             width: 100%;
             overflow: hidden;
+            border-radius: ${token.borderRadiusSM}px;
+            transition: background 200ms ease;
+            padding-right: 4px;
+          }
+          .workbench-object-tree .ant-tree-node-content-wrapper:hover {
+            background: ${token.controlItemBgHover} !important;
+          }
+          .workbench-object-tree .ant-tree-switcher {
+            color: ${token.colorTextTertiary};
           }
         `}</style>
-        {/* --- 极致优化的侧边栏微型头部 --- */}
-        <div style={{ padding: '12px 14px 8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: token.colorTextQuaternary, letterSpacing: 0.5 }}>
-            DATABASES
-          </span>
-          <Space size={2}>
+        <div style={{ padding: '16px', borderBottom: '1px solid var(--glass-border)' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+            <div style={{ minWidth: 0 }}>
+              <Text strong style={{ fontSize: 15, color: token.colorText }}>
+                资源浏览器
+              </Text>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+                {openConnections.length > 0 ? `${openConnections.length} 个连接已载入工作台` : '添加连接后即可浏览数据库对象'}
+              </Text>
+            </div>
             <Dropdown
               trigger={['click']}
               placement="bottomRight"
@@ -1278,26 +1459,58 @@ export const WorkbenchPage: React.FC = () => {
                   : [{ key: 'empty', label: <span style={{ color: token.colorTextQuaternary }}>全体连接已载入</span>, disabled: true }],
               }}
             >
-              <Tooltip title="接入数据库" placement="bottom">
-                <Button loading={!!connectingId} type="text" size="small" icon={!connectingId && <Plus size={14} />} style={{ width: 24, height: 24, padding: 0, color: token.colorTextSecondary }} />
+              <Tooltip title="添加连接" placement="bottom">
+                <Button
+                  loading={!!connectingId}
+                  size="small"
+                  icon={!connectingId && <Plus size={14} />}
+                  style={{ ...quietButtonStyle, minWidth: 92 }}
+                >
+                  添加连接
+                </Button>
               </Tooltip>
             </Dropdown>
+          </div>
+          <Space size={8} wrap style={{ marginTop: 12 }}>
+            <Tag bordered={false} style={{ marginInlineEnd: 0, borderRadius: 999, paddingInline: 10 }}>
+              连接 {openConnections.length}
+            </Tag>
+            <Tag bordered={false} style={{ marginInlineEnd: 0, borderRadius: 999, paddingInline: 10 }}>
+              脚本 {savedScripts.length}
+            </Tag>
+            {activeConnectionName && (
+              <Tag bordered={false} color="processing" style={{ marginInlineEnd: 0, borderRadius: 999, paddingInline: 10 }}>
+                当前: {activeConnectionName}
+              </Tag>
+            )}
           </Space>
         </div>
 
-        {/* --- 无感下沉搜索框 --- */}
-        <div style={{ padding: '0 12px 8px' }}>
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--glass-border)' }}>
           <Input
-            placeholder="在此过滤表或数据库..."
+            placeholder="筛选数据库、表、视图或脚本"
             prefix={<Search size={14} color={token.colorTextQuaternary} style={{ marginRight: 4 }} />}
-            variant="filled"
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
             allowClear
-            style={{ borderRadius: 6, fontSize: 12, padding: '4px 10px' }}
+            style={{ borderRadius: 10, fontSize: 12 }}
           />
         </div>
-        <div ref={treeContainerRef} style={{ flex: 1, overflow: 'hidden' }}>
+        <div
+          ref={treeContainerRef}
+          style={{ flex: 1, overflow: 'hidden' }}
+          onContextMenu={(e) => {
+            // 事件委托：从冒泡路径中查找 data-tree-key，作为 onRightClick 的可靠 fallback
+            const el = (e.target as HTMLElement).closest('[data-tree-key]')
+            if (!el) return
+            const nodeKey = el.getAttribute('data-tree-key')
+            if (!nodeKey) return
+            const menuItems = getContextMenuItems(nodeKey)
+            if (!menuItems || menuItems.length === 0) return
+            e.preventDefault()
+            setTreeCtxMenu({ x: e.clientX, y: e.clientY, nodeKey })
+          }}
+        >
           {openConnections.length === 0 && savedScripts.length === 0 ? (
             <div style={{ padding: '24px 12px', textAlign: 'center' }}>
               <Text type="secondary" style={{ fontSize: 13 }}>
@@ -1315,14 +1528,24 @@ export const WorkbenchPage: React.FC = () => {
                 titleRender={
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   (nodeData: any) => {
-                  if (nodeData.isLeaf && String(nodeData.key).startsWith('obj:')) {
+                  const key = String(nodeData.key)
+                  const title = nodeData.title as React.ReactNode
+                  // 叶子对象节点保留 Tooltip（名称可能被截断）
+                  if (nodeData.isLeaf && key.startsWith('obj:')) {
                     return (
                       <Tooltip title={String(nodeData.title)} mouseEnterDelay={0.5} placement="right">
-                        <span>{nodeData.title as React.ReactNode}</span>
+                        <span data-tree-key={key} style={{ display: 'contents' }}>{title}</span>
                       </Tooltip>
                     )
                   }
-                  return nodeData.title as React.ReactNode
+                  return <span data-tree-key={key} style={{ display: 'contents' }}>{title}</span>
+                }}
+                onRightClick={({ event, node }) => {
+                  const nodeKey = String(node.key)
+                  const menuItems = getContextMenuItems(nodeKey)
+                  if (menuItems && menuItems.length > 0) {
+                    setTreeCtxMenu({ x: event.clientX, y: event.clientY, nodeKey })
+                  }
                 }}
                 onSelect={handleTreeSelect}
                 selectedKeys={selectedTreeKeys}
@@ -1374,49 +1597,7 @@ export const WorkbenchPage: React.FC = () => {
                     }
                   }
                 }}
-                onRightClick={({ event, node }) => {
-                  event.preventDefault()
-                  event.stopPropagation()
-                  const key = String(node.key)
-                  const nativeEvent = event as unknown as ReactMouseEvent
-                  setCtxMenu({ x: nativeEvent.clientX, y: nativeEvent.clientY, nodeKey: key })
-                }}
               />
-              {ctxMenu && ctxMenuItems && ctxMenuItems.length > 0 && (
-                <>
-                  <div
-                    style={{ position: 'fixed', inset: 0, zIndex: 999 }}
-                    onClick={() => setCtxMenu(null)}
-                    onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null) }}
-                  />
-                  <div style={{
-                    position: 'fixed', left: ctxMenu.x, top: ctxMenu.y, zIndex: 1000,
-                    background: token.colorBgElevated, borderRadius: token.borderRadius,
-                    boxShadow: token.boxShadowSecondary, padding: '4px 0', minWidth: 160,
-                  }}>
-                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                    {ctxMenuItems.map((item: any, i: number) => {
-                      if (!item) return null
-                      if (item.type === 'divider') return <div key={`d${i}`} style={{ height: 1, background: token.colorBorderSecondary, margin: '4px 0' }} />
-                      return (
-                        <div
-                          key={item.key}
-                          style={{
-                            padding: '5px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
-                            color: item.danger ? token.colorError : token.colorText, fontSize: 13,
-                          }}
-                          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = token.colorBgTextHover }}
-                          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
-                          onClick={() => { item.onClick?.(); setCtxMenu(null) }}
-                        >
-                          {item.icon}
-                          <span>{item.label}</span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </>
-              )}
             </>
           )}
         </div>
@@ -1424,16 +1605,16 @@ export const WorkbenchPage: React.FC = () => {
       </Sider>
 
       {/* 右侧详情区 */}
-      <Content style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', background: token.colorBgLayout }}>
+      <Content style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'transparent' }}>
         {openConnections.length === 0 && Object.keys(openTableTabs).length === 0 ? (
           <EmptyState
             icon={<DatabaseOutlined style={{ fontSize: 48, color: token.colorTextQuaternary }} />}
             description={
               <div style={{ textAlign: 'center' }}>
-                <div style={{ marginBottom: 16, color: token.colorTextSecondary }}>暂无打开的数据库连接</div>
-                <div style={{ fontSize: 13, color: token.colorTextQuaternary }}>请先在“连接管理”中双击打开一个连接<br/>或者在左侧双击打开你收藏的 SQL 脚本</div>
-                <div style={{ marginTop: 24, padding: '8px 16px', background: token.colorBgElevated, borderRadius: 8, display: 'inline-block' }}>
-                  <kbd style={{ fontFamily: 'monospace', background: token.colorBgLayout, padding: '2px 4px', borderRadius: 4 }}>Cmd/Ctrl</kbd> + <kbd style={{ fontFamily: 'monospace', background: token.colorBgLayout, padding: '2px 4px', borderRadius: 4 }}>K</kbd> 唤起命令面板
+                <div style={{ marginBottom: 16, color: token.colorTextSecondary }}>工作台当前没有可浏览的连接</div>
+                <div style={{ fontSize: 13, color: token.colorTextQuaternary }}>先从左侧添加连接，或直接打开收藏脚本开始查询</div>
+                <div style={{ ...compactPanelStyle, marginTop: 24, padding: '8px 16px', display: 'inline-block' }}>
+                  <kbd style={{ fontFamily: 'monospace', background: token.colorFillSecondary, padding: '2px 4px', borderRadius: 4 }}>Cmd/Ctrl</kbd> + <kbd style={{ fontFamily: 'monospace', background: token.colorFillSecondary, padding: '2px 4px', borderRadius: 4 }}>K</kbd> 唤起命令面板
                 </div>
               </div>
             }
@@ -1460,26 +1641,32 @@ export const WorkbenchPage: React.FC = () => {
                 min-height: 0;
                 overflow: hidden;
               }
-              /* Pro-Max Borderless Geeky Tabs */
               .workbench-main-tabs.ant-tabs-card > .ant-tabs-nav {
                 margin: 0 !important;
-                background: ${token.colorBgContainer};
+                background: var(--glass-panel);
+                border-bottom: 1px solid var(--glass-border) !important;
               }
               .workbench-main-tabs.ant-tabs-card > .ant-tabs-nav::before {
-                border-bottom: 1px solid ${token.colorBorderSecondary} !important;
+                border-bottom: none !important;
               }
               .workbench-main-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab {
                 border: none !important;
                 background: transparent !important;
                 border-radius: 0 !important;
-                padding: 8px 16px !important;
+                padding: 10px 14px !important;
                 margin: 0 !important;
                 border-bottom: 2px solid transparent !important;
                 transition: all 0.2s;
+                color: ${token.colorTextSecondary};
+              }
+              .workbench-main-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab:hover {
+                background: ${token.controlItemBgHover} !important;
+                color: ${token.colorText};
               }
               .workbench-main-tabs.ant-tabs-card > .ant-tabs-nav .ant-tabs-tab-active {
-                background: ${token.colorBgElevated} !important;
+                background: var(--glass-panel) !important;
                 border-bottom: 2px solid ${token.colorPrimary} !important;
+                color: ${token.colorText} !important;
               }
               .workbench-main-tabs .ant-tabs-tab-remove {
                 opacity: 0;
@@ -1530,6 +1717,20 @@ export const WorkbenchPage: React.FC = () => {
                     }}
                     style={{ flexShrink: 0, padding: '0 16px' }}
                     tabBarStyle={{ marginBottom: 0 }}
+                    tabBarExtraContent={{
+                      right: (
+                        <Tooltip title="新建 SQL 查询" placement="bottom">
+                          <Button
+                            size="small"
+                            icon={<PlusOutlined />}
+                            style={{ ...quietButtonStyle, marginRight: 4 }}
+                            onClick={() => openSqlEditor()}
+                          >
+                            新建查询
+                          </Button>
+                        </Tooltip>
+                      )
+                    }}
                     items={tabKeys.map((key) => {
                       const tab = openTableTabs[key]
                       const tabLabel = tab.type === 'table'
@@ -1581,8 +1782,13 @@ export const WorkbenchPage: React.FC = () => {
                       />
                       <div style={{
                         position: 'fixed', left: tabCtxMenu.x, top: tabCtxMenu.y, zIndex: 1000,
-                        background: token.colorBgElevated, borderRadius: token.borderRadius,
-                        boxShadow: token.boxShadowSecondary, padding: '4px 0', minWidth: 140,
+                        background: 'var(--glass-popup)',
+                        backdropFilter: 'var(--glass-blur-heavy)',
+                        WebkitBackdropFilter: 'var(--glass-blur-heavy)',
+                        borderRadius: token.borderRadiusLG,
+                        border: '1px solid var(--glass-border)',
+                        boxShadow: 'var(--glass-shadow-lg), var(--glass-inner-glow)',
+                        padding: '6px 0', minWidth: 140,
                       }}>
                         {[
                           { label: '关闭', onClick: () => closeTableTab(tabCtxMenu.tabKey) },
@@ -1620,8 +1826,8 @@ export const WorkbenchPage: React.FC = () => {
                         ].map((item) => (
                           <div
                             key={item.label}
-                            style={{ padding: '5px 12px', cursor: 'pointer', fontSize: 13, color: token.colorText }}
-                            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = token.colorBgTextHover }}
+                            style={{ padding: '5px 12px', cursor: 'pointer', fontSize: 13, color: 'var(--edb-text-primary)', transition: 'background 0.15s' }}
+                            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--glass-panel-hover)' }}
                             onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
                             onClick={() => { item.onClick(); setTabCtxMenu(null) }}
                           >
@@ -1644,33 +1850,49 @@ export const WorkbenchPage: React.FC = () => {
                 const t = activeTab
                 return (
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                    {/* 面包屑 */}
-                    <div style={{ padding: '8px 16px 0 16px', flexShrink: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                        <Space>
-                          <Breadcrumb
-                            separator="/"
-                            items={[
-                              {
-                                title: (
-                                  <span style={{ cursor: 'pointer', color: token.colorTextSecondary }} onClick={() => openOrActivateDbOverview(t.connectionId, t.connectionName, t.database)}>
-                                    <DatabaseOutlined style={{ marginRight: 4 }} />{t.database}
-                                  </span>
-                                ),
-                              },
-                              {
-                                title: <Text strong style={{ fontSize: 13 }}>{t.tableName}</Text>,
-                              },
-                            ]}
-                          />
-                        </Space>
-                        <Space size={8}>
-                          <Text type="secondary" style={{ fontSize: 12 }}>({t.connectionName})</Text>
-                          <Button size="small" icon={<CodeOutlined />} onClick={() => openSqlEditor()}>打开 SQL 编辑器</Button>
-                        </Space>
+                    <div style={{ padding: '12px 16px 0 16px', flexShrink: 0 }}>
+                      <div style={{ ...panelStyle, padding: '14px 16px', marginBottom: 12 }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+                          <div style={{ minWidth: 0 }}>
+                            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+                              对象详情
+                            </Text>
+                            <Breadcrumb
+                              separator="/"
+                              items={[
+                                {
+                                  title: (
+                                    <span style={{ cursor: 'pointer', color: token.colorTextSecondary }} onClick={() => openOrActivateDbOverview(t.connectionId, t.connectionName, t.database)}>
+                                      <DatabaseOutlined style={{ marginRight: 4 }} />{t.database}
+                                    </span>
+                                  ),
+                                },
+                                {
+                                  title: <Text strong style={{ fontSize: 13 }}>{t.tableName}</Text>,
+                                },
+                              ]}
+                            />
+                            <Space size={8} wrap style={{ marginTop: 10 }}>
+                              <Text strong style={{ fontSize: 18, color: token.colorText }}>{t.tableName}</Text>
+                              <Tag bordered={false} color={t.objectType === 'view' ? 'processing' : 'default'} style={{ marginInlineEnd: 0, borderRadius: 999, paddingInline: 10 }}>
+                                {t.objectType === 'view' ? '视图' : '表'}
+                              </Tag>
+                              <Tag bordered={false} style={{ marginInlineEnd: 0, borderRadius: 999, paddingInline: 10 }}>
+                                {t.connectionName}
+                              </Tag>
+                            </Space>
+                          </div>
+                          <Space size={8} wrap>
+                            <Button size="small" style={quietButtonStyle} onClick={() => openOrActivateDbOverview(t.connectionId, t.connectionName, t.database)}>
+                              返回库概览
+                            </Button>
+                            <Button size="small" icon={<CodeOutlined />} onClick={() => openSqlEditor()}>
+                              新建查询
+                            </Button>
+                          </Space>
+                        </div>
                       </div>
                     </div>
-                    {/* 详情 Tabs */}
                     <Tabs
                       className="workbench-detail-tabs"
                       size="small"
@@ -1680,22 +1902,21 @@ export const WorkbenchPage: React.FC = () => {
                         updateTabState(tabKey, () => ({ detailTab: nextTab }))
                         loadTabDataForTab(tabKey, t.connectionId, t.database, t.tableName, nextTab)
                       }}
-                      style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '0 16px' }}
+                      style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '0 16px 16px' }}
                       tabBarStyle={{ flexShrink: 0, marginBottom: 0 }}
                       items={[
-                        // 数据标签：表和视图可用
                         (t.objectType === 'table' || t.objectType === 'view') ? {
                           key: 'data',
                           label: `数据${t.previewRows.length > 0 ? ` (${t.previewRows.length})` : ''}`,
                           children: (
                             <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 8, padding: '0 2px', flexShrink: 0 }}>
+                              <div style={{ ...compactPanelStyle, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10, padding: '10px 12px', flexShrink: 0 }}>
                                 <Text type="secondary" style={{ fontSize: 12, flex: 1 }}>
                                   {t.objectType === 'view'
-                                    ? '视图数据（只读）'
+                                    ? '视图数据为只读模式'
                                     : t.columns.length > 0 && t.columns.some((c: ColumnInfo) => c.isPrimaryKey)
-                                      ? `可编辑 · 主键：${t.columns.filter((c: ColumnInfo) => c.isPrimaryKey).map((c: ColumnInfo) => c.name).join(', ')}`
-                                      : '当前表无主键，数据编辑功能不可用'}
+                                      ? `可编辑数据 · 主键：${t.columns.filter((c: ColumnInfo) => c.isPrimaryKey).map((c: ColumnInfo) => c.name).join(', ')}`
+                                      : '当前表缺少主键，数据编辑功能不可用'}
                                 </Text>
                                 <Space size={8}>
                                   <Text type="secondary" style={{ fontSize: 12 }}>
@@ -1709,7 +1930,7 @@ export const WorkbenchPage: React.FC = () => {
                                         { key: 'sql', label: '导出为 SQL INSERT', onClick: () => exportTableData(t.tableName, t.columns.map((c: ColumnInfo) => c.name), t.previewRows, 'sql') },
                                       ],
                                     }}>
-                                      <Button size="small" icon={<DownloadOutlined />}>导出</Button>
+                                      <Button size="small" icon={<DownloadOutlined />} style={quietButtonStyle}>导出</Button>
                                     </Dropdown>
                                   )}
                                 </Space>
@@ -1721,11 +1942,40 @@ export const WorkbenchPage: React.FC = () => {
                                   tableName={t.tableName}
                                   columns={t.columns}
                                   dataSource={t.previewRows}
-                                  onRefresh={() => {
-                                    updateTabState(tabKey, (prev) => ({
-                                      loadedTabs: prev.loadedTabs.filter(k => k !== 'data'),
-                                    }))
-                                    loadTabDataForTab(tabKey, t.connectionId, t.database, t.tableName, 'data')
+                                  hasMore={t.hasMoreRows}
+                                  loadingMore={t.loadingMoreRows}
+                                  onLoadMore={async () => {
+                                    // 防止并发
+                                    if (t.loadingMoreRows || !t.hasMoreRows) return
+                                    updateTabState(tabKey, () => ({ loadingMoreRows: true }))
+                                    try {
+                                      const rows = await metadataApi.previewRows(
+                                        t.connectionId, t.database, t.tableName,
+                                        { limit: PREVIEW_PAGE_SIZE, offset: t.previewRows.length }
+                                      ) as Record<string, unknown>[]
+                                      updateTabState(tabKey, (prev) => ({
+                                        previewRows: [...prev.previewRows, ...rows],
+                                        hasMoreRows: rows.length >= PREVIEW_PAGE_SIZE,
+                                        loadingMoreRows: false,
+                                      }))
+                                    } catch (e) {
+                                      updateTabState(tabKey, () => ({ loadingMoreRows: false }))
+                                      handleApiError(e, '加载更多数据失败')
+                                    }
+                                  }}
+                                  onRefresh={async () => {
+                                    try {
+                                      const rows = await metadataApi.previewRows(
+                                        t.connectionId, t.database, t.tableName,
+                                        { limit: PREVIEW_PAGE_SIZE }
+                                      ) as Record<string, unknown>[]
+                                      updateTabState(tabKey, () => ({
+                                        previewRows: rows,
+                                        hasMoreRows: rows.length >= PREVIEW_PAGE_SIZE,
+                                      }))
+                                    } catch (e) {
+                                      handleApiError(e, '刷新数据失败')
+                                    }
                                   }}
                                   onFilter={async (params) => {
                                     try {
@@ -1734,6 +1984,7 @@ export const WorkbenchPage: React.FC = () => {
                                       ) as Record<string, unknown>[]
                                       updateTabState(tabKey, () => ({
                                         previewRows: rows,
+                                        hasMoreRows: false,
                                       }))
                                     } catch (e) {
                                       handleApiError(e, '筛选数据失败')
@@ -1744,7 +1995,6 @@ export const WorkbenchPage: React.FC = () => {
                             </div>
                           ),
                         } : null,
-                        // 设计标签：仅表可用
                         t.objectType === 'table' ? {
                           key: 'design',
                           label: '设计',
@@ -1756,31 +2006,36 @@ export const WorkbenchPage: React.FC = () => {
                                 database={t.database}
                                 editTableName={t.tableName}
                                 onSuccess={() => {
-                                  // Refresh columns when design is saved
                                   updateTabState(tabKey, (prev) => ({
                                     loadedTabs: prev.loadedTabs.filter(k => k !== 'columns'),
                                   }))
                                   loadTabDataForTab(tabKey, t.connectionId, t.database, t.tableName, 'columns')
                                 }}
                                 onCancel={() => {
-                                  // Revert back to data view if they cancel design
                                   updateTabState(tabKey, () => ({ detailTab: 'data' }))
                                 }}
                               />
                             </div>
                           ),
                         } : null,
-                        // DDL 标签：所有对象都有
                         {
                           key: 'ddl',
                           label: 'DDL',
                           children: (
-                            <pre style={{
-                              background: '#1e1e1e', color: '#d4d4d4', padding: 16, borderRadius: token.borderRadius,
-                              fontSize: 12, fontFamily: 'Menlo, Monaco, monospace', overflow: 'auto', height: '100%',
-                            }}>
-                              {t.ddl || '无 DDL 数据'}
-                            </pre>
+                            <div style={{ ...panelStyle, height: '100%', overflow: 'hidden', padding: 0 }}>
+                              <pre style={{
+                                margin: 0,
+                                padding: 16,
+                                color: token.colorText,
+                                background: 'var(--glass-panel)',
+                                fontSize: 12,
+                                fontFamily: 'var(--font-family-code)',
+                                overflow: 'auto',
+                                height: '100%',
+                              }}>
+                                {t.ddl || '无 DDL 数据'}
+                              </pre>
+                            </div>
                           ),
                         },
                       ].filter(Boolean) as NonNullable<typeof Tabs.prototype>[]}
@@ -1793,75 +2048,113 @@ export const WorkbenchPage: React.FC = () => {
               if (activeTab.type === 'db-overview') {
                 const objKey = `${activeTab.connectionId}::${activeTab.database}`
                 const dbObjects = objectsMap[objKey] || []
+                const totalTableBytes = dbObjects
+                  .filter((item) => item.type === 'table')
+                  .reduce((acc, item) => acc + (item.dataLength || 0) + (item.indexLength || 0), 0)
+                const formatBytes = (bytes: number) => {
+                  if (!bytes) return '0 B'
+                  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+                  const order = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+                  return `${(bytes / (1024 ** order)).toFixed(order === 0 ? 0 : 1)} ${units[order]}`
+                }
+                const objectSummary = [
+                  { key: 'tables', label: '表', value: dbObjects.filter((t) => t.type === 'table').length, icon: <Table2 size={16} color={token.colorPrimary} /> },
+                  { key: 'views', label: '视图', value: dbObjects.filter((t) => t.type === 'view').length, icon: <Eye size={16} color="#3B82F6" /> },
+                  { key: 'procedures', label: '存储过程', value: dbObjects.filter((t) => t.type === 'procedure').length, icon: <Cog size={16} color="#8B5CF6" /> },
+                  { key: 'functions', label: '函数', value: dbObjects.filter((t) => t.type === 'function').length, icon: <FunctionSquare size={16} color="#EC4899" /> },
+                  { key: 'triggers', label: '触发器', value: dbObjects.filter((t) => t.type === 'trigger').length, icon: <Zap size={16} color="#F59E0B" /> },
+                ] as const
+
                 return (
-                  <div style={{ flex: 1, padding: '32px 40px', overflow: 'auto', background: token.colorBgBase }}>
-                    <div style={{ maxWidth: 1000, margin: '0 auto' }}>
-                      <div style={{ marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div>
-                          <Text strong style={{ fontSize: 24, display: 'flex', alignItems: 'center', gap: 10, color: token.colorText }}>
-                            <Database size={24} color={token.colorPrimary} />
-                            {activeTab.database}
-                          </Text>
-                          <Text type="secondary" style={{ fontSize: 13, marginTop: 4, display: 'block' }}>连接网络: {activeTab.connectionName}</Text>
-                        </div>
-                        <Button type="primary" size="large" icon={<CodeOutlined />} onClick={() => openSqlEditor()} style={{ background: token.colorPrimary, border: 'none', boxShadow: '0 0 15px rgba(34,197,94,0.3)', borderRadius: 8 }}>
-                          新建查询 Workspace
-                        </Button>
-                      </div>
-
-                      {/* Bento Grid */}
-                      <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(12, 1fr)',
-                        gap: 16,
-                        gridAutoRows: 'minmax(120px, auto)'
-                      }}>
-                        {/* Box 1: Tables Count */}
-                        <div style={{ gridColumn: 'span 4', background: token.colorBgContainer, borderRadius: 12, padding: 20, border: `1px solid ${token.colorBorderSecondary}`, display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
-                          <Table2 size={20} color={token.colorPrimary} style={{ marginBottom: 12 }} />
-                          <Text type="secondary" style={{ fontSize: 13, marginBottom: 4 }}>数据表总数</Text>
-                          <Text strong style={{ fontSize: 32, lineHeight: 1 }}>{dbObjects.filter((t) => t.type === 'table').length}</Text>
-                          <div style={{ position: 'absolute', right: -15, bottom: -15, opacity: 0.03 }}>
-                            <Table2 size={120} />
+                  <div style={{ flex: 1, padding: '24px', overflow: 'auto', background: 'transparent' }}>
+                    <div style={{ maxWidth: 1180, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
+                      <div style={{ ...panelStyle, padding: '18px 20px' }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+                          <div>
+                            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 6 }}>
+                              数据库概览
+                            </Text>
+                            <Text strong style={{ fontSize: 24, display: 'flex', alignItems: 'center', gap: 10, color: token.colorText }}>
+                              <Database size={22} color={token.colorPrimary} />
+                              {activeTab.database}
+                            </Text>
+                            <Space size={8} wrap style={{ marginTop: 10 }}>
+                              <Tag bordered={false} style={{ marginInlineEnd: 0, borderRadius: 999, paddingInline: 10 }}>
+                                {activeTab.connectionName}
+                              </Tag>
+                              <Tag bordered={false} style={{ marginInlineEnd: 0, borderRadius: 999, paddingInline: 10 }}>
+                                对象 {dbObjects.length}
+                              </Tag>
+                              <Tag bordered={false} style={{ marginInlineEnd: 0, borderRadius: 999, paddingInline: 10 }}>
+                                表空间 {formatBytes(totalTableBytes)}
+                              </Tag>
+                            </Space>
                           </div>
-                        </div>
-
-                        {/* Box 2: Views & Triggers */}
-                        <div style={{ gridColumn: 'span 4', display: 'flex', flexDirection: 'column', gap: 16 }}>
-                          <div style={{ flex: 1, background: token.colorBgContainer, borderRadius: 12, padding: '16px 20px', border: `1px solid ${token.colorBorderSecondary}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <div>
-                              <Text type="secondary" style={{ fontSize: 13, display: 'block', marginBottom: 2 }}>视图分类</Text>
-                              <Text strong style={{ fontSize: 20 }}>{dbObjects.filter((t) => t.type === 'view').length}</Text>
-                            </div>
-                            <div style={{ width: 40, height: 40, borderRadius: 8, background: 'rgba(59,130,246,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              <Eye size={20} color="#3B82F6" />
-                            </div>
-                          </div>
-                          <div style={{ flex: 1, background: token.colorBgContainer, borderRadius: 12, padding: '16px 20px', border: `1px solid ${token.colorBorderSecondary}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <div>
-                              <Text type="secondary" style={{ fontSize: 13, display: 'block', marginBottom: 2 }}>系统触发器</Text>
-                              <Text strong style={{ fontSize: 20 }}>{dbObjects.filter((t) => t.type === 'trigger').length}</Text>
-                            </div>
-                            <div style={{ width: 40, height: 40, borderRadius: 8, background: 'rgba(245,158,11,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              <Zap size={20} color="#F59E0B" />
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Box 3: Quick Actions */}
-                        <div style={{ gridColumn: 'span 4', background: token.colorBgContainer, borderRadius: 12, padding: 20, border: `1px solid ${token.colorBorderSecondary}` }}>
-                          <Text strong style={{ fontSize: 14, marginBottom: 16, display: 'flex', alignItems: 'center' }}>
-                            <Activity size={16} style={{ marginRight: 6 }} />
-                            快捷面板
-                          </Text>
-                          <Space direction="vertical" size={12} style={{ width: '100%' }}>
-                            <Button block style={{ textAlign: 'left', background: token.colorBgElevated, border: 'none', color: token.colorTextSecondary }} icon={<ReloadOutlined />} onClick={() => loadTables(activeTab.connectionId, activeTab.database)}>
-                              重新加载对象树
+                          <Space size={8} wrap>
+                            <Button icon={<ReloadOutlined />} style={quietButtonStyle} onClick={() => loadTables(activeTab.connectionId, activeTab.database)}>
+                              刷新对象
                             </Button>
-                            <Button block style={{ textAlign: 'left', background: token.colorBgElevated, border: 'none', color: token.colorTextSecondary }} icon={<PlusOutlined />} onClick={() => openTableDesignerTab(activeTab.connectionId, activeTab.connectionName, activeTab.database)}>
-                              进入可视化表设计器
+                            <Button icon={<PlusOutlined />} style={quietButtonStyle} onClick={() => openTableDesignerTab(activeTab.connectionId, activeTab.connectionName, activeTab.database)}>
+                              新建表
+                            </Button>
+                            <Button type="primary" icon={<CodeOutlined />} onClick={() => openSqlEditor()}>
+                              新建查询
                             </Button>
                           </Space>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 12 }}>
+                        {objectSummary.map((item) => (
+                          <div key={item.key} style={{ ...compactPanelStyle, padding: '16px 18px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                              <Text type="secondary" style={{ fontSize: 12 }}>{item.label}</Text>
+                              {item.icon}
+                            </div>
+                            <Text strong style={{ fontSize: 26, lineHeight: 1 }}>{item.value}</Text>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.3fr) minmax(320px, 0.9fr)', gap: 16 }}>
+                        <div style={{ ...panelStyle, padding: '16px 18px' }}>
+                          <Text strong style={{ fontSize: 14, display: 'block', marginBottom: 14 }}>对象分类</Text>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                            {objectSummary.map((item) => (
+                              <div key={item.key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 12px', borderRadius: token.borderRadius, background: token.colorFillQuaternary }}>
+                                <Space size={10}>
+                                  {item.icon}
+                                  <div>
+                                    <Text style={{ display: 'block', fontSize: 13, color: token.colorText }}>{item.label}</Text>
+                                    <Text type="secondary" style={{ fontSize: 12 }}>{item.value} 个对象</Text>
+                                  </div>
+                                </Space>
+                                <Button size="small" style={quietButtonStyle} onClick={() => openOrActivateCategoryTab(activeTab.connectionId, activeTab.connectionName, activeTab.database, item.key)}>
+                                  查看列表
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div style={{ ...panelStyle, padding: '16px 18px' }}>
+                          <Text strong style={{ fontSize: 14, display: 'block', marginBottom: 14 }}>常用操作</Text>
+                          <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                            <Button block icon={<CodeOutlined />} style={{ ...quietButtonStyle, textAlign: 'left' }} onClick={() => openSqlEditor()}>
+                              打开当前库查询窗口
+                            </Button>
+                            <Button block icon={<PlusOutlined />} style={{ ...quietButtonStyle, textAlign: 'left' }} onClick={() => openTableDesignerTab(activeTab.connectionId, activeTab.connectionName, activeTab.database)}>
+                              新建数据表
+                            </Button>
+                            <Button block icon={<ReloadOutlined />} style={{ ...quietButtonStyle, textAlign: 'left' }} onClick={() => loadTables(activeTab.connectionId, activeTab.database)}>
+                              重新加载对象元数据
+                            </Button>
+                          </Space>
+                          <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--glass-border)' }}>
+                            <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.7 }}>
+                              工作台页优先服务浏览、查询和结构维护，因此这里保留紧凑摘要和高频动作，不再使用展示感过强的发光卡片。
+                            </Text>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1936,11 +2229,11 @@ export const WorkbenchPage: React.FC = () => {
           <EmptyState
             description={
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-                <div>{openConnections.length === 0 ? '从左侧添加连接开始浏览' : '选择左侧对象树中的数据库或表以开始查询'}</div>
+                <div>{openConnections.length === 0 ? '从左侧添加连接开始浏览' : '从左侧选择数据库、对象或脚本开始工作'}</div>
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: token.colorTextSecondary
                 }}>
-                  或按 <kbd style={{ padding: '2px 6px', background: token.colorBgLayout, border: `1px solid ${token.colorBorder}`, borderRadius: 4, fontFamily: 'monospace', color: token.colorText }}>{formatHotkey(['Cmd', 'K'])}</kbd> 唤起全局命令
+                  或按 <kbd style={{ padding: '2px 6px', background: token.colorFillSecondary, border: '1px solid var(--glass-border)', borderRadius: 4, fontFamily: 'monospace', color: token.colorText }}>{formatHotkey(['Cmd', 'K'])}</kbd> 唤起全局命令
                 </div>
                 {openConnections.length > 0 && (
                   <Space size={16} style={{ marginTop: 8 }}>
@@ -1994,11 +2287,87 @@ export const WorkbenchPage: React.FC = () => {
         {...exportModal}
       />)}
 
+      {backupModal && (
+        <BackupDatabaseModal
+          open={true}
+          onClose={() => setBackupModal(null)}
+          connectionId={backupModal.connectionId}
+          connectionName={backupModal.connectionName}
+          database={backupModal.database}
+        />
+      )}
+
+      {restoreModal && (
+        <RestoreDatabaseModal
+          open={true}
+          onClose={() => setRestoreModal(null)}
+          targetConnectionId={restoreModal.connectionId}
+          targetConnectionName={restoreModal.connectionName}
+          defaultTargetDatabase={restoreModal.database}
+        />
+      )}
+
       {/* 快捷键查看弹窗 */}
       <ShortcutsModal
         open={showShortcuts}
         onCancel={() => setShowShortcuts(false)}
       />
+
+      {/* 存储过程/函数执行弹窗 */}
+      {callProcedureTarget && (
+        <CallProcedurePanel
+          target={callProcedureTarget}
+          onClose={() => setCallProcedureTarget(null)}
+        />
+      )}
     </Layout>
+
+    {/* 树节点右键菜单 - 放在 Layout 外部确保 fixed 定位生效 */}
+    {treeCtxMenu && (
+      <>
+        <div
+          style={{ position: 'fixed', inset: 0, zIndex: 999 }}
+          onClick={() => setTreeCtxMenu(null)}
+          onContextMenu={(e) => { e.preventDefault(); setTreeCtxMenu(null) }}
+        />
+        <div style={{
+          position: 'fixed', left: treeCtxMenu.x, top: treeCtxMenu.y, zIndex: 1000,
+          background: 'var(--glass-popup)',
+          backdropFilter: 'var(--glass-blur-heavy)',
+          WebkitBackdropFilter: 'var(--glass-blur-heavy)',
+          borderRadius: token.borderRadiusLG,
+          border: '1px solid var(--glass-border)',
+          boxShadow: 'var(--glass-shadow-lg), var(--glass-inner-glow)',
+          padding: '6px 0', minWidth: 180,
+        }}>
+          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+          {(treeCtxMenuItems || []).map((item: any, idx: number) => {
+            if (!item) return null
+            if (item.type === 'divider') return <div key={`divider-${idx}`} style={{ height: 1, background: 'var(--glass-border)', margin: '4px 8px' }} />
+            return (
+              <div
+                key={String(item.key)}
+                style={{
+                  padding: '5px 12px', cursor: 'pointer', fontSize: 13,
+                  color: item.danger ? 'var(--edb-error)' : 'var(--edb-text-primary)',
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  transition: 'background 0.15s',
+                }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--glass-panel-hover)' }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+                onClick={() => {
+                  if (item.onClick) item.onClick({ key: String(item.key), keyPath: [String(item.key)], domEvent: new MouseEvent('click') } as any)
+                  setTreeCtxMenu(null)
+                }}
+              >
+                {item.icon && <span style={{ display: 'flex', alignItems: 'center' }}>{item.icon}</span>}
+                {item.label}
+              </div>
+            )
+          })}
+        </div>
+      </>
+    )}
+  </>
   )
 }

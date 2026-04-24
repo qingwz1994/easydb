@@ -1,18 +1,24 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react'
-import { Layout, Button, Space, Typography, Tabs, Select, theme } from 'antd'
-import { PlayCircleOutlined, ClearOutlined } from '@ant-design/icons'
+import { Layout, Button, Space, Typography, Tabs, Select, Spin, theme, Tooltip } from 'antd'
+import { PlayCircleOutlined, ClearOutlined, StarOutlined, FolderOpenOutlined, HistoryOutlined } from '@ant-design/icons'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
-import type { SqlResult } from '@/types'
+import type { SqlResult, EditabilityStatus } from '@/types'
 import { useSqlEditorStore, type EditorTab } from '@/stores/sqlEditorStore'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { sqlApi, connectionApi, metadataApi } from '@/services/api'
 import { SqlResultPanel } from '@/components/SqlResultPanel'
+import { EditableDataTable } from '@/components/EditableDataTable'
+import { analyzeEditability, extractAllTableNames } from '@/utils/editabilityAnalyzer'
 import { handleApiError, toast } from '@/utils/notification'
 import { createSqlCompletionProvider, clearCompletionCache } from '../pages/sql-editor/sqlCompletionProvider'
+import { SaveScriptModal } from '../pages/sql-editor/SaveScriptModal'
+import { SavedScriptsModal } from '../pages/sql-editor/SavedScriptsModal'
+import { SqlHistoryDrawer } from '../pages/sql-editor/SqlHistoryDrawer'
+import { useAppSettingsStore } from '@/stores/appSettingsStore'
+import { formatHotkey } from '@/utils/osUtils'
 import {
   DEFAULT_SQL_PREVIEW_PAGE_SIZE,
-  collectSqlQuerySessionIds,
   isPreviewableSql,
   MAX_SQL_PREVIEW_CELL_CHARS,
   mergeSqlPreviewResult,
@@ -23,18 +29,13 @@ import { EmptyState } from '@/components/EmptyState'
 const { Content } = Layout
 const { Text } = Typography
 
-const extractAllTableNames = (sql: string): string[] => {
-  if (!sql) return []
-  const regex = /(?:from|update|into)\s+([`'"]?[a-zA-Z0-9_$]+[`'"]?)/gi
-  const matches = [...sql.matchAll(regex)]
-  return matches.map(m => m[1].replace(/[`'"]/g, ''))
-}
-
 interface QueryEditorPaneProps {
   queryId: string
+  /** 开启高级 SQL 工具（收藏脚本、SQL 历史等）。默认开启。 */
+  showAdvancedTools?: boolean
 }
 
-export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => {
+export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId, showAdvancedTools = true }) => {
   const { token } = theme.useToken()
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null)
@@ -45,11 +46,20 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
   
   const activeEditorTab = useSqlEditorStore(useCallback(s => s.tabs.find(t => t.key === queryId), [queryId]))
   const storeUpdateTab = useSqlEditorStore((s) => s.updateTab)
+
+  // Advanced tools state
+  const sqlHistoryEnabled          = useAppSettingsStore((s) => s.sqlHistoryEnabled)
+  const sqlHistoryFilterByDatabase = useAppSettingsStore((s) => s.sqlHistoryFilterByDatabase)
+  const [saveModalOpen, setSaveModalOpen] = useState(false)
+  const [listModalOpen, setListModalOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
   
   const [executing, setExecuting] = useState(false)
   const [loadingMoreKey, setLoadingMoreKey] = useState<string | null>(null)
   const [databases, setDatabases] = useState<string[]>([])
-  
+  const [editabilityMap, setEditabilityMap] = useState<Map<number, EditabilityStatus>>(new Map())
+  const [analyzingEditability, setAnalyzingEditability] = useState(false)
+
   const [editorHeight, setEditorHeight] = useState(300)
   const isDraggingRef = useRef(false)
 
@@ -172,13 +182,7 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
 
     setExecuting(true)
     try {
-      // 关闭之前的 session（fire-and-forget，不阻塞新查询的执行）
-      const previousSessionIds = collectSqlQuerySessionIds(activeEditorTab.currentBatch, activeEditorTab.results)
-      if (previousSessionIds.length > 0) {
-        Promise.allSettled(previousSessionIds.map((querySessionId) => sqlApi.querySessionClose(querySessionId)))
-      }
-
-      // 拆分多条 SQL，每条 SELECT 走 querySession 流式分页（类似 DBeaver），非 SELECT 走 execute
+      // 拆分多条 SQL，每条 SELECT  queryPreview 流式分页（类似 DBeaver），非 SELECT 走 execute
       const statements = execSql
         .split(/;(?=(?:[^']*'[^']*')*[^']*$)/) // 按分号拆分，但忽略引号内的分号
         .map(s => s.trim())
@@ -190,22 +194,32 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
         if (!normalized) continue
 
         if (isPreviewableSql(normalized)) {
-
-          const result = await sqlApi.querySessionStart({
+          const result = await sqlApi.queryPreview({
             connectionId: activeEditorTab.connectionId,
             database: activeEditorTab.database,
             sql: normalized,
+            offset: 0,
             pageSize: DEFAULT_SQL_PREVIEW_PAGE_SIZE,
             maxCellChars: MAX_SQL_PREVIEW_CELL_CHARS,
           }) as SqlResult
 
-          resultList.push(result)
+          // 为结果添加 connectionId 和 database，用于后续加载更多和编辑性分析
+          resultList.push({
+            ...result,
+            connectionId: activeEditorTab.connectionId,
+            database: activeEditorTab.database,
+          })
         } else {
           // DML / DDL：走一次性执行
           const results = await sqlApi.execute(
             activeEditorTab.connectionId, activeEditorTab.database, stmt
           ) as SqlResult[]
-          resultList.push(...results)
+          // 补充连接信息，用于编辑性分析
+          resultList.push(...results.map(r => ({
+            ...r,
+            connectionId: activeEditorTab.connectionId,
+            database: activeEditorTab.database,
+          })))
         }
       }
 
@@ -241,32 +255,40 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
   const handleLoadMore = useCallback(async (batchIndex: number) => {
     if (!activeEditorTab) return
     const target = activeEditorTab.currentBatch?.[batchIndex]
-    if (!target || target.type !== 'query' || !target.preview || !target.hasMore || !target.querySessionId) return
+    if (!target || target.type !== 'query' || !target.preview || !target.hasMore) return
+    if (!target.connectionId || !target.database) return
 
     const loadKey = `${queryId}-${batchIndex}`
     setLoadingMoreKey(loadKey)
     try {
-      const next = await sqlApi.querySessionFetch({
-        querySessionId: target.querySessionId,
+      // 用 rows.length 作为新的 offset
+      const offset = target.rows?.length ?? 0
+
+      const next = await sqlApi.queryPreview({
+        connectionId: target.connectionId,
+        database: target.database,
+        sql: target.sql,
+        offset,
         pageSize: target.pageSize ?? DEFAULT_SQL_PREVIEW_PAGE_SIZE,
         maxCellChars: MAX_SQL_PREVIEW_CELL_CHARS,
       }) as SqlResult
 
       if (next.type === 'error') {
-        // 会话已过期/关闭时，标记加载完毕而不是报错（可能是竞态：数据已全部加载）
-        updateActiveTab({
-          currentBatch: (activeEditorTab.currentBatch ?? []).map((result, idx) => {
-            if (idx !== batchIndex) return result
-            return { ...result, hasMore: false }
-          }),
-        })
+        toast.error(next.error ?? '加载更多失败')
         return
+      }
+
+      // 为新结果添加 connectionId 和 database
+      const enrichedNext = {
+        ...next,
+        connectionId: target.connectionId,
+        database: target.database,
       }
 
       updateActiveTab({
         currentBatch: (activeEditorTab.currentBatch ?? []).map((result, idx) => {
           if (idx !== batchIndex) return result
-          return mergeSqlPreviewResult(result, next)
+          return mergeSqlPreviewResult(result, enrichedNext)
         }),
       })
     } catch (error) {
@@ -284,6 +306,45 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
     })
   }, [activeEditorTab?.currentBatch, updateActiveTab])
 
+  // 分析查询结果的可编辑性
+  useEffect(() => {
+    const currentBatch = activeEditorTab?.currentBatch ?? []
+    if (currentBatch.length === 0) {
+      setEditabilityMap(new Map())
+      return
+    }
+
+    let cancelled = false
+
+    const analyzeBatch = async () => {
+      setAnalyzingEditability(true)
+      const newMap = new Map<number, EditabilityStatus>()
+
+      for (let idx = 0; idx < currentBatch.length; idx++) {
+        if (cancelled) return
+        const result = currentBatch[idx]
+        if (result.type === 'query') {
+          try {
+            const status = await analyzeEditability(result, metadataApi)
+            if (cancelled) return
+            newMap.set(idx, status)
+          } catch {
+            if (cancelled) return
+            newMap.set(idx, { editable: false, reason: 'metadata_error' })
+          }
+        }
+      }
+
+      if (!cancelled) {
+        setEditabilityMap(newMap)
+        setAnalyzingEditability(false)
+      }
+    }
+
+    analyzeBatch()
+    return () => { cancelled = true }
+  }, [activeEditorTab?.currentBatch])
+
   const handleClear = () => {
     updateActiveTab({ sql: '' })
     editorRef.current?.setValue('')
@@ -300,11 +361,12 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
   let queryIndex = 0
 
   return (
+    <>
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* 快捷连接栏 */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0,
-        padding: '8px 16px', borderBottom: `1px solid ${token.colorBorderSecondary}`, background: token.colorBgContainer
+        padding: '8px 16px', borderBottom: '1px solid var(--glass-border)', background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur-sm)'
       }}>
         <Space size={12}>
           <Select
@@ -340,9 +402,36 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
           />
         </Space>
         <Space>
-          <Button type="primary" size="small" icon={<PlayCircleOutlined />} loading={executing} onClick={handleExecute} disabled={!activeEditorTab?.sql?.trim() || !activeEditorTab.connectionId || !activeEditorTab.database}>
-            执行
-          </Button>
+          {showAdvancedTools && (
+            <>
+              <Button size="small" icon={<FolderOpenOutlined />} onClick={() => setListModalOpen(true)}>
+                打开收藏
+              </Button>
+              <Button size="small" icon={<StarOutlined />} onClick={() => setSaveModalOpen(true)} disabled={!activeEditorTab?.sql?.trim()}>
+                收藏
+              </Button>
+              <Tooltip title="查看当前连接的 SQL 执行历史">
+                <Button
+                  size="small"
+                  icon={<HistoryOutlined />}
+                  onClick={() => setHistoryOpen(true)}
+                  disabled={!activeEditorTab?.connectionId || !sqlHistoryEnabled}
+                >
+                  历史
+                </Button>
+              </Tooltip>
+              <Tooltip title={`执行当前/已选 SQL (${formatHotkey(['Cmd', 'Enter'])})`}>
+                <Button type="primary" size="small" icon={<PlayCircleOutlined />} loading={executing} onClick={handleExecute} disabled={!activeEditorTab?.sql?.trim() || !activeEditorTab.connectionId || !activeEditorTab.database}>
+                  执行
+                </Button>
+              </Tooltip>
+            </>
+          )}
+          {!showAdvancedTools && (
+            <Button type="primary" size="small" icon={<PlayCircleOutlined />} loading={executing} onClick={handleExecute} disabled={!activeEditorTab?.sql?.trim() || !activeEditorTab.connectionId || !activeEditorTab.database}>
+              执行
+            </Button>
+          )}
           <Button size="small" icon={<ClearOutlined />} onClick={handleClear}>清空</Button>
         </Space>
       </div>
@@ -396,15 +485,15 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
           document.body.style.userSelect = 'none'
         }}
         style={{
-          height: 4, cursor: 'row-resize', background: token.colorBgSpotlight, zIndex: 10,
-          opacity: 0.5, transition: 'opacity 0.2s', borderBottom: `1px solid ${token.colorBorderSecondary}`
+          height: 4, cursor: 'row-resize', background: 'var(--glass-border)', zIndex: 10,
+          opacity: 0.5, transition: 'opacity 0.2s', borderBottom: '1px solid var(--glass-border)'
         }}
         onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
         onMouseLeave={(e) => (!isDraggingRef.current && (e.currentTarget.style.opacity = '0.5'))}
       />
 
       {/* Results 区 */}
-      <Content style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', background: token.colorBgContainer, flex: 1 }}>
+      <Content style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', background: 'transparent', flex: 1 }}>
         <Tabs
           destroyInactiveTabPane
           activeKey={activeEditorTab.resultTab}
@@ -437,17 +526,49 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
               return {
                 key: `result-${currentQueryIndex}`,
                 label: displayLabel,
-                children: (
-                  <SqlResultPanel
-                    result={r}
-                    displayLabel={displayLabel}
-                    tableHeight={resultTableHeight}
-                    loadMoreKey={`${queryId}-${idx}`}
-                    currentLoadKey={loadingMoreKey}
-                    onLoadMore={r.preview && r.hasMore ? () => handleLoadMore(idx) : undefined}
-                    onResultMetaChange={(patch) => handleResultMetaChange(idx, patch)}
-                  />
-                )
+                children: (() => {
+                  const editability = editabilityMap.get(idx)
+
+                  // 正在分析时显示加载状态（包括 preview 模式）
+                  if (!editability && analyzingEditability) {
+                    return (
+                      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: resultTableHeight }}>
+                        <Spin tip="分析可编辑性..." />
+                      </div>
+                    )
+                  }
+
+                  // 可编辑：渲染 EditableDataTable
+                  if (editability?.editable && editability.tableName && editability.columns) {
+                    return (
+                      <EditableDataTable
+                        connectionId={r.connectionId!}
+                        database={r.database!}
+                        tableName={editability.tableName}
+                        columns={editability.columns}
+                        dataSource={r.rows ?? []}
+                        onRefresh={() => handleExecute()}
+                        hasMore={r.preview && r.hasMore}
+                        onLoadMore={r.preview && r.hasMore ? () => handleLoadMore(idx) : undefined}
+                        loadingMore={loadingMoreKey === `${queryId}-${idx}`}
+                      />
+                    )
+                  }
+
+                  // 不可编辑或预览模式：渲染 SqlResultPanel
+                  return (
+                    <SqlResultPanel
+                      result={r}
+                      displayLabel={displayLabel}
+                      tableHeight={resultTableHeight}
+                      loadMoreKey={`${queryId}-${idx}`}
+                      currentLoadKey={loadingMoreKey}
+                      onLoadMore={r.preview && r.hasMore ? () => handleLoadMore(idx) : undefined}
+                      onResultMetaChange={(patch) => handleResultMetaChange(idx, patch)}
+                      editabilityReason={editability?.reason}
+                    />
+                  )
+                })()
               }
             }).filter(Boolean) as Array<{ key: string, label: string, children: React.ReactNode }>,
             {
@@ -481,5 +602,45 @@ export const QueryEditorPane: React.FC<QueryEditorPaneProps> = ({ queryId }) => 
         />
       </Content>
     </div>
+
+    {/* 高级工具模态框（收藏脚本 / SQL 历史） */}
+    {showAdvancedTools && activeEditorTab && (
+      <>
+        <SaveScriptModal
+          open={saveModalOpen}
+          initialSql={activeEditorTab.sql}
+          database={activeEditorTab.database}
+          onCancel={() => setSaveModalOpen(false)}
+          onSuccess={() => setSaveModalOpen(false)}
+        />
+        <SavedScriptsModal
+          open={listModalOpen}
+          onCancel={() => setListModalOpen(false)}
+          onSelect={(script) => {
+            storeUpdateTab(queryId, { sql: script.content })
+            editorRef.current?.setValue(script.content)
+            editorRef.current?.focus()
+            setListModalOpen(false)
+            toast.success('已加载收藏脚本到编辑区')
+          }}
+        />
+        <SqlHistoryDrawer
+          open={historyOpen}
+          connectionId={activeEditorTab.connectionId ?? ''}
+          database={sqlHistoryFilterByDatabase ? (activeEditorTab.database ?? undefined) : undefined}
+          onClose={() => setHistoryOpen(false)}
+          onApply={(sql) => {
+            if (editorRef.current) {
+              editorRef.current.setValue(sql)
+              editorRef.current.focus()
+            } else {
+              storeUpdateTab(queryId, { sql })
+            }
+            setHistoryOpen(false)
+          }}
+        />
+      </>
+    )}
+  </>
   )
 }

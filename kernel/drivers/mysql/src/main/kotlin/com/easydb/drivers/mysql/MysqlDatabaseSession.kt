@@ -31,4 +31,6 @@ class MysqlDatabaseSession(
             // 忽略关闭异常
         }
     }
+
+    override fun getJdbcConnection(): java.sql.Connection = connection
 }

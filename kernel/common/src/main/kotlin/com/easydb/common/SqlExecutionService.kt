@@ -170,9 +170,9 @@ class SqlExecutionService {
     }
 
     /**
-     * 查询预览模式：
-     * - 仅加载一页结果，避免一次性把整个结果集读入 JVM / 前端
-     * - 支持 offset 分页（通过重新执行查询并跳过前 N 行实现，先保证正确性）
+     * 查询预览模式 —— DBeaver 风格 LIMIT/OFFSET 分页。
+     * - 将用户 SQL 包装为 SELECT * FROM (用户SQL) _t LIMIT pageSize OFFSET offset
+     * - MySQL 只扫描前 pageSize+offset 行，性能远优于 rs.next() 逐行跳过
      * - 超长单元格会截断，降低传输与渲染开销
      */
     fun previewQuery(
@@ -196,6 +196,7 @@ class SqlExecutionService {
         val safeOffset = offset.coerceAtLeast(0)
         val safePageSize = pageSize.coerceIn(1, 1000)
         val safeMaxCellChars = maxCellChars.coerceIn(128, 16 * 1024)
+        val normalizedSql = sql.trim().trimEnd(';')
 
         return try {
             val conn = getConnection(jdbcSession)
@@ -204,14 +205,17 @@ class SqlExecutionService {
                 stmt.execute("USE `$database`")
             }
 
+            // DBeaver 风格：LIMIT/OFFSET 分页，MySQL 只扫描前 N 行
+            // 多取 1 行用于判断 hasMore
+            val pagedSql = "SELECT * FROM ($normalizedSql) _easydb_page LIMIT ${safePageSize + 1} OFFSET $safeOffset"
+
             conn.createStatement(
                 java.sql.ResultSet.TYPE_FORWARD_ONLY,
                 java.sql.ResultSet.CONCUR_READ_ONLY
             ).use { stmt ->
-                stmt.fetchSize = safePageSize.coerceAtLeast(100)
                 stmt.queryTimeout = 120
 
-                val hasResult = stmt.execute(sql)
+                val hasResult = stmt.execute(pagedSql)
                 val duration = System.currentTimeMillis() - start
 
                 if (!hasResult) {
@@ -240,22 +244,48 @@ class SqlExecutionService {
                     val columnCount = meta.columnCount
                     val columns = (1..columnCount).map { meta.getColumnLabel(it) }
                     val rows = mutableListOf<Map<String, String?>>()
-                    var skipped = 0
                     var truncatedCellCount = 0
 
-                    while (skipped < safeOffset && rs.next()) {
-                        skipped++
-                    }
-
-                    var hasMore = false
                     while (rs.next()) {
                         if (rows.size >= safePageSize) {
-                            hasMore = true
-                            break
+                            // 第 pageSize+1 行存在 → hasMore=true
+                            return SqlResult(
+                                type = "query",
+                                columns = columns,
+                                rows = rows,
+                                preview = true,
+                                hasMore = true,
+                                offset = safeOffset,
+                                pageSize = safePageSize,
+                                loadedRows = rows.size,
+                                truncatedCellCount = truncatedCellCount,
+                                duration = System.currentTimeMillis() - start,
+                                sql = sql,
+                                executedAt = LocalDateTime.now().format(timeFormatter)
+                            )
                         }
 
-                        val row = mutableMapOf<String, String?>()
+                        val row = linkedMapOf<String, String?>()
                         for (i in 1..columnCount) {
+                            val colType = meta.getColumnType(i)
+
+                            // 处理 BLOB/BINARY 类型：不读取实际内容，只显示大小标签
+                            if (colType in setOf(java.sql.Types.BLOB, java.sql.Types.BINARY, java.sql.Types.VARBINARY, java.sql.Types.LONGVARBINARY)) {
+                                val bytes = rs.getBytes(i)
+                                if (bytes == null) {
+                                    row[columns[i - 1]] = null
+                                } else {
+                                    truncatedCellCount++
+                                    val sizeLabel = when {
+                                        bytes.size < 1024 -> "${bytes.size} B"
+                                        bytes.size < 1024 * 1024 -> "${bytes.size / 1024} KB"
+                                        else -> "${bytes.size / (1024 * 1024)} MB"
+                                    }
+                                    row[columns[i - 1]] = "[BLOB $sizeLabel]"
+                                }
+                                continue
+                            }
+
                             val value = rs.getString(i)
                             row[columns[i - 1]] = when {
                                 value == null -> null
@@ -269,15 +299,17 @@ class SqlExecutionService {
                         rows.add(row)
                     }
 
+                    // 已遍历完所有行，无更多数据
                     SqlResult(
                         type = "query",
                         columns = columns,
                         rows = rows,
                         preview = true,
-                        hasMore = hasMore,
+                        hasMore = false,
                         offset = safeOffset,
                         pageSize = safePageSize,
                         loadedRows = rows.size,
+                        totalRows = safeOffset + rows.size.toLong(),  // 已知总数
                         truncatedCellCount = truncatedCellCount,
                         duration = System.currentTimeMillis() - start,
                         sql = sql,
@@ -436,13 +468,10 @@ class SqlExecutionService {
 
     /**
      * 提取底层 JDBC Connection
-     * 通过反射获取 MysqlDatabaseSession 的 connection 字段
-     * 避免 common 模块直接依赖 drivers/mysql
+     * 通过 DatabaseSession 接口方法直接获取
      */
     private fun getConnection(session: DatabaseSession): java.sql.Connection {
-        val field = session.javaClass.getDeclaredField("connection")
-        field.isAccessible = true
-        return field.get(session) as java.sql.Connection
+        return session.getJdbcConnection()
     }
 
     private fun parseSqlChunk(

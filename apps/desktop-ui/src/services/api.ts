@@ -25,6 +25,14 @@ const KERNEL_BASE_URL = 'http://localhost:18080'
 const MAX_RETRIES = 10
 const RETRY_DELAY_MS = 2000
 
+/** 自动重连回调（可选）- 通知前端更新连接状态 */
+export type ReconnectCallback = (connectionId: string) => void
+let reconnectCallback: ReconnectCallback | null = null
+
+export function setReconnectCallback(cb: ReconnectCallback | null) {
+  reconnectCallback = cb
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   let lastError: Error | null = null
 
@@ -37,20 +45,22 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
       if (!res.ok) {
         let errorMsg = `HTTP ${res.status}: ${res.statusText}`
+        let errorCode = ''
         try {
           const json = await res.json()
           if (json.error?.message) {
             errorMsg = json.error.message
+            errorCode = json.error?.code || ''
           }
         } catch {
           // 无法解析 JSON，使用默认错误消息
         }
-        throw new Error(errorMsg)
+        throw new ApiError(errorCode, errorMsg)
       }
 
       const json = await res.json()
       if (!json.success) {
-        throw new Error(json.error?.message ?? 'Unknown error')
+        throw new ApiError(json.error?.code || '', json.error?.message ?? 'Unknown error')
       }
       return json.data as T
     } catch (e) {
@@ -61,6 +71,34 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
         lastError.message.includes('NetworkError') ||
         lastError.message.includes('ERR_CONNECTION_REFUSED')
 
+      // 处理 NOT_CONNECTED / CONNECTION_LOST 错误：自动重连并重试
+      if (lastError instanceof ApiError &&
+          (lastError.code === 'NOT_CONNECTED' || lastError.code === 'CONNECTION_LOST')) {
+
+        const connectionId = extractConnectionId(path)
+        if (connectionId && attempt < MAX_RETRIES) {
+          try {
+            // 尝试重连
+            const reconnectRes = await fetch(`${KERNEL_BASE_URL}/api/connection/${connectionId}/open`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+            })
+            const reconnectJson = await reconnectRes.json()
+            if (reconnectJson.success) {
+              // 通知前端更新连接状态
+              if (reconnectCallback) {
+                reconnectCallback(connectionId)
+              }
+              // 重连成功，重试原请求
+              continue
+            }
+          } catch {
+            // 重连失败，抛出原错误
+            break
+          }
+        }
+      }
+
       if (!isNetworkError || attempt === MAX_RETRIES) {
         throw lastError
       }
@@ -70,6 +108,24 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   }
 
   throw lastError!
+}
+
+/** 从 API 路径中提取连接 ID */
+function extractConnectionId(path: string): string | null {
+  // 元数据路径格式: /api/metadata/{connectionId}/...
+  // SQL 路径格式: /api/sql/execute (body 中有 connectionId)
+  const match = path.match(/\/api\/metadata\/([^\/]+)/)
+  return match ? match[1] : null
+}
+
+/** 自定义 API 错误类型，携带错误码 */
+class ApiError extends Error {
+  code: string
+  constructor(code: string, message: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.code = code
+  }
 }
 
 // ─── 连接管理 ───────────────────────────────────────────
@@ -164,33 +220,31 @@ export const sqlApi = {
       method: 'POST',
       body: JSON.stringify({ connectionId, database, sql }),
     }),
-  querySessionStart: (config: { connectionId: string; database: string; sql: string; pageSize?: number; maxCellChars?: number }) =>
-    request('/api/sql/query-session/start', {
+  queryPreview: (config: {
+    connectionId: string
+    database: string
+    sql: string
+    offset?: number
+    pageSize?: number
+    maxCellChars?: number
+  }) =>
+    request('/api/sql/query-preview', {
       method: 'POST',
       body: JSON.stringify(config),
-    }),
-  querySessionFetch: (config: { querySessionId: string; pageSize?: number; maxCellChars?: number }) =>
-    request('/api/sql/query-session/fetch', {
-      method: 'POST',
-      body: JSON.stringify(config),
-    }),
-  querySessionStatus: (querySessionId: string) =>
-    request('/api/sql/query-session/status', {
-      method: 'POST',
-      body: JSON.stringify({ querySessionId }),
-    }),
-  querySessionClose: (querySessionId: string) =>
-    request('/api/sql/query-session/close', {
-      method: 'POST',
-      body: JSON.stringify({ querySessionId }),
     }),
   importFileStart: (config: { connectionId: string; database: string; filePath: string; fileName?: string }) =>
     request('/api/sql/import-file/start', {
       method: 'POST',
       body: JSON.stringify(config),
     }),
-  historyList: (connectionId: string) =>
-    request(`/api/sql/history?connectionId=${connectionId}`),
+  historyList: (connectionId: string, database?: string) => {
+    const params = new URLSearchParams({ connectionId })
+    if (database) params.set('database', database)
+    return request(`/api/sql/history?${params}`)
+  },
+  /** 清空指定连接下的 SQL 历史（不影响其他连接） */
+  historyClearByConnection: (connectionId: string) =>
+    request(`/api/sql/history?connectionId=${connectionId}`, { method: 'DELETE' }),
 }
 
 // ─── 数据迁移 ────────────────────────────────────────────
@@ -219,6 +273,32 @@ export const exportApi = {
     request('/api/export/estimate', { method: 'POST', body: JSON.stringify(config) }),
   start: (config: unknown) =>
     request('/api/export/start', { method: 'POST', body: JSON.stringify(config) }),
+}
+
+// ─── 数据库备份 (Backup) ──────────────────────────────────
+export const backupApi = {
+  estimate: (config: unknown) =>
+    request('/api/backup/estimate', { method: 'POST', body: JSON.stringify(config) }),
+  start: (config: unknown) =>
+    request('/api/backup/start', { method: 'POST', body: JSON.stringify(config) }),
+  list: () =>
+    request('/api/backup/list'),
+  downloadUrl: (path: string) => `${KERNEL_BASE_URL}/api/backup/download?path=${encodeURIComponent(path)}`,
+  deleteFile: (filePath: string) =>
+    request('/api/backup/file', { method: 'DELETE', body: JSON.stringify({ filePath }) }),
+  cleanup: (mode: string, days?: number) =>
+    request('/api/storage/cleanup', {
+      method: 'POST',
+      body: JSON.stringify({ target: 'backups', mode, days: days ?? 3 }),
+    }),
+}
+
+// ─── 数据库恢复 (Restore) ─────────────────────────────────
+export const restoreApi = {
+  inspect: (config: { filePath: string }) =>
+    request('/api/restore/inspect', { method: 'POST', body: JSON.stringify(config) }),
+  start: (config: unknown) =>
+    request('/api/restore/start', { method: 'POST', body: JSON.stringify(config) }),
 }
 
 // ─── 任务中心 ────────────────────────────────────────────
@@ -263,3 +343,85 @@ export const storageApi = {
       body: JSON.stringify({ target, mode, days: days ?? 3 }),
     }),
 }
+
+// ─── 存储过程 / 函数执行 ─────────────────────────────────
+export const procedureApi = {
+  /**
+   * 查询存储过程或函数的参数元数据
+   * @returns ProcedureInspectResult
+   */
+  inspect: (data: {
+    connectionId: string
+    database: string
+    name: string
+    type: 'PROCEDURE' | 'FUNCTION'
+  }) =>
+    request('/api/procedure/inspect', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  /**
+   * 执行存储过程或函数
+   * @returns ProcedureExecuteResult
+   */
+  execute: (data: ProcedureExecuteRequest) =>
+    request('/api/procedure/execute', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+}
+
+// ─── 存储过程类型定义（对应后端 DataModels.kt）─────────────
+
+export interface ProcedureParam {
+  name: string
+  ordinalPosition: number
+  mode: 'IN' | 'OUT' | 'INOUT' | 'RETURNS'
+  dataType: string
+  dtdIdentifier: string | null
+  characterMaxLength: number | null
+  numericPrecision: number | null
+  numericScale: number | null
+}
+
+export interface ProcedureInspectResult {
+  name: string
+  type: 'PROCEDURE' | 'FUNCTION'
+  database: string
+  definer: string | null
+  comment: string | null
+  params: ProcedureParam[]
+  ddl: string | null
+}
+
+export interface ProcedureParamValue {
+  name: string
+  value: string | null
+  mode: string
+}
+
+export interface ProcedureExecuteRequest {
+  connectionId: string
+  database: string
+  name: string
+  type: 'PROCEDURE' | 'FUNCTION'
+  params: ProcedureParamValue[]
+}
+
+export interface ProcedureResultSet {
+  index: number
+  columns: string[]
+  rows: Record<string, string | null>[]
+  rowCount: number
+}
+
+export interface ProcedureExecuteResult {
+  success: boolean
+  duration: number
+  outParams: Record<string, string | null>
+  resultSets: ProcedureResultSet[]
+  warningCount: number
+  error: string | null
+}
+

@@ -247,19 +247,21 @@ export const ConnectionPage: React.FC = () => {
         width={220}
         theme="light"
         style={{
-          borderRight: '1px solid var(--color-border)',
+          borderRight: '1px solid var(--glass-border)',
           overflow: 'auto',
-          background: 'var(--color-bg-container)'
+          background: 'var(--glass-panel)',
+          backdropFilter: 'var(--glass-blur)',
+          WebkitBackdropFilter: 'var(--glass-blur)',
         }}
       >
-        <div style={{ padding: '24px 16px 8px 16px', fontWeight: 600, color: 'var(--color-text-secondary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ padding: '20px 16px 8px 16px', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--edb-text-muted)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span>连接分组</span>
           <Button 
             type="text" 
             size="small" 
             icon={<PlusOutlined />} 
             onClick={() => { setEditingGroup(null); setGroupNameInput(''); setGroupModalOpen(true); }}
-            style={{ color: 'var(--color-primary)' }}
+            style={{ color: 'var(--edb-accent)' }}
           />
         </div>
         <Menu
@@ -282,7 +284,7 @@ export const ConnectionPage: React.FC = () => {
                     ]
                   }} trigger={['hover', 'click']}>
                     <div onClick={e => e.stopPropagation()} style={{ padding: '0 4px', visibility: selectedGroup === g.id ? 'visible' : undefined }}>
-                      <EllipsisOutlined style={{ color: 'var(--color-text-secondary)', fontSize: 16 }} />
+                      <EllipsisOutlined style={{ color: 'var(--edb-text-muted)', fontSize: 16 }} />
                     </div>
                   </Dropdown>
                 </div>
@@ -294,7 +296,7 @@ export const ConnectionPage: React.FC = () => {
       </Layout.Sider>
 
       {/* 右侧主内容区 */}
-      <Layout.Content style={{ overflow: 'auto', padding: 24 }}>
+      <Layout.Content style={{ overflow: 'auto', padding: 24, background: 'var(--edb-bg-base)' }}>
         {/* 头部操作区 */}
         <div style={{
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -335,23 +337,23 @@ export const ConnectionPage: React.FC = () => {
         {selectedGroup === 'all' && (
           <Row gutter={16} style={{ marginBottom: 24 }}>
             <Col span={6}>
-              <Card size="small" bordered={false} style={{ background: 'var(--color-bg-elevated)', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
+              <Card size="small" bordered={false} style={{ background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur)', border: '1px solid var(--glass-border)', borderRadius: 'var(--edb-radius-lg)', boxShadow: 'var(--glass-shadow), var(--glass-inner-glow)' }}>
                 <Statistic title="连接总数" value={stats.total} prefix={<ApiOutlined />} />
               </Card>
             </Col>
             <Col span={6}>
-              <Card size="small" bordered={false} style={{ background: 'var(--color-bg-elevated)', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
-                <Statistic title="已连接" value={stats.connected} valueStyle={{ color: 'var(--color-success)' }} prefix={<CheckCircleOutlined />} />
+              <Card size="small" bordered={false} style={{ background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur)', border: '1px solid var(--glass-border)', borderRadius: 'var(--edb-radius-lg)', boxShadow: 'var(--glass-shadow), var(--glass-inner-glow)' }}>
+                <Statistic title="已连接" value={stats.connected} valueStyle={{ color: 'var(--edb-success)' }} prefix={<CheckCircleOutlined />} />
               </Card>
             </Col>
             <Col span={6}>
-              <Card size="small" bordered={false} style={{ background: 'var(--color-bg-elevated)', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
-                <Statistic title="未连接" value={stats.disconnected} valueStyle={{ color: 'var(--color-text-secondary)' }} prefix={<DisconnectOutlined />} />
+              <Card size="small" bordered={false} style={{ background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur)', border: '1px solid var(--glass-border)', borderRadius: 'var(--edb-radius-lg)', boxShadow: 'var(--glass-shadow), var(--glass-inner-glow)' }}>
+                <Statistic title="未连接" value={stats.disconnected} valueStyle={{ color: 'var(--edb-text-secondary)' }} prefix={<DisconnectOutlined />} />
               </Card>
             </Col>
             <Col span={6}>
-              <Card size="small" bordered={false} style={{ background: 'var(--color-bg-elevated)', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
-                <Statistic title="异常" value={stats.error} valueStyle={{ color: 'var(--color-error)' }} prefix={<ExclamationCircleOutlined />} />
+              <Card size="small" bordered={false} style={{ background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur)', border: '1px solid var(--glass-border)', borderRadius: 'var(--edb-radius-lg)', boxShadow: 'var(--glass-shadow), var(--glass-inner-glow)' }}>
+                <Statistic title="异常" value={stats.error} valueStyle={{ color: 'var(--edb-error)' }} prefix={<ExclamationCircleOutlined />} />
               </Card>
             </Col>
           </Row>
@@ -376,6 +378,12 @@ export const ConnectionPage: React.FC = () => {
                 connection={conn}
                 selected={selectedConn?.id === conn.id}
                 onClick={() => setSelectedConn(conn)}
+                onDoubleClick={async () => {
+                  if (conn.status !== 'connected') {
+                    await handleOpen(conn)
+                  }
+                  handleEnterWorkbench(conn)
+                }}
                 onOpen={() => handleOpen(conn)}
                 onClose={() => handleClose(conn)}
                 onEnterWorkbench={() => handleEnterWorkbench(conn)}

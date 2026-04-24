@@ -107,7 +107,8 @@ export interface SqlResult {
   affectedRows?: number
   preview?: boolean
   hasMore?: boolean
-  querySessionId?: string
+  connectionId?: string // 用于加载更多
+  database?: string // 用于加载更多
   totalRows?: number
   offset?: number
   pageSize?: number
@@ -117,13 +118,6 @@ export interface SqlResult {
   sql: string
   executedAt: string
   error?: string
-}
-
-export interface SqlQuerySessionStatus {
-  querySessionId: string
-  totalRows?: number
-  counting: boolean
-  exists: boolean
 }
 
 // SQL 历史记录
@@ -272,6 +266,11 @@ export interface CompareOptions {
   ignoreCharset: boolean
   ignoreCollation: boolean
   includeDropStatements: boolean
+  // 扩展对象开关（默认全开）
+  compareViews?: boolean
+  compareProcedures?: boolean
+  compareFunctions?: boolean
+  compareTriggers?: boolean
 }
 
 // 结构对比结果
@@ -281,6 +280,21 @@ export interface CompareResult {
   totalTables: number
   diffCount: number
   tables: TableCompareResult[]
+  // 扩展对象
+  views:      ObjectCompareResult[]
+  procedures: ObjectCompareResult[]
+  functions:  ObjectCompareResult[]
+  triggers:   ObjectCompareResult[]
+}
+
+/** 非表对象对比结果（视图/存储过程/函数/触发器） */
+export interface ObjectCompareResult {
+  name: string
+  objectType: 'view' | 'procedure' | 'function' | 'trigger'
+  status: 'only_in_source' | 'only_in_target' | 'different' | 'identical'
+  sourceDdl: string
+  targetDdl: string
+  summary: string
 }
 
 export interface TableCompareResult {
@@ -367,7 +381,8 @@ export interface ChangeEvent {
   timestamp: number
   database: string
   table: string
-  eventType: 'INSERT' | 'UPDATE' | 'DELETE'
+  /** INSERT | UPDATE | DELETE | DDL_CREATE_TABLE | DDL_ALTER_TABLE | DDL_DROP_TABLE | DDL_TRUNCATE_TABLE | DDL_RENAME_TABLE | DDL_OTHER */
+  eventType: string
   columns: string[]
   rowsBefore?: Record<string, string | null>[]
   rowsAfter?: Record<string, string | null>[]
@@ -378,7 +393,11 @@ export interface ChangeEvent {
     position?: number
     serverId?: number
   }
-  transactionId?: string  // 事务 ID，来自 QUERY:BEGIN / XID 事件
+  transactionId?: string
+  // DDL 专属字段（DML 事件为 undefined）
+  ddlSql?: string
+  ddlObjectType?: string
+  ddlRisk?: 'low' | 'medium' | 'high' | 'critical'
 }
 
 export interface TrackerSessionConfig {
@@ -448,6 +467,7 @@ export interface HistoryStats {
   insertCount: number
   updateCount: number
   deleteCount: number
+  ddlCount: number    // DDL 事件计数
   tables: string[]
   timeRange: number[]  // [minTimestamp, maxTimestamp]
 }
@@ -458,5 +478,26 @@ export interface SseTick {
   rate: number
   latestId?: string
   message?: string
+}
+
+// ─── 查询结果可编辑性分析 ─────────────────────────────
+
+export type EditabilityReason =
+  | 'not_query'           // 非 SELECT 查询
+  | 'preview_mode'        // 预览模式（数据可能截断）
+  | 'missing_context'     // 缺少 connectionId 或 database
+  | 'parse_error'         // SQL 解析失败
+  | 'multi_table'         // 多表 JOIN
+  | 'aggregate'           // 聚合查询
+  | 'view'                // 视图查询
+  | 'no_primary_key'      // 表无主键
+  | 'metadata_error'      // 元数据获取失败
+
+export interface EditabilityStatus {
+  editable: boolean
+  reason?: EditabilityReason
+  tableName?: string
+  primaryKeys?: string[]
+  columns?: ColumnInfo[]
 }
 

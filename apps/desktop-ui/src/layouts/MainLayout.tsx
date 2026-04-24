@@ -15,12 +15,11 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 import React, { useEffect } from 'react'
-import { Layout, Menu, theme, Typography, Space, Breadcrumb } from 'antd'
+import { Layout, Menu, Typography, Space, Breadcrumb } from 'antd'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   ApiOutlined,
   DatabaseOutlined,
-  CodeOutlined,
   SwapOutlined,
   SyncOutlined,
   DiffOutlined,
@@ -31,6 +30,7 @@ import {
   PlayCircleOutlined,
   BgColorsOutlined,
   ThunderboltOutlined,
+  SearchOutlined,
 } from '@ant-design/icons'
 import { useWorkbenchStore } from '@/stores/workbenchStore'
 import { useCommandStore } from '@/stores/commandStore'
@@ -44,24 +44,24 @@ const { Text } = Typography
 const menuItems = [
   { key: '/connection', icon: <ApiOutlined />, label: '连接管理' },
   { key: '/workbench', icon: <DatabaseOutlined />, label: '工作台' },
-  { key: '/sql-editor', icon: <CodeOutlined />, label: 'SQL 编辑器' },
   { key: '/migration', icon: <SwapOutlined />, label: '数据迁移' },
   { key: '/sync', icon: <SyncOutlined />, label: '数据同步' },
   { key: '/structure-compare', icon: <DiffOutlined />, label: '结构对比' },
   { key: '/task-center', icon: <UnorderedListOutlined />, label: '任务中心' },
   { key: '/data-tracker', icon: <ThunderboltOutlined />, label: '数据追踪' },
+  { key: '/slow-query',   icon: <SearchOutlined />,      label: '慢查询分析' },
   { key: '/settings', icon: <SettingOutlined />, label: '设置' },
 ]
 
 const pageTitle: Record<string, string> = {
   '/connection': '连接管理',
   '/workbench': '工作台',
-  '/sql-editor': 'SQL 编辑器',
   '/migration': '数据迁移',
   '/sync': '数据同步',
   '/structure-compare': '结构对比',
   '/task-center': '任务中心',
   '/data-tracker': '数据追踪',
+  '/slow-query': '慢查询分析',
   '/settings': '设置',
 }
 
@@ -72,7 +72,6 @@ interface MainLayoutProps {
 export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   const navigate = useNavigate()
   const location = useLocation()
-  const { token } = theme.useToken()
 
   const themeMode = useThemeStore((s) => s.themeMode)
   const setThemeMode = useThemeStore((s) => s.setThemeMode)
@@ -85,18 +84,17 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   const setSiderCollapsed = useWorkbenchStore((s) => s.setSiderCollapsed)
 
   const currentTitle = pageTitle[location.pathname] ?? ''
-  const isSqlEditor = location.pathname === '/sql-editor'
 
   useEffect(() => {
     const defaultCommands = [
       { id: 'nav-conn', title: '前往 连接管理', category: 'Navigation', icon: <ApiOutlined />, action: () => navigate('/connection') },
       { id: 'nav-wb', title: '前往 工作台', category: 'Navigation', icon: <DatabaseOutlined />, action: () => navigate('/workbench') },
-      { id: 'nav-sql', title: '前往 SQL 编辑器', category: 'Navigation', icon: <CodeOutlined />, action: () => navigate('/sql-editor') },
       { id: 'nav-mig', title: '前往 数据迁移', category: 'Navigation', icon: <SwapOutlined />, action: () => navigate('/migration') },
       { id: 'nav-sync', title: '前往 数据同步', category: 'Navigation', icon: <SyncOutlined />, action: () => navigate('/sync') },
       { id: 'nav-comp', title: '前往 结构对比', category: 'Navigation', icon: <DiffOutlined />, action: () => navigate('/structure-compare') },
       { id: 'nav-task', title: '前往 任务中心', category: 'Navigation', icon: <UnorderedListOutlined />, action: () => navigate('/task-center') },
       { id: 'nav-tracker', title: '前往 数据追踪', category: 'Navigation', icon: <ThunderboltOutlined />, action: () => navigate('/data-tracker') },
+      { id: 'nav-slow-query', title: '前往 慢查询分析', category: 'Navigation', icon: <SearchOutlined />, action: () => navigate('/slow-query') },
       { id: 'nav-sett', title: '前往 设置', category: 'Navigation', icon: <SettingOutlined />, action: () => navigate('/settings') },
       { id: 'theme-toggle', title: '切换 深色/浅色 主题', category: 'Preferences', icon: <BgColorsOutlined />, action: () => setThemeMode(themeMode === 'dark' ? 'light' : 'dark') },
       { id: 'run-sql', title: '执行选中的 SQL (如果可用)', category: 'Editor', icon: <PlayCircleOutlined />, shortcut: ['Cmd', 'Enter'], action: () => {
@@ -111,11 +109,11 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
     }
   }, [navigate, themeMode, setThemeMode, registerCommand, unregisterCommand])
 
-  // 面包屑项（SQL 编辑器内部有自己的上下文，不显示全局上下文）
+  // 面包屑项
   const breadcrumbItems = [
     { title: currentTitle },
-    ...(!isSqlEditor && activeConnectionName ? [{ title: activeConnectionName }] : []),
-    ...(!isSqlEditor && activeDatabase ? [{ title: activeDatabase }] : []),
+    ...(activeConnectionName ? [{ title: activeConnectionName }] : []),
+    ...(activeDatabase ? [{ title: activeDatabase }] : []),
   ]
 
   return (
@@ -126,25 +124,34 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
         collapsedWidth={56}
         collapsed={siderCollapsed}
         style={{
-          background: token.colorBgContainer,
-          borderRight: `1px solid ${token.colorBorderSecondary}`,
+          background: 'var(--glass-panel)',
+          backdropFilter: 'var(--glass-blur)',
+          WebkitBackdropFilter: 'var(--glass-blur)',
+          borderRight: '1px solid var(--glass-border)',
+          boxShadow: 'var(--glass-shadow), var(--glass-inner-glow)',
+          zIndex: 10,
         }}
       >
         {/* Logo */}
         <div
           style={{
-            height: 48,
+            height: 52,
             display: 'flex',
             alignItems: 'center',
             justifyContent: siderCollapsed ? 'center' : 'flex-start',
-            paddingLeft: siderCollapsed ? 0 : 24,
-            borderBottom: `1px solid ${token.colorBorderSecondary}`,
+            paddingLeft: siderCollapsed ? 0 : 20,
+            margin: '10px 10px 6px',
+            borderRadius: 'var(--edb-radius-md)',
+            background: 'var(--glass-panel)',
+            border: '1px solid var(--glass-border)',
+            boxShadow: 'var(--glass-inner-glow)',
             fontWeight: 700,
             fontSize: siderCollapsed ? 14 : 16,
-            color: token.colorPrimary,
-            letterSpacing: 1,
+            color: 'var(--edb-accent)',
+            letterSpacing: 1.5,
             cursor: 'pointer',
-            transition: 'all 0.2s',
+            transition: 'all var(--edb-transition-normal)',
+            textShadow: '0 0 20px var(--edb-accent-muted)',
           }}
           onClick={() => navigate('/connection')}
         >
@@ -165,13 +172,31 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
           style={{
             position: 'absolute',
             bottom: 16,
-            width: '100%',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: 36,
+            height: 36,
             display: 'flex',
+            alignItems: 'center',
             justifyContent: 'center',
             cursor: 'pointer',
-            color: token.colorTextSecondary,
+            color: 'var(--edb-text-muted)',
+            borderRadius: 'var(--edb-radius-md)',
+            background: 'var(--glass-panel)',
+            border: '1px solid var(--glass-border)',
+            boxShadow: 'var(--glass-inner-glow)',
+            backdropFilter: 'var(--glass-blur-sm)',
+            transition: 'all var(--edb-transition-fast)',
           }}
           onClick={() => setSiderCollapsed(!siderCollapsed)}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'var(--glass-panel-hover)'
+            e.currentTarget.style.color = 'var(--edb-text-primary)'
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'var(--glass-panel)'
+            e.currentTarget.style.color = 'var(--edb-text-muted)'
+          }}
         >
           {siderCollapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
         </div>
@@ -183,19 +208,23 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
           style={{
             height: 48,
             lineHeight: '48px',
-            background: token.colorBgContainer,
-            borderBottom: `1px solid ${token.colorBorderSecondary}`,
+            background: 'var(--glass-panel)',
+            backdropFilter: 'var(--glass-blur)',
+            WebkitBackdropFilter: 'var(--glass-blur)',
+            borderBottom: '1px solid var(--glass-border)',
+            boxShadow: 'var(--glass-inner-glow)',
             padding: '0 24px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
+            zIndex: 9,
           }}
         >
           <Breadcrumb items={breadcrumbItems} />
 
           {/* 右侧：当前连接状态 */}
           <Space size={12}>
-            {!isSqlEditor && activeConnectionName ? (
+            {activeConnectionName ? (
               <>
                 <Text type="secondary" style={{ fontSize: 13 }}>
                   <DatabaseOutlined style={{ marginRight: 4 }} />
@@ -204,11 +233,11 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                 </Text>
                 <ConnectionStatusTag status="connected" />
               </>
-            ) : !isSqlEditor ? (
+            ) : (
               <Text type="secondary" style={{ fontSize: 13 }}>
                 未连接
               </Text>
-            ) : null}
+            )}
           </Space>
         </Header>
 
@@ -217,7 +246,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
           style={{
             height: '100%',
             overflow: 'auto',
-            background: token.colorBgLayout,
+            background: 'var(--edb-bg-base)',
           }}
         >
           {children}

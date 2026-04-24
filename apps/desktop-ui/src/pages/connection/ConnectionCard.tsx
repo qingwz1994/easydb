@@ -1,5 +1,5 @@
 import React from 'react'
-import { Card, Space, Typography, Tag, Dropdown, theme } from 'antd'
+import { Card, Space, Typography, Tag, Dropdown } from 'antd'
 import {
   EllipsisOutlined, PlayCircleOutlined, DisconnectOutlined,
   EditOutlined, DeleteOutlined, ThunderboltOutlined,
@@ -14,6 +14,7 @@ interface ConnectionCardProps {
   connection: ConnectionConfig
   selected: boolean
   onClick: () => void
+  onDoubleClick: () => void
   onOpen: () => void
   onClose: () => void
   onEdit: () => void
@@ -22,76 +23,92 @@ interface ConnectionCardProps {
   onEnterWorkbench: () => void
 }
 
+// Vendor color mapping for DB type icon
+const VENDOR_COLORS: Record<string, string> = {
+  mysql: '#E17E10',
+  postgresql: '#336791',
+  dm: '#C23531',
+}
+
 export const ConnectionCard: React.FC<ConnectionCardProps> = ({
-  connection: c, selected, onClick, onOpen, onClose, onEdit, onDelete, onTest, onEnterWorkbench
+  connection: c, selected, onClick, onDoubleClick, onOpen, onClose, onEdit, onDelete, onTest, onEnterWorkbench
 }) => {
-  const { token } = theme.useToken()
-
-  // Generate an aesthetic background style based on theme
-  const isDark = token.colorBgBase === '#0F172A'
-  
-  const cardStyle: React.CSSProperties = {
-    cursor: 'pointer',
-    position: 'relative',
-    transition: 'all 0.2s ease',
-    borderColor: selected ? token.colorPrimary : token.colorBorderSecondary,
-    boxShadow: selected ? `0 0 0 1px ${token.colorPrimary}` : 'none',
-    background: isDark 
-      ? `linear-gradient(145deg, ${token.colorBgContainer}, rgba(255,255,255,0.02))`
-      : token.colorBgContainer,
-    overflow: 'hidden',
-  }
-
-  // Get vendor color indicator
-  const vendorColor = c.dbType === 'mysql' ? '#E17E10' : 
-                      c.dbType === 'postgresql' ? '#336791' : 
-                      token.colorPrimary
+  const vendorColor = VENDOR_COLORS[c.dbType] ?? 'var(--edb-accent)'
 
   return (
     <Card
       size="small"
-      style={cardStyle}
-      bodyStyle={{ padding: 16 }}
+      style={{
+        cursor: 'pointer',
+        position: 'relative',
+        background: 'var(--glass-panel)',
+        backdropFilter: 'var(--glass-blur)',
+        WebkitBackdropFilter: 'var(--glass-blur)',
+        border: '1px solid var(--glass-border)',
+        borderRadius: 'var(--edb-radius-lg)',
+        boxShadow: 'var(--glass-shadow), var(--glass-inner-glow)',
+        overflow: 'hidden',
+      }}
+      styles={{ body: { padding: 16 } }}
       onClick={onClick}
+      onDoubleClick={onDoubleClick}
       hoverable
-      className="connection-card"
+      className={`connection-card${selected ? ' connection-card--selected' : ''}`}
     >
-      {/* Top Section */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+      {/* Top Section: Icon + Name */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
         <Space align="start">
           <div style={{
-            width: 40, height: 40, borderRadius: 8,
-            background: isDark ? 'rgba(255,255,255,0.05)' : token.colorBgLayout,
+            width: 40, height: 40, borderRadius: 'var(--edb-radius-md)',
+            background: 'var(--glass-panel)',
+            backdropFilter: 'var(--glass-blur-sm)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 20, color: vendorColor,
-            border: `1px solid ${token.colorBorderSecondary}`
+            fontSize: 18, color: vendorColor,
+            border: '1px solid var(--glass-border)',
+            boxShadow: 'var(--glass-inner-glow)',
+            transition: 'all var(--edb-transition-fast)',
           }}>
             <DesktopOutlined />
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <Text strong style={{ fontSize: 15, lineHeight: '1.2' }} ellipsis title={c.name}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Text strong style={{ fontSize: 14, lineHeight: '1.3', color: 'var(--edb-text-primary)' }} ellipsis title={c.name}>
               {c.name}
             </Text>
-            <Text type="secondary" style={{ fontSize: 12 }}>
+            <Text style={{ fontSize: 12, color: 'var(--edb-text-muted)' }}>
               {c.host}:{c.port}
             </Text>
           </div>
         </Space>
       </div>
 
-      {/* Tags Section */}
-      <Space size={4} style={{ marginBottom: 16, flexWrap: 'wrap' }}>
-        <Tag color="processing" bordered={false}>{c.dbType.toUpperCase()}</Tag>
+      {/* Status + DB Type */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+        <Tag
+          bordered={false}
+          style={{
+            background: 'var(--glass-panel)',
+            color: 'var(--edb-text-secondary)',
+            border: '1px solid var(--glass-border)',
+            backdropFilter: 'var(--glass-blur-sm)',
+            borderRadius: 'var(--edb-radius-sm)',
+            fontSize: 11,
+            fontWeight: 600,
+            lineHeight: '18px',
+            padding: '0 8px',
+          }}
+        >
+          {c.dbType.toUpperCase()}
+        </Tag>
         <ConnectionStatusTag status={c.status} />
-      </Space>
+      </div>
 
-      {/* Footer Details */}
+      {/* Footer: User + Actions */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Text type="secondary" style={{ fontSize: 12 }} ellipsis>
-          {c.username} {c.database ? `• ${c.database}` : ''}
+        <Text style={{ fontSize: 12, color: 'var(--edb-text-muted)' }} ellipsis>
+          {c.username}{c.database ? ` · ${c.database}` : ''}
         </Text>
-        
-        {/* Actions triggering Dropdown on ellipsis */}
+
+        {/* Actions dropdown */}
         <div onClick={(e) => e.stopPropagation()}>
           <Dropdown menu={{
             items: [
@@ -101,10 +118,10 @@ export const ConnectionCard: React.FC<ConnectionCardProps> = ({
               ] : [
                 { key: 'open', label: '打开连接', icon: <PlayCircleOutlined /> },
               ]),
-              { type: 'divider' },
+              { type: 'divider' as const },
               { key: 'edit', label: '编辑连接', icon: <EditOutlined /> },
               { key: 'test', label: '测试连接', icon: <ThunderboltOutlined /> },
-              { type: 'divider' },
+              { type: 'divider' as const },
               { key: 'delete', label: '删除', icon: <DeleteOutlined />, danger: true },
             ],
             onClick: ({ key, domEvent }) => {
@@ -120,11 +137,26 @@ export const ConnectionCard: React.FC<ConnectionCardProps> = ({
             }
           }} trigger={['click']}>
             <div style={{
-              padding: '4px 8px', borderRadius: 4,
-              background: token.colorBgLayout,
-              cursor: 'pointer', display: 'flex', alignItems: 'center',
-              color: token.colorTextSecondary
-            }}>
+              padding: '6px 8px',
+              borderRadius: 'var(--edb-radius-sm)',
+              background: 'var(--glass-panel)',
+              border: '1px solid var(--glass-border)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              color: 'var(--edb-text-muted)',
+              boxShadow: 'var(--glass-inner-glow)',
+              transition: 'all var(--edb-transition-fast)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--glass-panel-hover)'
+              e.currentTarget.style.color = 'var(--edb-text-primary)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'var(--glass-panel)'
+              e.currentTarget.style.color = 'var(--edb-text-muted)'
+            }}
+            >
               <EllipsisOutlined />
             </div>
           </Dropdown>

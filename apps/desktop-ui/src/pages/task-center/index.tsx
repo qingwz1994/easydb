@@ -225,8 +225,8 @@ export const TaskCenterPage: React.FC = () => {
       {/* 头部 (Header) */}
       <div style={{ 
         display: 'flex', justifyContent: 'space-between', alignItems: 'center', 
-        marginBottom: 16, padding: '16px 24px', background: token.colorBgContainer, 
-        borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.02)', border: `1px solid ${token.colorBorderSecondary}`
+        marginBottom: 16, padding: '16px 24px', background: 'var(--glass-panel)', 
+        backdropFilter: 'var(--glass-blur-sm)', borderRadius: 8, boxShadow: 'var(--glass-shadow), var(--glass-inner-glow)', border: '1px solid var(--glass-border)'
       }}>
         <Title level={5} style={{ margin: 0 }}>
           <UnorderedListOutlined style={{ marginRight: 8, color: token.colorPrimary }} />
@@ -271,8 +271,8 @@ export const TaskCenterPage: React.FC = () => {
       <Layout style={{ flex: 1, minHeight: 0, background: 'transparent', gap: 16 }}>
         {/* 左侧主要任务列表面板 */}
         <div style={{ 
-          flex: 1, background: token.colorBgContainer, borderRadius: 8, 
-          boxShadow: '0 2px 8px rgba(0,0,0,0.02)', border: `1px solid ${token.colorBorderSecondary}`,
+          flex: 1, background: 'var(--glass-panel)', backdropFilter: 'var(--glass-blur-sm)', borderRadius: 8, 
+          boxShadow: 'var(--glass-shadow), var(--glass-inner-glow)', border: '1px solid var(--glass-border)',
           display: 'flex', flexDirection: 'column', overflow: 'auto'
         }}>
           {tasks.length === 0 && !loading ? (
@@ -307,16 +307,17 @@ export const TaskCenterPage: React.FC = () => {
           <Sider
             width={400}
             style={{
-              background: token.colorBgContainer,
+              background: 'var(--glass-panel)',
+              backdropFilter: 'var(--glass-blur-sm)',
               borderRadius: 8,
-              border: `1px solid ${token.colorBorderSecondary}`,
-              boxShadow: '0 2px 8px rgba(0,0,0,0.02)',
+              border: '1px solid var(--glass-border)',
+              boxShadow: 'var(--glass-shadow), var(--glass-inner-glow)',
               padding: 24,
               overflow: 'auto',
             }}
           >
             <Space direction="vertical" size={16} style={{ width: '100%' }}>
-              <div style={{ borderBottom: `1px solid ${token.colorBorderSecondary}`, paddingBottom: 16 }}>
+              <div style={{ borderBottom: '1px solid var(--glass-border)', paddingBottom: 16 }}>
                 <Text strong style={{ fontSize: 16, display: 'block', marginBottom: 4 }}>{selectedTask.name}</Text>
                 <Text type="secondary" style={{ fontSize: 13 }}>ID: {selectedTask.id}</Text>
               </div>

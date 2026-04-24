@@ -464,9 +464,9 @@ export default function ExportDatabaseModal({
     <Modal
       title={(
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <Text strong>导出数据库：{database}</Text>
+          <Text strong>导出数据库</Text>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            来源连接：{connectionName}
+            来源连接：{connectionName} · 数据库：{database}
           </Text>
         </div>
       )}
@@ -493,6 +493,14 @@ export default function ExportDatabaseModal({
       }
     >
       <div style={{ padding: '8px 0' }}>
+        {/* 顶部说明 */}
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="导出为 SQL/ZIP 文件，适用于查看、交付和兼容处理。导出文件不等同于标准备份包。"
+        />
+
         <Steps
           size="small"
           current={currentStep}
@@ -518,9 +526,10 @@ export default function ExportDatabaseModal({
               <div
                 style={{
                   minWidth: 0,
-                  border: `1px solid ${token.colorBorderSecondary}`,
+                  border: '1px solid var(--glass-border)',
                   borderRadius: token.borderRadiusLG,
-                  background: token.colorBgContainer,
+                  background: 'var(--glass-panel)',
+                  backdropFilter: 'var(--glass-blur-sm)',
                   padding: 16,
                 }}
               >
@@ -607,9 +616,9 @@ export default function ExportDatabaseModal({
                 size="small"
                 loading={estimateLoading && selectedCount > 0}
                 style={{
-                  borderColor: token.colorBorderSecondary,
-                  background: token.colorBgContainer,
-                  boxShadow: `0 8px 24px ${token.colorFillSecondary}`,
+                  borderColor: 'var(--glass-border)',
+                  background: 'var(--glass-panel)',
+                  backdropFilter: 'var(--glass-blur-sm)',
                 }}
               >
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -747,7 +756,7 @@ export default function ExportDatabaseModal({
                   }}
                 >
                   <Text type="secondary">
-                    建议保持默认“全选全部”，仅取消不需要导出的表，可减少误选和来回移动的操作成本。
+                    导出适用于数据交换，不建议替代正式备份。
                   </Text>
                 </div>
               </Card>
@@ -800,7 +809,7 @@ export default function ExportDatabaseModal({
                 fontFamily: token.fontFamilyCode || 'SFMono-Regular, Consolas, monospace',
                 fontSize: 12,
                 lineHeight: 1.6,
-                border: `1px solid ${token.colorBorderSecondary}`
+                border: '1px solid var(--glass-border)'
               }}
             >
               {logs.length === 0 && (
@@ -822,8 +831,8 @@ export default function ExportDatabaseModal({
           <div>
             <Result
               status="success"
-              title="数据库导出成功！"
-              subTitle={durationText ? `文件已经生成在本地并准备就绪。导出耗时：${durationText}` : '文件已经生成在本地并准备就绪。'}
+              title="导出完成"
+              subTitle="导出文件已生成。"
               extra={[
                 <Button type="primary" key="download" icon={<DownloadOutlined />} size="large" onClick={() => {
                   if (taskId) {
@@ -846,7 +855,7 @@ export default function ExportDatabaseModal({
                   fontFamily: token.fontFamilyCode || 'SFMono-Regular, Consolas, monospace',
                   fontSize: 12,
                   lineHeight: 1.6,
-                  border: `1px solid ${token.colorBorderSecondary}`
+                  border: '1px solid var(--glass-border)'
                 }}
               >
                 {logs.map((log, i) => (

@@ -98,10 +98,29 @@ fn pick_sql_file() -> Result<Option<SelectedSqlFile>, String> {
     }))
 }
 
+#[tauri::command]
+fn pick_backup_folder() -> Result<Option<String>, String> {
+    let picked = rfd::FileDialog::new()
+        .set_title("选择备份文件存放目录")
+        .pick_folder();
+
+    Ok(picked.map(|p| p.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+fn pick_backup_file() -> Result<Option<String>, String> {
+    let picked = rfd::FileDialog::new()
+        .add_filter("EasyDB Backup", &["edbkp"])
+        .set_title("选择备份文件")
+        .pick_file();
+
+    Ok(picked.map(|p| p.to_string_lossy().to_string()))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![pick_sql_file])
+        .invoke_handler(tauri::generate_handler![pick_sql_file, pick_backup_folder, pick_backup_file])
         .plugin(tauri_plugin_shell::init())
         .plugin(
             tauri_plugin_log::Builder::default()

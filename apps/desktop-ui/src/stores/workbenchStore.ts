@@ -43,6 +43,10 @@ export interface TableTabState {
   indexes: IndexInfo[]
   ddl: string
   previewRows: Record<string, unknown>[]
+  /** 是否还有更多数据可加载（用于滚动加载） */
+  hasMoreRows: boolean
+  /** 是否正在加载更多数据 */
+  loadingMoreRows: boolean
   detailTab: 'data' | 'design' | 'ddl'
   loadedTabs: string[]
 }

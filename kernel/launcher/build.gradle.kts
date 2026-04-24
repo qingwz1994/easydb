@@ -15,6 +15,7 @@ dependencies {
     implementation(project(":migration-engine"))
     implementation(project(":task-center"))
     implementation(project(":tunnel"))
+    implementation(project(":backup-engine"))
 
     // Ktor HTTP server
     val ktorVersion = "2.3.7"

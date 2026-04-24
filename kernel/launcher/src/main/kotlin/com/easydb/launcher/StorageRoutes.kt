@@ -41,6 +41,11 @@ fun Route.storageRoutes() {
                     put("sizeText", info.config.sizeText)
                     put("fileCount", info.config.fileCount)
                 }
+                putJsonObject("backups") {
+                    put("size", info.backups.size)
+                    put("sizeText", info.backups.sizeText)
+                    put("fileCount", info.backups.fileCount)
+                }
                 put("totalSize", info.totalSize)
                 put("totalSizeText", info.totalSizeText)
             }
@@ -52,8 +57,8 @@ fun Route.storageRoutes() {
     post("/cleanup") {
         val req = call.receive<CleanupRequest>()
 
-        if (req.target !in listOf("exports", "logs", "tasks")) {
-            call.fail("INVALID_TARGET", "target 必须是 exports, logs 或 tasks")
+        if (req.target !in listOf("exports", "logs", "tasks", "backups")) {
+            call.fail("INVALID_TARGET", "target 必须是 exports, logs, tasks 或 backups")
             return@post
         }
         if (req.mode !in listOf("older_than_days", "all")) {
