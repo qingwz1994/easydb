@@ -6,14 +6,14 @@
 
 <p align="center">
   <strong>Open-source, cross-platform database management tool</strong><br>
-  Connection Management · Object Browser · SQL Editor · Data Tracker · DDL Audit · Structure Diff · Data Migration · Data Sync · Data Export · Backup &amp; Restore · Task Center · Secure Connection
+  Connection Management · Object Browser · SQL Editor · Data Tracker · DDL Audit · Structure Diff · Data Migration · Data Sync · Data Export · Backup &amp; Restore · Slow Query Analysis · Task Center · Secure Connection
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="Platform">
   <img src="https://img.shields.io/badge/database-MySQL-4479A1?logo=mysql&logoColor=white" alt="MySQL">
-  <img src="https://img.shields.io/badge/version-1.5.0--dev-green" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.3.2-green" alt="Version">
 </p>
 
 <p align="center">
@@ -114,6 +114,15 @@
 - Stream-based import, no memory pressure for large files
 - Execution stats: success, failure, skip counts
 - Progress tracking, log viewer, cancellation support
+
+### 🔍 Slow Query Analysis
+- Based on MySQL `performance_schema` — no Binlog or slow log parsing required
+- SQL fingerprint aggregation: group by digest, view execution count, average/max latency, rows scanned
+- Filter by minimum latency threshold, database, keyword search
+- Index-miss-only filter to surface queries without proper indexing
+- Sort by average latency, max latency, or execution count
+- One-click EXPLAIN execution plan analysis
+- Auto-detect `performance_schema` availability with capability check
 
 ### 📋 Task Center
 - Unified management for migration, sync, export, and import tasks
@@ -230,9 +239,8 @@ easydb/
 | v1.2.0 | ✅ Released | Data preview filter/sort/pagination, inline editing, schema diff, multi-tab |
 | v1.3.0 | ✅ Released | Dark mode, SQL file import, storage management, query favorites, keyboard shortcuts, export cancellation, auto-update, view/procedure/function/trigger browser |
 | v1.3.1 | ✅ Released | **Database backup & restore** (full backup, table-level selection, consistency snapshot, SHA-256 checksum, restore strategies, restore modes) |
-| v1.3.2 | ✅ Released | Backup file management, **stored procedure execution**, parameter inspector |
-| v1.4.0 | ✅ Released | **Secure Connection** — AES-256-GCM credential encryption, SSH tunnel integration, SSL/TLS JDBC parameters |
-| **v1.5.0** | ✅ Released | **SQL History** (per-database toggle, search, re-run) · **Structure Diff Extension** (views/procedures/functions/triggers, DDL normalization) · **DDL Audit** (Binlog table-level DDL capture, 5 DDL types, risk classification, raw SQL) |
+| **v1.3.2** | ✅ Released | Backup file management · **Stored procedure execution** · **Secure connection** (AES-256-GCM credential encryption, SSH tunnel, SSL/TLS) · **SQL History** (per-database toggle, search, re-run) · **Structure Diff Extension** (views/procedures/functions/triggers, DDL normalization) · **DDL Audit** (Binlog table-level DDL capture, 5 DDL types, risk classification, raw SQL) · **Slow Query Analysis** (performance_schema based, SQL fingerprint aggregation, EXPLAIN execution plan) |
+| **v1.4.0** | 🔜 Planned | **DM (达梦) database compatibility** — driver SPI extension, DM-specific SQL dialect |
 
 ## 🤝 Contributing
 

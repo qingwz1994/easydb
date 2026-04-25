@@ -6,14 +6,14 @@
 
 <p align="center">
   <strong>开源、跨平台的数据库管理工具</strong><br>
-  连接管理 · 对象浏览 · SQL 编辑器 · 数据追踪 · DDL 审计 · 结构对比 · 数据迁移 · 数据同步 · 数据导出 · 备份恢复 · 任务中心 · 安全连接
+  连接管理 · 对象浏览 · SQL 编辑器 · 数据追踪 · DDL 审计 · 结构对比 · 数据迁移 · 数据同步 · 数据导出 · 备份恢复 · 慢查询分析 · 任务中心 · 安全连接
 </p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="Platform">
   <img src="https://img.shields.io/badge/database-MySQL-4479A1?logo=mysql&logoColor=white" alt="MySQL">
-  <img src="https://img.shields.io/badge/version-1.5.0--dev-green" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.3.2-green" alt="Version">
 </p>
 
 <p align="center">
@@ -114,6 +114,15 @@
 - 流式导入，大文件无内存压力
 - 执行统计：成功、失败、跳过计数
 - 进度追踪、日志查看、支持取消
+
+### 🔍 慢查询分析
+- 基于 MySQL `performance_schema`，无需解析 Binlog 或慢查询日志
+- SQL 指纹聚合：按 digest 分组，查看执行次数、平均/最大耗时、扫描行数
+- 按最低耗时阈值、数据库、关键词搜索过滤
+- 「仅无索引」筛选，快速定位缺索引的查询
+- 支持按平均耗时、最大耗时、执行次数排序
+- 一键 EXPLAIN 执行计划分析
+- 自动检测 `performance_schema` 可用性
 
 ### 📋 任务中心
 - 迁移/同步/导出/导入任务统一管理
@@ -230,9 +239,8 @@ easydb/
 | v1.2.0 | ✅ 已发布 | 数据预览筛选/排序/分页、行内编辑、结构对比、多标签页 |
 | v1.3.0 | ✅ 已发布 | 深色模式、SQL 文件导入、存储管理、查询收藏、快捷键体系、导出取消优化、自动更新检查、视图/存储过程/函数/触发器浏览 |
 | v1.3.1 | ✅ 已发布 | **数据库备份恢复**（完整备份、表级选择、一致性快照、SHA-256 校验、恢复策略、恢复模式） |
-| v1.3.2 | ✅ 已发布 | 备份文件管理、**存储过程执行**、参数面板 |
-| v1.4.0 | ✅ 已发布 | **安全连接**（凭据 AES-256-GCM 加密、SSH 隧道真正接入、SSL/TLS 参数接入 JDBC） |
-| **v1.5.0** | ✅ 已发布 | **SQL 历史**（按库浏览开关、搜索、重执行）· **结构对比扩展**（视图/过程/函数/触发器，DDL 归一化）· **DDL 审计**（Binlog 表级 DDL 采集、5 类 DDL、风险分级、原始 SQL 保留） |
+| **v1.3.2** | ✅ 已发布 | 备份文件管理 · **存储过程执行** · **安全连接**（凭据 AES-256-GCM 加密、SSH 隧道、SSL/TLS）· **SQL 历史**（按库浏览开关、搜索、重执行）· **结构对比扩展**（视图/过程/函数/触发器，DDL 归一化）· **DDL 审计**（Binlog 表级 DDL 采集、5 类 DDL、风险分级、原始 SQL 保留）· **慢查询分析**（基于 performance_schema，SQL 指纹聚合，EXPLAIN 执行计划） |
+| **v1.4.0** | 🔜 计划中 | **达梦数据库兼容** — 驱动 SPI 扩展，达梦 SQL 方言适配 |
 
 ## 🤝 参与贡献
 
