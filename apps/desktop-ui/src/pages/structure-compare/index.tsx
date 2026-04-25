@@ -375,7 +375,10 @@ export const StructureComparePage: React.FC = () => {
         </div>
 
         <Space size="middle">
-          <Popover content={optionsContent} title="对比高级设置" trigger="click" placement="bottomRight">
+          <Popover content={optionsContent} title="对比高级设置" trigger="click" placement="bottomRight"
+            overlayStyle={{ zIndex: 100 }}
+            overlayInnerStyle={{ background: 'var(--glass-popup)', backdropFilter: 'var(--glass-blur-heavy)' }}
+          >
             <Button size="large" icon={<SettingOutlined />}>高级选项</Button>
           </Popover>
           <Button
