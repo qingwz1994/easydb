@@ -249,3 +249,7 @@ easydb/
 ```
 Copyright (c) 2024-2026 EasyDB Contributors
 ```
+
+## 🙏 致谢
+
+感谢 [LinuxDo](https://linux.do/) 社区每一位朋友的支持！
