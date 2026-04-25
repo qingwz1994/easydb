@@ -249,3 +249,7 @@ This project is licensed under the [GNU Affero General Public License v3.0](LICE
 ```
 Copyright (c) 2024-2026 EasyDB Contributors
 ```
+
+## 🙏 Acknowledgments
+
+Thanks to everyone on [LinuxDo](https://linux.do/) for their support!
